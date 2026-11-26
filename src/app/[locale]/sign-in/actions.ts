@@ -5,11 +5,12 @@ import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { DEMO_MODE, checkCode, clearPending, createSession, getPending, homeFor, issueCode, setPending } from "@/lib/auth";
 import { maskEmail, type Channel } from "@/lib/notify";
+import { decryptSecret, verifyTotp } from "@/lib/totp";
 import { isValidPhone, maskPhone, normalizePhone } from "@/lib/format";
 import { isLocale, type Locale } from "@/i18n/config";
 
 export type SignInState = {
-  step: "identify" | "register" | "code";
+  step: "identify" | "register" | "code" | "totp";
   error?: string;
   purpose?: "sign_in" | "sign_up";
   channel?: Channel;
@@ -34,6 +35,8 @@ const M = {
   expired: ["الرمز خلص. اطلب رمز جديد", "The code expired. Request a new one"],
   locked: ["محاولات كتير غلط. اطلب رمز جديد", "Too many wrong attempts. Request a new one"],
   wrong: ["الرمز غلط", "Wrong code"],
+  terms: ["لازم توافق على الشروط وسياسة الخصوصية", "You must accept the terms and privacy policy"],
+  totpWrong: ["رمز تطبيق التحقق غلط أو خلص — جرّب الرمز اللي ظاهر دلوقتي", "Wrong or expired authenticator code — try the current one"],
 } as const;
 
 const msg = (locale: Locale, k: keyof typeof M) => (locale === "ar" ? M[k][0] : M[k][1]);
@@ -93,6 +96,7 @@ export async function register(locale: Locale, _prev: SignInState, form: FormDat
   if (!isValidPhone(phone)) return { step: "register", prefill, error: msg(locale, "phone") };
   if (emailRaw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) return { step: "register", prefill, error: msg(locale, "email") };
   if (channel === "email" && !emailRaw) return { step: "register", prefill, error: msg(locale, "emailNeeded") };
+  if (form.get("terms") !== "on") return { step: "register", prefill, error: msg(locale, "terms") };
   if (await db.user.findUnique({ where: { phone } })) return { step: "register", prefill, error: msg(locale, "phoneTaken") };
   if (emailRaw && (await db.user.findUnique({ where: { email: emailRaw } })))
     return { step: "register", prefill, error: msg(locale, "emailTaken") };
@@ -121,10 +125,22 @@ export async function verify(locale: Locale, next: string | null, prev: SignInSt
   let user;
   if ("signIn" in pending) {
     user = await db.user.findUniqueOrThrow({ where: { phone: pending.phone } });
+    // عنده تحقق ثنائي؟ لسه فاضل رمز التطبيق
+    if (user.totpEnabledAt && user.totpSecret) {
+      await setPending({ ...pending, totp: true });
+      return { ...prev, step: "totp", error: undefined };
+    }
     await audit(user.id, "auth.sign_in", "User", user.id, { channel: prev.channel });
   } else {
     user = await db.user.create({
-      data: { name: pending.name, phone: pending.phone, email: pending.email, countryOfResidence: pending.country, locale: pending.locale },
+      data: {
+        name: pending.name,
+        phone: pending.phone,
+        email: pending.email,
+        countryOfResidence: pending.country,
+        locale: pending.locale,
+        termsAcceptedAt: new Date(),
+      },
     });
     await audit(user.id, "auth.sign_up", "User", user.id, { country: pending.country, channel: prev.channel });
   }
@@ -132,6 +148,22 @@ export async function verify(locale: Locale, next: string | null, prev: SignInSt
   await createSession(user.id);
   const fallback = user.role === "CLIENT" ? `account${"signIn" in pending ? "" : "?welcome=1"}` : homeFor(user.role);
   redirect(safeNext(locale, next) ?? `/${locale}/${fallback}`);
+}
+
+/** الخطوة التانية للي مفعّل التحقق الثنائي: رمز من تطبيق Authenticator */
+export async function verifyTotpStep(locale: Locale, next: string | null, prev: SignInState, form: FormData): Promise<SignInState> {
+  const pending = await getPending();
+  if (!pending || !("signIn" in pending) || !pending.totp) return { step: "identify", error: msg(locale, "session") };
+  const user = await db.user.findUniqueOrThrow({ where: { phone: pending.phone } });
+  const ok = !!user.totpSecret && verifyTotp(decryptSecret(user.totpSecret), String(form.get("totp") ?? ""));
+  if (!ok) {
+    await audit(user.id, "auth.totp_failed", "User", user.id);
+    return { ...prev, step: "totp", error: msg(locale, "totpWrong") };
+  }
+  await audit(user.id, "auth.sign_in", "User", user.id, { channel: prev.channel, totp: true });
+  await clearPending();
+  await createSession(user.id);
+  redirect(safeNext(locale, next) ?? `/${locale}/${homeFor(user.role)}`);
 }
 
 /** رمز جديد — على نفس القناة أو على القناة التانية */

@@ -7,6 +7,7 @@ import { fileFromForm, saveFile } from "@/lib/storage";
 import { isValidPhone, normalizePhone } from "@/lib/format";
 import { CITY_KEYS } from "@/lib/labels";
 import type { City } from "@prisma/client";
+import { idsByRole, notify } from "@/lib/notifications";
 
 export type RescueState = { ok?: boolean; error?: string; ref?: string };
 
@@ -61,5 +62,11 @@ export async function submitRescue(locale: string, _prev: RescueState, form: For
     }
   }
   await audit(user?.id ?? null, "service_request.create", "ServiceRequest", req.id, { type });
+  await notify(await idsByRole("BROKER"), {
+    kind: "service_request.new",
+    ar: [`طلب ${type === "SITE_INSPECTION" ? "معاينة" : "إنقاذ مهلة"} جديد من ${name}`],
+    en: [`New ${type === "SITE_INSPECTION" ? "inspection" : "deadline rescue"} request from ${name}`],
+    link: `/broker?tab=services`,
+  });
   return { ok: true, ref: req.id.slice(-6).toUpperCase() };
 }

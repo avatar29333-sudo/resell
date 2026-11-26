@@ -7,9 +7,9 @@ import { ROLE, label } from "@/lib/labels";
 import { signOut } from "@/app/[locale]/auth-actions";
 import { Logo } from "./Logo";
 
-type Props = { locale: Locale; t: Dictionary; user: User | null };
+type Props = { locale: Locale; t: Dictionary; user: User | null; unread?: number };
 
-export function SiteHeader({ locale, t, user }: Props) {
+export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
   const other: Locale = locale === "ar" ? "en" : "ar";
   const base = `/${locale}`;
   const links = [
@@ -29,7 +29,7 @@ export function SiteHeader({ locale, t, user }: Props) {
   ].filter((l) => role && l.roles.includes(role));
 
   return (
-    <header className="bg-navy text-white">
+    <header className="bg-navy text-white print:hidden">
       <div className="bg-[#FDF3E1] px-5 py-1.5 text-center text-sm text-[#5C3D00]">{t.demo.banner}</div>
       <div className="mx-auto flex min-h-[68px] max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-3 md:px-8">
         <Link href={base} className="flex items-center gap-3 text-white no-underline">
@@ -51,6 +51,18 @@ export function SiteHeader({ locale, t, user }: Props) {
           </Link>
           {user ? (
             <>
+              <Link
+                href={`${base}/notifications`}
+                aria-label={`${ar ? "الإشعارات" : "Notifications"}${unread ? ` (${unread})` : ""}`}
+                className="relative inline-flex min-h-11 min-w-11 items-center justify-center text-[#D6DCEE] hover:text-white"
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                  <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+                </svg>
+                {unread > 0 && (
+                  <span className="absolute top-1 end-0 min-w-5 bg-[#D9480F] px-1 text-center text-xs font-bold text-white">{unread > 99 ? "99+" : unread}</span>
+                )}
+              </Link>
               <Link href={dash!} className="flex flex-col px-2 py-1 leading-tight text-white hover:text-[#D6DCEE]">
                 <span className="font-semibold">{user.name}</span>
                 <span className="text-xs text-[#B9C3DE]">{label(ROLE, user.role, locale)}</span>

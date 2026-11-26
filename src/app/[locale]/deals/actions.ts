@@ -14,6 +14,8 @@ import { latestRate } from "@/lib/listing";
 import { makePdf } from "@/lib/pdf";
 import { toNum } from "@/lib/format";
 import { isLocale, type Locale } from "@/i18n/config";
+import { idsByRole, notify } from "@/lib/notifications";
+import { CONTRACT_TYPE, DEAL_STAGE } from "@/lib/labels";
 
 type Deal = NonNullable<Awaited<ReturnType<typeof loadDealFor>>>;
 
@@ -65,9 +67,21 @@ export async function advanceStage(locale: string, dealId: string) {
       await db.deal.update({ where: { id: o.id }, data: { status: "CANCELLED" } });
       await db.dealEvent.create({ data: { dealId: o.id, type: "CANCELLED", actorId: user.id, data: { reason: "sold_to_other" } } });
       await db.contract.updateMany({ where: { dealId: o.id, status: { not: "SIGNED" } }, data: { status: "VOID" } });
+      await notify([o.buyerId], {
+        kind: "deal.sold_to_other",
+        ar: ["القطعة اللي كنت مهتم بيها اتباعت لمشتري تاني", "تقدر تدوّر على قطع شبهها في السجل."],
+        en: ["A plot you were interested in was sold to another buyer", "Browse the register for similar plots."],
+        link: `/deals/${o.id}`,
+      });
     }
   }
   await event(deal, user, "STAGE_CHANGED", undefined, { from: deal.stage as Stage, to: to! });
+  await notify([deal.buyerId, deal.listing.sellerId], {
+    kind: "deal.stage",
+    ar: [`صفقتك انتقلت لمرحلة «${DEAL_STAGE[to!][0]}»`],
+    en: [`Your deal moved to “${DEAL_STAGE[to!][1]}”`],
+    link: `/deals/${dealId}`,
+  });
   done(l, dealId);
 }
 
@@ -101,6 +115,12 @@ export async function createContract(locale: string, dealId: string, type: Contr
     data: { dealId, type, templateVersion: await templateVersion(type), status: "PENDING_LAWYER" },
   });
   await event(deal, user, "CONTRACT_UPDATED", { contractId: c.id, type, status: "PENDING_LAWYER" });
+  await notify(deal.lawyerId ? [deal.lawyerId] : await idsByRole("LAWYER"), {
+    kind: "contract.review_needed",
+    ar: [`عقد مستني اعتمادك: ${CONTRACT_TYPE[type][0]}`, `صفقة #${dealId.slice(-6).toUpperCase()}`],
+    en: [`Contract awaiting your approval: ${CONTRACT_TYPE[type][1]}`, `Deal #${dealId.slice(-6).toUpperCase()}`],
+    link: `/deals/${dealId}`,
+  });
   done(l, dealId);
 }
 
@@ -128,6 +148,13 @@ export async function lawyerDecision(locale: string, dealId: string, contractId:
     data: decision === "APPROVED" ? { status: "APPROVED", approvedById: user.id, approvedAt: new Date() } : { status: "DRAFT" },
   });
   await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, decision, notes });
+  const t = CONTRACT_TYPE[contract!.type];
+  await notify([deal.brokerId], {
+    kind: decision === "APPROVED" ? "contract.approved" : "contract.changes",
+    ar: [decision === "APPROVED" ? `المحامي اعتمد ${t[0]} — ابعته للتوقيع` : `المحامي طلب تعديل في ${t[0]}`, notes ?? undefined],
+    en: [decision === "APPROVED" ? `Lawyer approved the ${t[1]} — send it for signature` : `Lawyer requested changes to the ${t[1]}`, notes ?? undefined],
+    link: `/deals/${dealId}`,
+  });
   done(l, dealId);
 }
 
@@ -149,6 +176,13 @@ export async function sendForSignature(locale: string, dealId: string, contractI
     data: { status: "SENT_FOR_SIGNATURE", providerEnvelopeId: `DEMO-${contractId.slice(-8).toUpperCase()}` },
   });
   await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, status: "SENT_FOR_SIGNATURE" });
+  const signers = requiredSigners(contract!.type).map((r) => (r === "BUYER" ? deal.buyerId : deal.listing.sellerId));
+  await notify(signers, {
+    kind: "contract.sign_needed",
+    ar: [`مطلوب توقيعك على ${CONTRACT_TYPE[contract!.type][0]}`, "افتح غرفة الصفقة ووقّع إلكترونياً."],
+    en: [`Your signature is needed on the ${CONTRACT_TYPE[contract!.type][1]}`, "Open the deal room and sign electronically."],
+    link: `/deals/${dealId}`,
+  });
   done(l, dealId);
 }
 
@@ -201,6 +235,14 @@ export async function signContract(locale: string, dealId: string, contractId: s
     data: { signatures: all, ...(complete ? { status: "SIGNED", signedAt: new Date(), pdfDocumentId } : {}) },
   });
   await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, signedBy: side, complete });
+  if (complete) {
+    await notify([deal.buyerId, deal.listing.sellerId, deal.brokerId], {
+      kind: "contract.signed",
+      ar: [`${CONTRACT_TYPE[contract!.type][0]} اتوقّع من الطرفين`, "نسخة PDF موجودة في مستندات الصفقة."],
+      en: [`The ${CONTRACT_TYPE[contract!.type][1]} is signed by both sides`, "A PDF copy is in the deal documents."],
+      link: `/deals/${dealId}`,
+    });
+  }
   done(l, dealId);
 }
 
@@ -226,6 +268,13 @@ export async function setDepositStatus(locale: string, dealId: string, depositId
     },
   });
   await event(deal, user, "DEPOSIT_UPDATED", { depositId, status });
+  const msgs: Partial<Record<EscrowStatus, [string[], [string, string]]>> = {
+    HELD: [[deal.buyerId, deal.listing.sellerId], ["العربون اتحفظ في حساب الضمان بالبنك", "The deposit is held in the bank escrow account"]],
+    RELEASED_TO_SELLER: [[deal.listing.sellerId], ["العربون اتصرف لك", "The deposit was released to you"]],
+    REFUNDED_TO_BUYER: [[deal.buyerId], ["العربون اترد لك بالكامل", "Your deposit was refunded in full"]],
+  };
+  const m = msgs[status];
+  if (m) await notify(m[0], { kind: `deposit.${status.toLowerCase()}`, ar: [m[1][0]], en: [m[1][1]], link: `/deals/${dealId}` });
   done(l, dealId);
 }
 
@@ -289,6 +338,14 @@ export async function setDealStatus(locale: string, dealId: string, status: "ACT
     if (deal.listing.status === "IN_DEAL") await db.listing.update({ where: { id: deal.listingId }, data: { status: "PUBLISHED" } });
   }
   await event(deal, user, status === "CANCELLED" ? "CANCELLED" : "NOTE", { status, ...(note ? { note } : {}) });
+  if (status === "CANCELLED") {
+    await notify([deal.buyerId, deal.listing.sellerId], {
+      kind: "deal.cancelled",
+      ar: ["الصفقة اتلغت", note],
+      en: ["The deal was cancelled", note],
+      link: `/deals/${dealId}`,
+    });
+  }
   done(l, dealId);
 }
 

@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/auth";
 import { fileFromForm, saveFile } from "@/lib/storage";
 import { CITY_KEYS } from "@/lib/labels";
 import { isLocale } from "@/i18n/config";
+import { idsByRole, notify } from "@/lib/notifications";
 
 export type ListState = { error?: string };
 
@@ -102,5 +103,11 @@ export async function createListing(locale: string, _prev: ListState, form: Form
     });
   }
   await audit(user.id, "listing.create", "Listing", listing.id, { plotId: plot.id, files: uploads.length });
+  await notify(await idsByRole("BROKER"), {
+    kind: "listing.new",
+    ar: [`عرض جديد مستني المراجعة من ${user.name}`, `${area} م² — ${district}`],
+    en: [`New listing to review from ${user.name}`, `${area} m² — ${district}`],
+    link: `/broker?tab=queue`,
+  });
   redirect(`/${l}/account?listed=1`);
 }

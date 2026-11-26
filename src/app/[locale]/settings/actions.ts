@@ -6,6 +6,8 @@ import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { getSetting } from "@/lib/settings";
+import { updateDailyRate } from "@/lib/fx";
+import { redirect } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 
 const ROLES: Role[] = ["CLIENT", "BROKER", "LAWYER", "AGENT", "FINANCE", "ADMIN"];
@@ -43,6 +45,15 @@ export async function addManualRate(locale: string, form: FormData) {
   refresh(locale);
 }
 
+/** سحب سعر النهارده دلوقتي (نفس اللي المهمة اليومية بتعمله) */
+export async function fetchRateNow(locale: string) {
+  const me = await admin(locale, ["ADMIN", "FINANCE"]);
+  const r = await updateDailyRate();
+  await audit(me.id, "fx.fetch_now", "ExchangeRate", r.status === "unavailable" ? "-" : r.rate.id, { status: r.status });
+  refresh(locale);
+  redirect(`/${isLocale(locale) ? locale : "ar"}/settings?tab=fx&fx=${r.status}`);
+}
+
 export async function saveCommission(locale: string, form: FormData) {
   const me = await admin(locale);
   const sellerPct = Number(form.get("sellerPct"));
@@ -54,9 +65,12 @@ export async function saveCommission(locale: string, form: FormData) {
 
 export async function saveFees(locale: string, form: FormData) {
   const me = await admin(locale);
+  const pct = String(form.get("authorityTransferPct") ?? "").trim();
   await saveSetting(me.id, "service.fees", {
     deadlineRescueEgp: Number(form.get("deadlineRescueEgp")) || 0,
     siteInspectionEgp: Number(form.get("siteInspectionEgp")) || 0,
+    authorityTransferPct: pct === "" ? null : Math.min(20, Math.max(0, Number(pct) || 0)),
+    buyerLawyerFeeEgp: Math.max(0, Number(form.get("buyerLawyerFeeEgp")) || 0),
   });
   refresh(locale);
 }

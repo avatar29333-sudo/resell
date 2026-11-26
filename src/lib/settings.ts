@@ -2,7 +2,14 @@ import "server-only";
 import { db } from "./db";
 
 export type CommissionRates = { sellerPct: number; buyerPct: number };
-export type ServiceFees = { deadlineRescueEgp: number; siteInspectionEgp: number };
+export type ServiceFees = {
+  deadlineRescueEgp: number;
+  siteInspectionEgp: number;
+  /** رسوم التنازل في الجهاز كنسبة — null لحد ما تتحدد من آخر قرار */
+  authorityTransferPct?: number | null;
+  /** أتعاب المحامي على المشتري (0 = مش بتتحسب) */
+  buyerLawyerFeeEgp?: number;
+};
 export type ContractTemplate = { type: string; version: string; updatedAt: string; note?: string };
 
 export const DEFAULTS = {

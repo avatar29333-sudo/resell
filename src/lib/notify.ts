@@ -1,4 +1,5 @@
 import "server-only";
+import type { User } from "@prisma/client";
 
 export type Channel = "whatsapp" | "email";
 
@@ -17,6 +18,26 @@ export async function sendCode(channel: Channel, to: string, code: string): Prom
   }
   void to;
   return { shownOnScreen: code };
+}
+
+/**
+ * إرسال إشعار برّه المنصة. بيرجّع القناة اللي اتبعت عليها، أو null لو مفيش مزوّد متظبط
+ * (الإشعار بيفضل ظاهر جوه المنصة في الحالتين).
+ */
+export async function deliver(user: User, title: string, body: string | null, link: string | null): Promise<Channel | null> {
+  const url = link && process.env.NEXT_PUBLIC_SITE_URL ? `${process.env.NEXT_PUBLIC_SITE_URL}${link}` : null;
+  void url;
+  void body;
+  void title;
+  if (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID) {
+    // TODO: قالب واتساب «تحديث صفقة» — بيتفعّل مع ربط حساب WhatsApp Business
+    return null;
+  }
+  if (process.env.EMAIL_API_KEY && user.email) {
+    // TODO: إيميل الإشعار عبر مزوّد الإيميل
+    return null;
+  }
+  return null;
 }
 
 export function maskEmail(email: string) {

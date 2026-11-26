@@ -9,6 +9,7 @@ import { requireUser } from "@/lib/auth";
 import { fileFromForm, saveFile } from "@/lib/storage";
 import { CITY_KEYS } from "@/lib/labels";
 import { isLocale } from "@/i18n/config";
+import { idsByRole, notify } from "@/lib/notifications";
 
 const loc = (l: string) => (isLocale(l) ? l : "ar");
 
@@ -63,6 +64,50 @@ export async function setBuyRequestStatus(locale: string, id: string, status: "A
   await db.buyRequest.update({ where: { id }, data: { status } });
   await audit(user.id, "buy_request.status", "BuyRequest", id, { status });
   revalidatePath(`/${l}/account`);
+}
+
+/**
+ * نسخة جديدة من مستند اترفض: بتتحفظ بنفس المجموعة برقم إصدار أعلى،
+ * والقديمة بتبقى «إصدار قديم» (ما بتتمسحش). العرض بيرجع للمراجعة.
+ */
+export async function uploadNewVersion(locale: string, documentId: string, form: FormData) {
+  const l = loc(locale);
+  const user = await requireUser(l, `/${l}/account`);
+  const old = await db.document.findUnique({ where: { id: documentId }, include: { listing: true } });
+  if (!old || old.ownerId !== user.id || old.status !== "REJECTED") redirect(`/${l}/account`);
+  const f = await fileFromForm(form, "file");
+  if (!f.file) redirect(`/${l}/account?upload=bad#listing-${old!.listingId}`);
+
+  const s = await saveFile(f.file!.data, f.file!.type);
+  const doc = await db.document.create({
+    data: {
+      type: old!.type,
+      groupId: old!.groupId,
+      version: old!.version + 1,
+      ownerId: user.id,
+      uploadedById: user.id,
+      plotId: old!.plotId,
+      listingId: old!.listingId,
+      dealId: old!.dealId,
+      storageKey: s.key,
+      sha256: s.sha256,
+      sizeBytes: s.sizeBytes,
+      fileName: f.file!.name,
+      mimeType: f.file!.type,
+    },
+  });
+  await db.document.update({ where: { id: old!.id }, data: { status: "SUPERSEDED" } });
+  if (old!.listing && ["DRAFT", "WITHDRAWN"].includes(old!.listing.status)) {
+    await db.listing.update({ where: { id: old!.listing.id }, data: { status: "IN_REVIEW" } });
+  }
+  await audit(user.id, "document.new_version", "Document", doc.id, { previous: old!.id, version: doc.version });
+  await notify(await idsByRole("BROKER"), {
+    kind: "document.new_version",
+    ar: [`${user.name} رفع نسخة جديدة من مستند مرفوض`, "ابعتها للمحامي من طابور التوثيق."],
+    en: [`${user.name} uploaded a new version of a rejected document`, "Send it to the lawyer from the verification queue."],
+    link: `/broker?tab=queue`,
+  });
+  redirect(`/${l}/account?upload=ok#listing-${old!.listingId}`);
 }
 
 /** البائع: يبعت المسودة للمراجعة أو يسحب العرض */

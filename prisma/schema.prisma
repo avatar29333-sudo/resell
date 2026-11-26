@@ -176,6 +176,7 @@ enum EscrowStatus {
 enum RateSource {
   CBE_AUTO // سحب آلي من البنك المركزي
   MANUAL // إدخال يدوي
+  MARKET_API // سحب آلي من مصدر سوق مفتوح (احتياطي لو موقع البنك المركزي مش متاح)
 }
 
 enum BuyRequestStatus {
@@ -214,7 +215,13 @@ model User {
   updatedAt        DateTime     @updatedAt
   //حذف بالطلب (قانون 151): البيانات الشخصية بتتمسح والسجل يفضل
   anonymizedAt     DateTime?
+  // التحقق الثنائي (تطبيق Authenticator) — السر متشفّر بـ AES-GCM
+  totpSecret       String?
+  totpEnabledAt    DateTime?
+  // موافقة صريحة على الشروط وسياسة الخصوصية (قانون 151)
+  termsAcceptedAt  DateTime?
 
+  notifications       Notification[]
   kycProfile          KycProfile?      @relation("KycUser")
   kycReviews          KycProfile[]     @relation("KycReviewer")
   listings            Listing[]        @relation("Seller")
@@ -578,6 +585,22 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([actorId, createdAt])
+}
+
+/// الإشعارات: بتظهر جوه المنصة دايماً، وبتتبعت واتساب/إيميل لما المزوّد يتظبط
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  kind      String // مثلاً contract.sign_needed أو deposit.held
+  title     String
+  body      String?
+  link      String?
+  sentVia   String? // whatsapp أو email لو اتبعتت برّه المنصة
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
 }
 
 /// رموز الدخول على واتساب. الرمز نفسه مش بيتخزن — بصمته (sha256) بس.

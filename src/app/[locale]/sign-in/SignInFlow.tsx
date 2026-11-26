@@ -5,7 +5,7 @@ import type { Locale } from "@/i18n/config";
 import { tr } from "@/lib/format";
 import { COUNTRY, label } from "@/lib/labels";
 import { btn, field, labelCls, Notice } from "@/components/ui";
-import { identify, register, resend, verify, type SignInState } from "./actions";
+import { identify, register, resend, verify, verifyTotpStep, type SignInState } from "./actions";
 
 export function SignInFlow({ locale, next, demo }: { locale: Locale; next: string | null; demo: boolean }) {
   const L = tr(locale);
@@ -78,12 +78,23 @@ export function SignInFlow({ locale, next, demo }: { locale: Locale; next: strin
             </label>
           </div>
         </fieldset>
-        <p className="text-sm leading-6 text-muted">
-          {L(
-            "بالتسجيل أنت موافق على سياسة الخصوصية. رقمك ما بيظهرش لأي مشتري أو بائع قبل اتفاق العمولة.",
-            "By signing up you accept the privacy policy. Your number is never shown to a buyer or seller before the commission agreement.",
-          )}
-        </p>
+        <label className="flex items-start gap-2 text-sm leading-6">
+          <input type="checkbox" name="terms" required className="mt-1 size-5 shrink-0" />
+          <span>
+            {L("أوافق على ", "I accept the ")}
+            <a href={`/${locale}/terms`} target="_blank" className="font-semibold text-brand underline">
+              {L("الشروط", "terms")}
+            </a>
+            {L(" و", " and ")}
+            <a href={`/${locale}/privacy`} target="_blank" className="font-semibold text-brand underline">
+              {L("سياسة الخصوصية", "privacy policy")}
+            </a>
+            {L(
+              ". رقمك ما بيظهرش لأي مشتري أو بائع قبل اتفاق العمولة.",
+              ". Your number is never shown to a buyer or seller before the commission agreement.",
+            )}
+          </span>
+        </label>
         <div className="flex flex-wrap gap-3">
           <button type="submit" disabled={busy} className={btn.primary}>
             {busy ? L("لحظة…", "One moment…") : L("سجّل وابعت الرمز", "Sign up and send code")}
@@ -92,6 +103,35 @@ export function SignInFlow({ locale, next, demo }: { locale: Locale; next: strin
             {L("رجوع", "Back")}
           </button>
         </div>
+      </form>
+    );
+  }
+
+  if (state.step === "totp") {
+    return (
+      <form action={run((f) => verifyTotpStep(locale, next, state, f))} className="flex flex-col gap-4">
+        <Notice tone="blue">
+          {L(
+            "حسابك عليه تحقق ثنائي. افتح تطبيق التحقق (Google أو Microsoft Authenticator) واكتب الرمز اللي ظاهر لـ Resell.",
+            "Your account has two-factor authentication. Open your authenticator app and enter the code shown for Resell.",
+          )}
+        </Notice>
+        {err}
+        <label className={labelCls}>
+          {L("رمز تطبيق التحقق", "Authenticator code")}
+          <input
+            name="totp"
+            required
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            dir="ltr"
+            className={`${field} text-center text-2xl tracking-[0.4em]`}
+          />
+        </label>
+        <button type="submit" disabled={busy} className={btn.primary}>
+          {busy ? L("بنتأكد…", "Checking…") : L("دخول", "Sign in")}
+        </button>
       </form>
     );
   }

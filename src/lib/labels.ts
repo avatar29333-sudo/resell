@@ -158,6 +158,7 @@ export const ESCROW_STATUS: Map = {
 export const RATE_SOURCE: Map = {
   CBE_AUTO: ["البنك المركزي (آلي)", "Central Bank (auto)"],
   MANUAL: ["إدخال يدوي", "Manual entry"],
+  MARKET_API: ["مصدر سوق مفتوح (آلي)", "Open market source (auto)"],
 };
 
 export const BUY_REQUEST_STATUS: Map = {

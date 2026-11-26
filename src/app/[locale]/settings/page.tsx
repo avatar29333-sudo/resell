@@ -6,9 +6,9 @@ import { getSetting } from "@/lib/settings";
 import { date, dateTime, num, tr } from "@/lib/format";
 import { ACCOUNT_LEVEL, CONTRACT_TYPE, RATE_SOURCE, ROLE, label } from "@/lib/labels";
 import { Badge, Card, Container, Notice, PageHeader, Table, Tabs, btn, field, labelCls } from "@/components/ui";
-import { addManualRate, bumpTemplate, saveCommission, saveFees, setUserRole } from "./actions";
+import { addManualRate, bumpTemplate, fetchRateNow, saveCommission, saveFees, setUserRole } from "./actions";
 
-type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; q?: string; entity?: string }> };
+type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; q?: string; entity?: string; fx?: string }> };
 
 export default async function SettingsPage({ params, searchParams }: Props) {
   const { locale } = await params;
@@ -20,6 +20,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   const tabs = isAdmin ? ["users", "fx", "commission", "templates", "audit"] : ["fx"];
   const tab = tabs.includes(sp.tab ?? "") ? sp.tab! : tabs[0];
   const base = `/${locale}/settings`;
+  const fxStatus = sp.fx;
 
   return (
     <>
@@ -97,7 +98,18 @@ export default async function SettingsPage({ params, searchParams }: Props) {
     const rates = await db.exchangeRate.findMany({ include: { enteredBy: true }, orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 20 });
     return (
       <Card title={L("سعر صرف الدولار", "USD exchange rate")}>
-        <Notice>{L("بيتسحب يومياً من البنك المركزي. الإدخال اليدوي للطوارئ بس وبيتسجل باسمك.", "Pulled daily from the Central Bank. Manual entry is for emergencies only and is logged under your name.")}</Notice>
+        <Notice>
+          {L(
+            "بيتسحب لوحده كل يوم الساعة 8 الصبح: من البنك المركزي، ولو موقعه مش متاح من مصدر سوق مفتوح (ومكتوب المصدر جنب كل سعر). الإدخال اليدوي للطوارئ بس وبيتسجل باسمك.",
+            "Fetched automatically every day at 8am: from the Central Bank, or from an open market source if the CBE site is down (the source is shown next to each rate). Manual entry is for emergencies only and is logged under your name.",
+          )}
+        </Notice>
+        {fxStatus === "created" && <Notice tone="green">{L("اتسحب سعر النهارده.", "Today's rate was fetched.")}</Notice>}
+        {fxStatus === "exists" && <Notice tone="blue">{L("سعر النهارده متسجل بالفعل.", "Today's rate is already recorded.")}</Notice>}
+        {fxStatus === "unavailable" && <Notice tone="red">{L("المصادر مش متاحة دلوقتي — سجّل السعر يدوي.", "Sources are unavailable right now — enter the rate manually.")}</Notice>}
+        <form action={fetchRateNow.bind(null, locale)}>
+          <button className={btn.secondary}>{L("اسحب سعر النهارده دلوقتي", "Fetch today's rate now")}</button>
+        </form>
         <form action={addManualRate.bind(null, locale)} className="flex flex-wrap items-end gap-2">
           <label className={labelCls}>
             {L("شراء", "Buy")}
@@ -154,6 +166,15 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               {L("معاينة (ج.م)", "Inspection (EGP)")}
               <input name="siteInspectionEgp" type="number" min={0} defaultValue={fees.siteInspectionEgp} className={`${field} w-40`} />
             </label>
+            <label className={labelCls}>
+              {L("رسوم التنازل في الجهاز (%) — فاضي لو مش معروفة", "Authority transfer fee (%) — blank if unknown")}
+              <input name="authorityTransferPct" type="number" step="0.01" min={0} max={20} defaultValue={fees.authorityTransferPct ?? ""} className={`${field} w-40`} />
+            </label>
+            <label className={labelCls}>
+              {L("أتعاب المحامي على المشتري (ج.م)", "Lawyer fee charged to buyer (EGP)")}
+              <input name="buyerLawyerFeeEgp" type="number" min={0} defaultValue={fees.buyerLawyerFeeEgp ?? 0} className={`${field} w-40`} />
+            </label>
+            <p className="w-full text-sm text-muted">{L("الأرقام دي بتظهر في حاسبة التكلفة في صفحة كل قطعة.", "These figures feed the cost calculator on each plot page.")}</p>
             <button className={btn.primary}>{L("حفظ", "Save")}</button>
           </form>
         </Card>

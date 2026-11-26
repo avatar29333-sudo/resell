@@ -10,6 +10,10 @@ import { date, daysUntil, money, num, toNum, tr } from "@/lib/format";
 import { CITY, DEAL_STAGE, DOC_STATUS, DOC_TYPE, LISTING_STATUS, PAYMENT_STATUS, PRICE_TYPE, label, toneOf } from "@/lib/labels";
 import { Badge, Card, Container, DL, FileLink, Notice, PageHeader, btn } from "@/components/ui";
 import { expressInterest } from "../actions";
+import { approximateCenter, plotGeo } from "@/lib/geo";
+import { getSetting } from "@/lib/settings";
+import { PlotMap } from "@/components/PlotMap";
+import { CostCalculator } from "@/components/CostCalculator";
 
 type Props = { params: Promise<{ locale: string; id: string }> };
 
@@ -50,6 +54,8 @@ export default async function ListingPage({ params }: Props) {
   const area = toNum(listing.plot.areaSqm);
   const days = daysUntil(listing.plot.buildDeadline);
   const photos = listing.documents.filter((d) => d.type === "SITE_PHOTO" && d.status === "APPROVED");
+  const geo = await plotGeo(listing.plotId);
+  const [rates, fees] = await Promise.all([getSetting("commission.rates"), getSetting("service.fees")]);
   const papers = listing.documents.filter((d) => d.type !== "SITE_PHOTO");
 
   return (
@@ -121,6 +127,30 @@ export default async function ListingPage({ params }: Props) {
             )}
           </Card>
 
+          {geo.center && (
+            <Card
+              title={L("الموقع", "Location")}
+              actions={
+                canSeeFiles && (
+                  <Link href={`/${locale}/listings/${id}/report`} className={`${btn.small} border border-brand text-brand`}>
+                    {L("تقرير المعاينة (PDF)", "Inspection report (PDF)")}
+                  </Link>
+                )
+              }
+            >
+              <PlotMap
+                polygon={canSeeCode ? geo.polygon : null}
+                approx={canSeeCode ? null : approximateCenter(geo.center, listing.plotId)}
+                label={L("خريطة موقع القطعة", "Map of the plot location")}
+              />
+              {!canSeeCode && (
+                <p className="text-sm text-muted">
+                  {L("الدايرة مكان تقريبي. حدود القطعة بالظبط بتظهر بعد اتفاق العمولة.", "The circle is approximate. Exact plot boundaries appear after the commission agreement.")}
+                </p>
+              )}
+            </Card>
+          )}
+
           <Card title={L("الورق اللي اتراجع", "Checked paperwork")}>
             <ul className="flex flex-col divide-y divide-line">
               {papers.map((d) => (
@@ -162,6 +192,19 @@ export default async function ListingPage({ params }: Props) {
               {L(`محسوب بسعر دولار ${num(usd, locale, 2)} ج.م (${date(rate?.date, locale)})`, `Calculated at USD = EGP ${num(usd, locale, 2)} (${date(rate?.date, locale)})`)}
             </p>
           </Card>
+
+          {listing.status !== "SOLD" && (
+            <Card title={L("احسب التكلفة الكاملة", "Full cost calculator")}>
+              <CostCalculator
+                locale={locale}
+                priceEgp={total}
+                buyerPct={rates.buyerPct}
+                transferPct={fees.authorityTransferPct ?? null}
+                lawyerFeeEgp={fees.buyerLawyerFeeEgp ?? 0}
+                usdEgp={usd}
+              />
+            </Card>
+          )}
 
           <Card>
             {owner ? (

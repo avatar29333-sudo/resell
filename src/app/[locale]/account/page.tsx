@@ -13,6 +13,7 @@ import {
   COUNTRY,
   DEAL_STAGE,
   DEAL_STATUS,
+  DOC_TYPE,
   LISTING_STATUS,
   ROLE,
   SERVICE_STATUS,
@@ -23,9 +24,12 @@ import {
 } from "@/lib/labels";
 import { Badge, Card, Container, DL, Empty, Notice, PageHeader, btn, field, labelCls } from "@/components/ui";
 import { MiniSteps } from "@/components/MiniSteps";
-import { createBuyRequest, setBuyRequestStatus, setMyListingStatus, submitKyc } from "./actions";
+import { createBuyRequest, setBuyRequestStatus, setMyListingStatus, submitKyc, uploadNewVersion } from "./actions";
 
-type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; denied?: string }> };
+type Props = {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; denied?: string; upload?: string }>;
+};
 
 // مراحل العرض من ناحية البائع
 const LISTING_FLOW = ["DRAFT", "IN_REVIEW", "VERIFIED", "PUBLISHED", "IN_DEAL", "SOLD"] as const;
@@ -43,7 +47,10 @@ export default async function AccountPage({ params, searchParams }: Props) {
       where: { sellerId: me.id },
       include: {
         plot: true,
-        documents: { where: { status: { in: ["UPLOADED", "IN_REVIEW", "REJECTED"] }, type: { not: "SITE_PHOTO" } }, select: { status: true } },
+        documents: {
+          where: { status: { in: ["UPLOADED", "IN_REVIEW", "REJECTED"] }, type: { not: "SITE_PHOTO" } },
+          select: { id: true, type: true, status: true, version: true, reviews: { orderBy: { createdAt: "desc" }, take: 1, select: { notes: true } } },
+        },
         deals: { where: { status: { in: ["ACTIVE", "ON_HOLD", "COMPLETED"] } }, select: { id: true, stage: true, status: true }, orderBy: { stageChangedAt: "desc" } },
       },
       orderBy: { updatedAt: "desc" },
@@ -113,6 +120,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
         {sp.welcome && <Notice tone="green">{L("حسابك اتعمل. وثّق هويتك عشان تقدر تبيع أو تشتري.", "Your account is ready. Verify your ID to buy or sell.")}</Notice>}
         {sp.listed && <Notice tone="green">{L("قطعتك وصلت وهي دلوقتي قيد المراجعة. هنبلغك على واتساب.", "Your plot was received and is now in review. We'll update you on WhatsApp.")}</Notice>}
         {sp.denied && <Notice tone="amber">{L("الصفحة دي مش متاحة لحسابك.", "That page isn't available to your account.")}</Notice>}
+        {sp.upload === "ok" && <Notice tone="green">{L("النسخة الجديدة اترفعت ووصلت للوسيط.", "The new version was uploaded and sent to the broker.")}</Notice>}
+        {sp.upload === "bad" && <Notice tone="red">{L("الملف لازم يكون PDF أو صورة وأقل من 4 ميجا.", "The file must be a PDF or image under 4 MB.")}</Notice>}
 
         {/* ── المشتري: القطع اللي مهتم بيها ومرحلة كل صفقة ── */}
         <section className="flex flex-col gap-3">
@@ -220,7 +229,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                   WITHDRAWN: L("العرض مسحوب ومش ظاهر لحد", "Withdrawn and hidden from everyone"),
                 };
                 return (
-                  <li key={l.id} className="flex flex-col gap-3 border border-line bg-white p-4">
+                  <li key={l.id} id={`listing-${l.id}`} className="flex flex-col gap-3 border border-line bg-white p-4">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <Link href={`/${locale}/listings/${l.id}`} className="text-lg font-bold text-navy hover:text-brand">
@@ -244,6 +253,26 @@ export default async function AccountPage({ params, searchParams }: Props) {
                       </div>
                     )}
                     <p className={`text-sm ${rejected ? "text-[#A32020]" : "text-muted"}`}>{next[l.status]}</p>
+                    {l.documents
+                      .filter((d) => d.status === "REJECTED")
+                      .map((d) => (
+                        <form
+                          key={d.id}
+                          action={uploadNewVersion.bind(null, locale, d.id)}
+                          className="flex flex-col gap-2 border border-[#EFC4C4] bg-[#FBEAEA] p-3"
+                        >
+                          <span className="text-sm font-semibold text-[#A32020]">
+                            {L(`${label(DOC_TYPE, d.type, locale)} اترفض`, `${label(DOC_TYPE, d.type, locale)} was rejected`)}
+                            {d.reviews[0]?.notes && ` — ${d.reviews[0].notes}`}
+                          </span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input name="file" type="file" required accept="application/pdf,image/*" className="flex-1 border border-dashed border-line bg-white p-1.5 text-sm" />
+                            <button className={`${btn.small} bg-brand text-white`}>
+                              {L(`ارفع نسخة ${num(d.version + 1, locale)}`, `Upload version ${d.version + 1}`)}
+                            </button>
+                          </div>
+                        </form>
+                      ))}
                     <div className="flex flex-wrap gap-2">
                       {activeDeal && (
                         <Link href={`/${locale}/deals/${activeDeal.id}`} className={`${btn.small} bg-brand text-white`}>
@@ -307,8 +336,15 @@ export default async function AccountPage({ params, searchParams }: Props) {
                 [L("الموبايل", "Mobile"), <span key="p" dir="ltr">{me.phone}</span>],
                 [L("الإيميل", "Email"), me.email ?? "—"],
                 [L("بلد الإقامة", "Country"), label(COUNTRY, me.countryOfResidence, locale)],
+                [
+                  L("التحقق الثنائي", "Two-factor"),
+                  me.totpEnabledAt ? <Badge key="t" tone="green">{L("مفعّل", "On")}</Badge> : <Badge key="t">{L("مش مفعّل", "Off")}</Badge>,
+                ],
               ]}
             />
+            <Link href={`/${locale}/account/security`} className={`${btn.small} self-start border border-brand text-brand`}>
+              {L("الخصوصية والأمان", "Privacy & security")}
+            </Link>
           </Card>
 
           <Card title={<span id="kyc">{L("توثيق الهوية", "ID verification")}</span>}>

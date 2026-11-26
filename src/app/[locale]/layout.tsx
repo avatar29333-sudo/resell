@@ -8,6 +8,7 @@ import { getDictionary } from "@/i18n/dictionaries";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getCurrentUser } from "@/lib/auth";
+import { db } from "@/lib/db";
 
 const plex = IBM_Plex_Sans_Arabic({
   subsets: ["arabic", "latin"],
@@ -43,13 +44,14 @@ export default async function LocaleLayout({
   if (!isLocale(locale)) notFound();
   const t = getDictionary(locale);
   const user = await getCurrentUser();
+  const unread = user ? await db.notification.count({ where: { userId: user.id, readAt: null } }) : 0;
 
   return (
     <html lang={locale} dir={dirOf(locale)} className={plex.variable}>
       <body className="flex min-h-screen flex-col bg-white">
-        <SiteHeader locale={locale} t={t} user={user} />
+        <SiteHeader locale={locale} t={t} user={user} unread={unread} />
         <main className="flex-1">{children}</main>
-        <SiteFooter t={t} />
+        <SiteFooter t={t} locale={locale} />
       </body>
     </html>
   );

@@ -487,9 +487,90 @@ SERVICE_STATUSES.forEach((st, si) => {
   }
 });
 
+// ─── إضافات بتشتغل حتى لو البيانات موجودة (من غير ما تمسح حاجة) ───
+
+/** مراكز تقريبية لمناطق بيت الوطن في كل مدينة (للخريطة التجريبية) */
+const CITY_CENTER: Record<string, [number, number]> = {
+  NEW_CAIRO: [30.0205, 31.5605],
+  SHEIKH_ZAYED: [30.0452, 30.9855],
+  OCTOBER: [29.9612, 30.9248],
+  NEW_OCTOBER: [29.9955, 30.8305],
+  NEW_DAMIETTA: [31.4405, 31.6805],
+};
+
+/** حدود مستطيلة لكل قطعة ملهاش حدود: مساحتها بالظبط، ومكانها ثابت جوه منطقة المدينة */
+async function backfillBoundaries() {
+  const plots = await prisma.$queryRaw<{ id: string; city: string; area: number }[]>`
+    SELECT id, city::text AS city, "areaSqm"::float AS area FROM "Plot" WHERE boundary IS NULL`;
+  for (const p of plots) {
+    let h = 0;
+    for (const ch of p.id) h = (h * 33 + ch.charCodeAt(0)) >>> 0;
+    const [clat, clng] = CITY_CENTER[p.city] ?? CITY_CENTER.NEW_CAIRO;
+    const lat = clat + (((h % 997) / 997) - 0.5) * 0.03;
+    const lng = clng + ((((h >>> 8) % 991) / 991) - 0.5) * 0.03;
+    const side = Math.sqrt(p.area);
+    const w = side * 1.25; // القطع غالباً مستطيلة
+    const d = p.area / w;
+    const dLat = d / 2 / 111_320;
+    const dLng = w / 2 / (111_320 * Math.cos((lat * Math.PI) / 180));
+    const ring = [
+      [lng - dLng, lat - dLat],
+      [lng + dLng, lat - dLat],
+      [lng + dLng, lat + dLat],
+      [lng - dLng, lat + dLat],
+      [lng - dLng, lat - dLat],
+    ];
+    const geojson = JSON.stringify({ type: "Polygon", coordinates: [ring] });
+    await prisma.$executeRaw`UPDATE "Plot" SET boundary = ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(${geojson}), 4326)) WHERE id = ${p.id}`;
+  }
+  if (plots.length) console.log(`حدود ${plots.length} قطعة اتضافت للخريطة.`);
+}
+
+/** إشعارات تجريبية لحسابات «الدخول السريع» عشان الجرس ما يبقاش فاضي */
+async function seedNotifications() {
+  if ((await prisma.notification.count()) > 0) return;
+  const staffUsers = await prisma.user.findMany({ where: { role: { not: "CLIENT" } } });
+  const sellerWithListing = await prisma.user.findFirst({ where: { role: "CLIENT", listings: { some: {} } }, orderBy: { phone: "asc" } });
+  const buyerWithDeal = await prisma.user.findFirst({ where: { role: "CLIENT", dealsAsBuyer: { some: {} } }, orderBy: { phone: "asc" } });
+  const byRole: Record<string, [string, string, string][]> = {
+    BROKER: [
+      ["listing.new", "عرض جديد مستني المراجعة", "/broker?tab=queue"],
+      ["contract.approved", "المحامي اعتمد اتفاق العمولة — ابعته للتوقيع", "/broker?tab=deals"],
+      ["plots.deadline", "4 قطع معروضة مهلة بنائها هتخلص خلال 60 يوم", "/broker?tab=queue"],
+    ],
+    LAWYER: [
+      ["documents.review_needed", "3 مستندات مستنية مراجعتك", "/lawyer"],
+      ["contract.review_needed", "عقد مستني اعتمادك: العقد المبدئي", "/lawyer"],
+    ],
+    AGENT: [["service_request.assigned", "اتسند لك طلب معاينة جديد", "/broker?tab=services"]],
+    FINANCE: [["deposit.held", "عربون جديد اتحفظ في حساب الضمان", "/reports"]],
+    ADMIN: [["documents.expiring", "مستندات محتاجة تجديد: 6 هتنتهي خلال 30 يوم", "/reports"]],
+  };
+  const rows: Prisma.NotificationCreateManyInput[] = [];
+  for (const u of staffUsers) {
+    (byRole[u.role] ?? []).forEach(([kind, title, link], i) =>
+      rows.push({ userId: u.id, kind, title, link: `/ar${link}`, createdAt: ago(i * 0.3), readAt: i === 2 ? ago(0.1) : null }),
+    );
+  }
+  if (sellerWithListing)
+    rows.push(
+      { userId: sellerWithListing.id, kind: "listing.interest", title: "فيه مشتري مهتم بقطعتك", body: "الوسيط هيتابع معاه، وبياناته بتظهر لك بعد اتفاق العمولة.", link: "/ar/account", createdAt: ago(0.2) },
+      { userId: sellerWithListing.id, kind: "listing.published", title: "قطعتك اتنشرت في السجل", link: "/ar/account", createdAt: ago(2), readAt: ago(1) },
+    );
+  if (buyerWithDeal)
+    rows.push(
+      { userId: buyerWithDeal.id, kind: "contract.sign_needed", title: "مطلوب توقيعك على اتفاق العمولة", body: "افتح غرفة الصفقة ووقّع إلكترونياً.", link: "/ar/account", createdAt: ago(0.1) },
+      { userId: buyerWithDeal.id, kind: "buy_request.match", title: "عرض جديد مطابق لطلبك في القاهرة الجديدة", link: "/ar/listings?city=NEW_CAIRO", createdAt: ago(1) },
+    );
+  await prisma.notification.createMany({ data: rows });
+  console.log(`${rows.length} إشعار تجريبي اتضاف.`);
+}
+
 async function main() {
   if (await prisma.appSetting.findUnique({ where: { key: "demo.seeded" } })) {
-    console.log("البيانات التجريبية موجودة بالفعل — اتخطّينا. للبداية من الأول: npm run db:clean -- --yes");
+    console.log("البيانات التجريبية موجودة بالفعل — بنكمّل الإضافات بس.");
+    await backfillBoundaries();
+    await seedNotifications();
     return;
   }
   if ((await prisma.user.count()) > 0) {
@@ -533,6 +614,8 @@ async function main() {
       { key: "demo.seeded", value: { at: new Date().toISOString() } },
     ],
   });
+  await backfillBoundaries();
+  await seedNotifications();
   const c = (k: keyof typeof rows) => rows[k].length;
   console.log(
     `تمام في ${((Date.now() - t0) / 1000).toFixed(1)} ث: ${c("users")} مستخدم، ${c("listings")} عرض، ${c("deals")} صفقة، ${c("contracts")} عقد، ${c("docs")} مستند بمرفقاته، ${c("services")} طلب خدمة، ${c("buy")} طلب شراء، ${c("rates")} سعر صرف.`,

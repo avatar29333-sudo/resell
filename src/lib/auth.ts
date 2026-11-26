@@ -62,11 +62,20 @@ export async function getCurrentUser(): Promise<User | null> {
   }
 }
 
+/**
+ * التحقق الثنائي إجباري للفريق لما REQUIRE_STAFF_2FA=1.
+ * مقفول في النسخة التجريبية عشان «الدخول السريع» يفضل شغال — بيتفتح مع قفله.
+ */
+export const REQUIRE_STAFF_2FA = process.env.REQUIRE_STAFF_2FA === "1";
+
 /** لو مش داخل: يروح لصفحة الدخول ويرجع لنفس الصفحة بعدها */
 export async function requireUser(locale: Locale, next: string, roles?: Role[]) {
   const user = await getCurrentUser();
   if (!user) redirect(`/${locale}/sign-in?next=${encodeURIComponent(next)}`);
   if (roles && !roles.includes(user.role)) redirect(`/${locale}/account?denied=1`);
+  if (REQUIRE_STAFF_2FA && STAFF_ROLES.includes(user.role) && !user.totpEnabledAt && !next.includes("/account/security")) {
+    redirect(`/${locale}/account/security?required=1`);
+  }
   return user;
 }
 
@@ -90,7 +99,7 @@ export function homeFor(role: Role) {
 
 export type PendingSignUp = { name: string; phone: string; email: string | null; country: string | null; locale: Locale };
 
-export async function setPending(data: PendingSignUp | { phone: string; email: string | null; signIn: true }) {
+export async function setPending(data: Pending) {
   const token = await new SignJWT({ data })
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime("15m")
@@ -98,7 +107,8 @@ export async function setPending(data: PendingSignUp | { phone: string; email: s
   (await cookies()).set(PENDING_COOKIE, token, { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: 900 });
 }
 
-export type Pending = PendingSignUp | { phone: string; email: string | null; signIn: true };
+/** totp = الرمز الأول اتأكد، ومستنيين رمز تطبيق التحقق */
+export type Pending = PendingSignUp | { phone: string; email: string | null; signIn: true; totp?: boolean };
 
 export async function getPending(): Promise<Pending | null> {
   const token = (await cookies()).get(PENDING_COOKIE)?.value;

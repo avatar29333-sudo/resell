@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { isLocale } from "@/i18n/config";
+import { notify } from "@/lib/notifications";
 
 /** المشتري بيبدي اهتمام → صفقة جديدة في مرحلة «اهتمام» مع وسيط */
 export async function expressInterest(locale: string, listingId: string) {
@@ -34,5 +35,17 @@ export async function expressInterest(locale: string, listingId: string) {
     },
   });
   await audit(user.id, "deal.create", "Deal", deal.id, { listingId });
+  await notify([deal.brokerId], {
+    kind: "deal.new_interest",
+    ar: [`مشتري جديد مهتم: ${user.name}`, "كلّمه لاتفاق العمولة."],
+    en: [`New interested buyer: ${user.name}`, "Contact them about the commission agreement."],
+    link: `/deals/${deal.id}`,
+  });
+  await notify([listing!.sellerId], {
+    kind: "listing.interest",
+    ar: ["فيه مشتري مهتم بقطعتك", "الوسيط هيتابع معاه، وبياناته بتظهر لك بعد اتفاق العمولة."],
+    en: ["A buyer is interested in your plot", "The broker will follow up; their details appear after the commission agreement."],
+    link: `/account`,
+  });
   redirect(`/${loc}/deals/${deal.id}?new=1`);
 }
