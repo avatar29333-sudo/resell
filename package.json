@@ -1,0 +1,17 @@
+{
+  "name": "resell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Resell — منصة وساطة لإعادة بيع أراضي بيت الوطن",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "test": "vitest run"
+  }
+}

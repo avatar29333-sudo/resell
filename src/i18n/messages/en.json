@@ -1,0 +1,53 @@
+{
+  "meta": {
+    "title": "Resell — Beit El Watan plot resale",
+    "description": "Your Beit El Watan plot, bought and sold on the right paperwork. Lawyer review, a held deposit, and follow-up until the authority signs."
+  },
+  "brand": { "tagline": "Beit El Watan plot resale" },
+  "nav": {
+    "listings": "Listings register",
+    "priceIndex": "Price index",
+    "howItWorks": "How a deal works",
+    "otherLanguage": "العربية",
+    "signIn": "Sign in",
+    "listPlot": "List your plot",
+    "menu": "Menu"
+  },
+  "hero": {
+    "badge": "Licensed brokerage · for Egyptians abroad and at home",
+    "title": "Your Beit El Watan plot, bought and sold on the right paperwork",
+    "body": "We check every listing against the allocation letter, the city authority statement and a lawyer's review, and walk you through the transfer until the authority signs.",
+    "city": "City",
+    "cityAny": "All cities",
+    "area": "Area (m²)",
+    "budget": "Total budget (EGP)",
+    "search": "Search the register"
+  },
+  "cities": {
+    "newCairo": "New Cairo",
+    "zayed": "Sheikh Zayed",
+    "october": "6th of October",
+    "newOctober": "New October",
+    "damietta": "New Damietta"
+  },
+  "steps": {
+    "title": "The deal, step by step",
+    "s1Title": "We check the paperwork",
+    "s1Body": "Allocation letter, receipts and the authority statement, with a lawyer.",
+    "s2Title": "You agree a price",
+    "s2Body": "After the commission agreement we introduce you and negotiate with you.",
+    "s3Title": "Contract and held deposit",
+    "s3Body": "Refunded in full if the authority refuses the transfer.",
+    "s4Title": "Transfer at the authority",
+    "s4Body": "Our agent files it and follows it to approval."
+  },
+  "cta": {
+    "title": "Have a plot?",
+    "body": "Enter its details and upload the allocation letter. Your number stays hidden until a buyer signs the commission agreement.",
+    "button": "List your plot"
+  },
+  "footer": {
+    "legal": "Resell is a private brokerage, registered in the real estate brokers register [REG. NO.], not affiliated with the Ministry of Housing or the Beit El Watan project.",
+    "rights": "All rights reserved"
+  }
+}
