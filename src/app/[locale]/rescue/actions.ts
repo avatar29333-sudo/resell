@@ -1,0 +1,65 @@
+"use server";
+
+import { db } from "@/lib/db";
+import { audit } from "@/lib/audit";
+import { getCurrentUser } from "@/lib/auth";
+import { fileFromForm, saveFile } from "@/lib/storage";
+import { isValidPhone, normalizePhone } from "@/lib/format";
+import { CITY_KEYS } from "@/lib/labels";
+import type { City } from "@prisma/client";
+
+export type RescueState = { ok?: boolean; error?: string; ref?: string };
+
+export async function submitRescue(locale: string, _prev: RescueState, form: FormData): Promise<RescueState> {
+  const ar = locale === "ar";
+  const name = String(form.get("name") ?? "").trim();
+  const phone = normalizePhone(String(form.get("phone") ?? ""));
+  const cityRaw = String(form.get("city") ?? "");
+  const city = CITY_KEYS.includes(cityRaw as never) ? (cityRaw as City) : null;
+  const area = String(form.get("area") ?? "");
+  const plotCode = String(form.get("plotCode") ?? "").trim() || null;
+  const type = form.get("type") === "SITE_INSPECTION" ? "SITE_INSPECTION" : "DEADLINE_RESCUE";
+
+  if (name.length < 3) return { error: ar ? "اكتب اسمك" : "Enter your name" };
+  if (!isValidPhone(phone)) return { error: ar ? "رقم الواتساب مش صحيح — اكتبه بكود الدولة" : "Invalid WhatsApp number — include the country code" };
+
+  const upload = await fileFromForm(form, "file");
+  if ("error" in upload && upload.error)
+    return { error: ar ? "الملف لازم يكون PDF أو صورة وأقل من 4 ميجا" : "The file must be a PDF or image under 4 MB" };
+
+  const user = await getCurrentUser();
+  const req = await db.serviceRequest.create({
+    data: {
+      type,
+      contactName: name,
+      contactPhone: phone,
+      requesterId: user?.id,
+      city,
+      plotCode,
+      message: [area && `${ar ? "المساحة" : "Area"}: ${area} m²`, String(form.get("message") ?? "").trim()].filter(Boolean).join(" — ") || null,
+    },
+  });
+
+  // الملف بيتحفظ كمستند باسم صاحب الطلب لو داخل، أو باسم الوسيط المسؤول لحد ما العميل يسجّل
+  if (upload.file) {
+    const owner = user ?? (await db.user.findFirst({ where: { role: "BROKER" } }));
+    if (owner) {
+      const saved = await saveFile(upload.file.data, upload.file.type);
+      await db.document.create({
+        data: {
+          type: "ALLOCATION_LETTER",
+          ownerId: owner.id,
+          uploadedById: owner.id,
+          serviceRequestId: req.id,
+          storageKey: saved.key,
+          sha256: saved.sha256,
+          sizeBytes: saved.sizeBytes,
+          fileName: upload.file.name,
+          mimeType: upload.file.type,
+        },
+      });
+    }
+  }
+  await audit(user?.id ?? null, "service_request.create", "ServiceRequest", req.id, { type });
+  return { ok: true, ref: req.id.slice(-6).toUpperCase() };
+}

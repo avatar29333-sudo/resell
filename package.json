@@ -1,61 +1,64 @@
 {
-  "name": "resell",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Resell — منصة وساطة لإعادة بيع أراضي بيت الوطن",
-  "engines": {
-    "node": ">=20"
-  },
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "typecheck": "tsc --noEmit",
-    "format": "prettier --write .",
-    "test": "vitest run",
-    "db:up": "docker compose up -d",
-    "db:generate": "prisma generate",
-    "db:validate": "prisma validate",
-    "db:migrate": "prisma migrate dev",
-    "db:extras": "prisma db execute --file prisma/sql/extras.sql --schema prisma/schema.prisma",
-    "db:seed": "prisma db seed",
-    "db:setup": "prisma migrate dev --name init && npm run db:extras && npm run db:seed",
-    "db:deploy": "prisma migrate deploy && npm run db:extras",
-    "db:studio": "prisma studio"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  },
-  "dependencies": {
-    "@aws-sdk/client-s3": "^3.1178.0",
-    "@aws-sdk/s3-request-presigner": "^3.1178.0",
-    "@hookform/resolvers": "^3.10.0",
-    "@prisma/client": "^6.19.3",
-    "date-fns": "^4.4.0",
-    "jose": "^6.2.18",
-    "next": "^15.5.29",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "react-hook-form": "^7.92.0",
-    "zod": "^3.25.76"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4.3.5",
-    "@types/node": "^22.20.7",
-    "@types/react": "^19.3.3",
-    "@types/react-dom": "^19.3.0",
-    "prettier": "^3.10.1",
-    "prettier-plugin-tailwindcss": "^0.8.1",
-    "prisma": "^6.19.3",
-    "tailwindcss": "^4.3.5",
-    "tsx": "^4.23.15",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.7"
-  },
-  "allowScripts": {
-    "prisma@6.19.3": true,
-    "@prisma/engines@6.19.3": true,
-    "@prisma/client@6.19.3": true,
-    "esbuild@0.28.2": true
-  }
+    "name":  "resell",
+    "version":  "0.1.0",
+    "private":  true,
+    "description":  "Resell — منصة وساطة لإعادة بيع أراضي بيت الوطن",
+    "engines":  {
+                    "node":  "\u003e=20"
+                },
+    "scripts":  {
+                    "dev":  "next dev",
+                    "build":  "next build",
+                    "start":  "next start",
+                    "typecheck":  "tsc --noEmit",
+                    "format":  "prettier --write .",
+                    "test":  "vitest run",
+                    "db:up":  "docker compose up -d",
+                    "db:generate":  "prisma generate",
+                    "db:validate":  "prisma validate",
+                    "db:migrate":  "prisma migrate dev",
+                    "db:seed":  "prisma db seed",
+                    "db:setup":  "prisma migrate deploy \u0026\u0026 prisma db seed",
+                    "db:deploy":  "prisma migrate deploy",
+                    "db:studio":  "prisma studio",
+                    "db:clean":  "tsx prisma/clean.ts",
+                    "db:reset-demo":  "tsx prisma/clean.ts --yes \u0026\u0026 prisma db seed",
+                    "vercel-build":  "prisma generate \u0026\u0026 prisma migrate deploy \u0026\u0026 prisma db seed \u0026\u0026 next build"
+                },
+    "prisma":  {
+                   "seed":  "tsx prisma/seed.ts"
+               },
+    "dependencies":  {
+                         "@aws-sdk/client-s3":  "^3.1178.0",
+                         "@aws-sdk/s3-request-presigner":  "^3.1178.0",
+                         "@hookform/resolvers":  "^3.10.0",
+                         "@prisma/client":  "^6.19.3",
+                         "date-fns":  "^4.4.0",
+                         "jose":  "^6.2.18",
+                         "next":  "^15.5.29",
+                         "react":  "^19.3.1",
+                         "react-dom":  "^19.3.1",
+                         "react-hook-form":  "^7.92.0",
+                         "server-only":  "^0.0.1",
+                         "zod":  "^3.25.76"
+                     },
+    "devDependencies":  {
+                            "@tailwindcss/postcss":  "^4.3.5",
+                            "@types/node":  "^22.20.7",
+                            "@types/react":  "^19.3.3",
+                            "@types/react-dom":  "^19.3.0",
+                            "prettier":  "^3.10.1",
+                            "prettier-plugin-tailwindcss":  "^0.8.1",
+                            "prisma":  "^6.19.3",
+                            "tailwindcss":  "^4.3.5",
+                            "tsx":  "^4.23.15",
+                            "typescript":  "^5.9.3",
+                            "vitest":  "^3.2.7"
+                        },
+    "allowScripts":  {
+                         "prisma@6.19.3":  true,
+                         "@prisma/engines@6.19.3":  true,
+                         "@prisma/client@6.19.3":  true,
+                         "esbuild@0.28.2":  true
+                     }
 }

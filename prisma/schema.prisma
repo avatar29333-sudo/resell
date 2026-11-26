@@ -13,6 +13,8 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
+  // اتصال مباشر من غير pooler — للـ migrations (Neon على Vercel بيظبطه لوحده)
+  directUrl  = env("DATABASE_URL_UNPOOLED")
   extensions = [postgis]
 }
 
@@ -326,6 +328,8 @@ model Document {
   listing      Listing?       @relation(fields: [listingId], references: [id])
   dealId       String?
   deal         Deal?          @relation(fields: [dealId], references: [id])
+  serviceRequestId String?
+  serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
   storageKey   String         @unique
   fileName     String
   mimeType     String
@@ -552,6 +556,7 @@ model ServiceRequest {
   feeCurrency  Currency?
   assignedToId String?
   assignedTo   User?                @relation("ServiceAssignee", fields: [assignedToId], references: [id])
+  documents    Document[]
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
 
@@ -573,4 +578,36 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([actorId, createdAt])
+}
+
+/// رموز الدخول على واتساب. الرمز نفسه مش بيتخزن — بصمته (sha256) بس.
+model LoginCode {
+  id        String    @id @default(cuid())
+  phone     String
+  codeHash  String    @db.Char(64)
+  purpose   String    @default("sign_in") // sign_in أو sign_up
+  attempts  Int       @default(0)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+/// مخزن ملفات احتياطي: بيتستخدم لما S3 مش متظبط (التطوير والنسخة التجريبية).
+/// على الإنتاج الملفات بتروح خزنة S3 المشفرة، والجدول ده يفضل فاضي.
+model FileBlob {
+  key       String   @id
+  data      Bytes
+  mimeType  String
+  createdAt DateTime @default(now())
+}
+
+/// إعدادات المنصة اللي بتتغير من شاشة الإعدادات (نسب العمولة، رسوم الخدمات، نماذج العقود)
+/// كل تغيير بيتسجل في سجل التدقيق.
+model AppSetting {
+  key         String   @id
+  value       Json
+  updatedById String?
+  updatedAt   DateTime @updatedAt
 }

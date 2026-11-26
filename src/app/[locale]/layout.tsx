@@ -3,10 +3,11 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { IBM_Plex_Sans_Arabic } from "next/font/google";
 import "../globals.css";
-import { dirOf, isLocale, locales } from "@/i18n/config";
+import { dirOf, isLocale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/dictionaries";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
+import { getCurrentUser } from "@/lib/auth";
 
 const plex = IBM_Plex_Sans_Arabic({
   subsets: ["arabic", "latin"],
@@ -17,9 +18,8 @@ const plex = IBM_Plex_Sans_Arabic({
 
 type Params = Promise<{ locale: string }>;
 
-export function generateStaticParams() {
-  return locales.map((locale) => ({ locale }));
-}
+// كل الصفحات بتتعرض وقت الطلب: فيها بيانات حية وحالة الدخول
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const { locale } = await params;
@@ -42,11 +42,12 @@ export default async function LocaleLayout({
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const t = getDictionary(locale);
+  const user = await getCurrentUser();
 
   return (
     <html lang={locale} dir={dirOf(locale)} className={plex.variable}>
-      <body className="flex min-h-screen flex-col">
-        <SiteHeader locale={locale} t={t} />
+      <body className="flex min-h-screen flex-col bg-white">
+        <SiteHeader locale={locale} t={t} user={user} />
         <main className="flex-1">{children}</main>
         <SiteFooter t={t} />
       </body>

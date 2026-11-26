@@ -11,8 +11,12 @@
     "otherLanguage": "العربية",
     "signIn": "Sign in",
     "listPlot": "List your plot",
-    "menu": "Menu"
+    "menu": "Menu",
+    "rescue": "Deadline rescue",
+    "account": "My account",
+    "signOut": "Sign out"
   },
+  "demo": { "banner": "Demo version — all names, plots and documents are sample data" },
   "hero": {
     "badge": "Licensed brokerage · for Egyptians abroad and at home",
     "title": "Your Beit El Watan plot, bought and sold on the right paperwork",

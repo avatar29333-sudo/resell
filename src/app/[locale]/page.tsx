@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/dictionaries";
+import { CITY, CITY_KEYS, label } from "@/lib/labels";
 
 type Params = Promise<{ locale: string }>;
 
@@ -16,7 +17,7 @@ export default async function HomePage({ params }: { params: Params }) {
     { n: 3, title: t.steps.s3Title, body: t.steps.s3Body },
     { n: 4, title: t.steps.s4Title, body: t.steps.s4Body },
   ];
-  const cities = Object.entries(t.cities);
+  const cities = CITY_KEYS.map((k) => [k, label(CITY, k, locale)] as const);
   const field = "min-h-12 w-full border border-line bg-white px-3 text-ink";
 
   return (
