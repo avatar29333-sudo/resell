@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Resell — تثبيت المكتبات (الخطوة 1)
+# Resell — تثبيت المكتبات (الخطوات 1 و 2)
 # شغّله من فولدر المشروع:  bash install.sh
 # الإصدارات مثبّتة على الإصدار الرئيسي عشان الكود المكتوب يفضل متوافق.
 set -euo pipefail
@@ -16,8 +16,13 @@ npm install -D typescript@5 @types/node@22 @types/react@19 @types/react-dom@19 \
   prettier@3 prettier-plugin-tailwindcss \
   vitest@3
 
-# الخطوة 2 (هنثبتهم لما نوصل لقاعدة البيانات):
-#   npm install @prisma/client@6 jose@6 @aws-sdk/client-s3@3 @aws-sdk/s3-request-presigner@3
-#   npm install -D prisma@6
+# الخطوة 2: قاعدة البيانات (Prisma + PostgreSQL/PostGIS)، الجلسات، وخزنة المستندات
+npm install @prisma/client@6 jose@6 @aws-sdk/client-s3@3 @aws-sdk/s3-request-presigner@3
+npm install -D prisma@6 tsx@4
 
-echo "تم التثبيت. شغّل: npm run dev  وافتح http://localhost:3000"
+# تجهيز عميل قاعدة البيانات من schema.prisma
+npx prisma generate
+
+echo "تم التثبيت."
+echo "قاعدة البيانات:  npm run db:up  ثم  npm run db:setup"
+echo "الموقع:          npm run dev  وافتح http://localhost:3000"

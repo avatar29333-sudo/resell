@@ -1,0 +1,576 @@
+// Resell — نموذج البيانات (الخطوة 2)
+// المرجع: دوك «Resell — خطة البرمجة وطريقة العمل» → قسم «نموذج البيانات».
+// الفكرة الأساسية: القطعة (Plot) حاجة ثابتة بكودها، والعروض والصفقات بتتربط بيها.
+//
+// الفلوس كلها Decimal (مش Float) عشان الحسابات تطلع مظبوطة.
+// الحذف: المستندات وسجل التدقيق ما بيتمسحوش (الحماية في src/lib/db.ts و prisma/sql/extras.sql).
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+// ───────────────────────── قيم ثابتة ─────────────────────────
+
+enum Role {
+  CLIENT // عميل (بائع أو مشتري)
+  BROKER // وسيط
+  LAWYER // محامي
+  AGENT // مندوب الجهاز
+  FINANCE // مالي
+  ADMIN // أدمن
+}
+
+/// مستويات الحساب — افتراض مبدئي لحد ما نطابقها مع شاشة «مستويات الحساب»
+enum AccountLevel {
+  BASIC // اتسجل برمز واتساب
+  VERIFIED // الهوية اتراجعت واتقبلت
+}
+
+enum Locale {
+  ar
+  en
+}
+
+enum Currency {
+  EGP
+  USD
+}
+
+/// نفس المدن اللي في src/i18n/messages
+enum City {
+  NEW_CAIRO
+  SHEIKH_ZAYED
+  OCTOBER
+  NEW_OCTOBER
+  NEW_DAMIETTA
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum IdType {
+  NATIONAL_ID
+  PASSPORT
+}
+
+enum PlotPaymentStatus {
+  INSTALLMENTS // لسه بيقسّط
+  FULLY_PAID // سداد كامل الثمن
+}
+
+enum PriceType {
+  ALL_INCLUSIVE // شامل
+  PAID_PLUS_PREMIUM // المدفوع بالدولار + أوفر
+}
+
+enum ListingStatus {
+  DRAFT // مسودة
+  IN_REVIEW // مراجعة
+  VERIFIED // موثّق
+  PUBLISHED // منشور
+  IN_DEAL // في صفقة
+  SOLD // مباع
+  WITHDRAWN // البائع سحبه (مش في الدوك — مضافة عشان ما نمسحش عروض)
+}
+
+enum DocumentType {
+  NATIONAL_ID // بطاقة
+  PASSPORT // باسبور
+  SELFIE // صورة شخصية للتوثيق
+  ALLOCATION_LETTER // خطاب التخصيص
+  PAYMENT_RECEIPT // إيصالات السداد
+  AUTHORITY_STATEMENT // إفادة الجهاز
+  SITE_PHOTO // صور المعاينة
+  TRANSFER_RECEIPT // إيصال تحويل العربون
+  CONTRACT_PDF // نسخة عقد
+  POWER_OF_ATTORNEY // توكيل
+  OTHER
+}
+
+enum DocumentStatus {
+  UPLOADED
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  EXPIRED
+  SUPERSEDED // اتعمل له إصدار أحدث
+}
+
+enum ReviewDecision {
+  APPROVED // اعتماد
+  CHANGES_REQUESTED // طلب تعديل
+  REJECTED // رفض
+}
+
+/// مراحل الصفقة السبعة. الصفقة ما تقفلش قبل موافقة الجهاز (المرحلة 6).
+enum DealStage {
+  INTEREST // 1 اهتمام
+  COMMISSION_AGREEMENT // 2 اتفاق العمولة
+  PRICE_AGREED // 3 اتفاق السعر
+  PRELIMINARY_CONTRACT // 4 العقد المبدئي والعربون
+  TRANSFER_FILED // 5 تقديم ملف التنازل للجهاز
+  AUTHORITY_APPROVED // 6 موافقة الجهاز
+  CLOSED // 7 الإغلاق
+}
+
+enum DealStatus {
+  ACTIVE
+  ON_HOLD
+  CANCELLED
+  COMPLETED
+}
+
+enum DealEventType {
+  CREATED
+  STAGE_CHANGED
+  DOCUMENT_ADDED
+  CONTRACT_UPDATED
+  DEPOSIT_UPDATED
+  ASSIGNMENT_CHANGED
+  NOTE
+  CANCELLED
+}
+
+enum ContractType {
+  COMMISSION_AGREEMENT // اتفاق عمولة
+  PRELIMINARY_CONTRACT // عقد مبدئي
+  DEPOSIT_RECEIPT // محضر عربون
+  POWER_OF_ATTORNEY // توكيل (للتقديم والمتابعة بس)
+}
+
+enum ContractStatus {
+  DRAFT
+  PENDING_LAWYER // مستني اعتماد المحامي
+  APPROVED
+  SENT_FOR_SIGNATURE
+  SIGNED
+  VOID
+}
+
+enum CommissionStatus {
+  PENDING
+  INVOICED
+  PAID
+  WAIVED
+}
+
+enum EscrowStatus {
+  AWAITING_TRANSFER // مستني التحويل
+  HELD // محفوظ عند البنك
+  RELEASED_TO_SELLER // اتصرف للبائع
+  REFUNDED_TO_BUYER // اترد للمشتري (لو الجهاز رفض)
+}
+
+enum RateSource {
+  CBE_AUTO // سحب آلي من البنك المركزي
+  MANUAL // إدخال يدوي
+}
+
+enum BuyRequestStatus {
+  ACTIVE
+  PAUSED
+  FULFILLED
+  CANCELLED
+}
+
+enum ServiceType {
+  DEADLINE_RESCUE // إنقاذ المهلة
+  SITE_INSPECTION // معاينة
+}
+
+enum ServiceRequestStatus {
+  NEW
+  CONTACTED
+  IN_PROGRESS
+  DELIVERED
+  CANCELLED
+}
+
+// ───────────────────────── الجداول ─────────────────────────
+
+model User {
+  id               String       @id @default(cuid())
+  name             String
+  phone            String       @unique //بصيغة دولية E.164 زي +201001234567
+  email            String?      @unique
+  countryOfResidence String?    @db.Char(2) //كود الدولة ISO، مثلاً EG أو SA
+  locale           Locale       @default(ar)
+  role             Role         @default(CLIENT)
+  accountLevel     AccountLevel @default(BASIC)
+  twoFactorEnabled Boolean      @default(false) //إجباري للفريق
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  //حذف بالطلب (قانون 151): البيانات الشخصية بتتمسح والسجل يفضل
+  anonymizedAt     DateTime?
+
+  kycProfile          KycProfile?      @relation("KycUser")
+  kycReviews          KycProfile[]     @relation("KycReviewer")
+  listings            Listing[]        @relation("Seller")
+  ownedDocuments      Document[]       @relation("DocumentOwner")
+  uploadedDocuments   Document[]       @relation("DocumentUploader")
+  reviews             Review[]
+  dealsAsBuyer        Deal[]           @relation("DealBuyer")
+  dealsAsBroker       Deal[]           @relation("DealBroker")
+  dealsAsLawyer       Deal[]           @relation("DealLawyer")
+  dealsAsAgent        Deal[]           @relation("DealAgent")
+  dealEvents          DealEvent[]
+  approvedContracts   Contract[]       @relation("ContractApprover")
+  enteredRates        ExchangeRate[]
+  buyRequests         BuyRequest[]
+  serviceRequests     ServiceRequest[] @relation("ServiceRequester")
+  assignedServices    ServiceRequest[] @relation("ServiceAssignee")
+  auditLogs           AuditLog[]
+  createdPlots        Plot[]
+
+  @@index([role])
+}
+
+/// توثيق الهوية — مراجعة يدوية في المرحلة 1
+model KycProfile {
+  id               String             @id @default(cuid())
+  userId           String             @unique
+  user             User               @relation("KycUser", fields: [userId], references: [id])
+  idType           IdType
+  idDocumentId     String?            @unique
+  idDocument       Document?          @relation("KycIdDocument", fields: [idDocumentId], references: [id])
+  selfieDocumentId String?            @unique
+  selfieDocument   Document?          @relation("KycSelfie", fields: [selfieDocumentId], references: [id])
+  status           VerificationStatus @default(PENDING)
+  reviewedById     String?
+  reviewedBy       User?              @relation("KycReviewer", fields: [reviewedById], references: [id])
+  reviewedAt       DateTime?
+  rejectionReason  String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([status])
+}
+
+/// القطعة: ثابتة بكودها. الكود مخفي عن المشتري لحد اتفاق العمولة (بيتفحص في الخادم).
+model Plot {
+  id                 String            @id @default(cuid())
+  city               City
+  district           String //المرحلة / الحي
+  code               String //كود القطعة
+  areaSqm            Decimal           @db.Decimal(10, 2)
+  //حدود القطعة (PostGIS). Prisma ما بيقراهاش مباشرة — بنكتب ونقرا بـ SQL.
+  boundary           Unsupported("geometry(MultiPolygon, 4326)")?
+  paymentStatus      PlotPaymentStatus @default(INSTALLMENTS)
+  buildDeadline      DateTime?         @db.Date //نهاية مهلة البناء
+  constructionPercent Int              @default(0) //نسبة التنفيذ 0–100
+  createdById        String?
+  createdBy          User?             @relation(fields: [createdById], references: [id])
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  listings        Listing[]
+  documents       Document[]
+  serviceRequests ServiceRequest[]
+
+  //نفس القطعة ما تتسجلش مرتين — ده أساس كشف العروض المكررة
+  @@unique([city, district, code])
+  @@index([buildDeadline])
+}
+
+model Listing {
+  id            String        @id @default(cuid())
+  plotId        String
+  plot          Plot          @relation(fields: [plotId], references: [id])
+  sellerId      String
+  seller        User          @relation("Seller", fields: [sellerId], references: [id])
+  priceType     PriceType
+  //شامل: السعر الكلي. مدفوع + أوفر: قيمة الأوفر بس.
+  price         Decimal       @db.Decimal(14, 2)
+  currency      Currency      @default(EGP)
+  //في حالة «مدفوع بالدولار + أوفر»: المبلغ اللي اتدفع للجهاز بالدولار
+  paidAmountUsd Decimal?      @db.Decimal(14, 2)
+  status        ListingStatus @default(DRAFT)
+  publishedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  documents Document[]
+  deals     Deal[]
+
+  @@index([status, publishedAt])
+  @@index([plotId])
+  @@index([sellerId])
+}
+
+/// المستندات: كل إصدار بيتحفظ، ومفيش حذف.
+/// الملف نفسه في خزنة S3 المشفرة، وهنا المفتاح بس.
+model Document {
+  id           String         @id @default(cuid())
+  type         DocumentType
+  //كل إصدارات نفس المستند ليها نفس groupId
+  groupId      String         @default(cuid())
+  version      Int            @default(1)
+  status       DocumentStatus @default(UPLOADED)
+  ownerId      String
+  owner        User           @relation("DocumentOwner", fields: [ownerId], references: [id])
+  uploadedById String
+  uploadedBy   User           @relation("DocumentUploader", fields: [uploadedById], references: [id])
+  plotId       String?
+  plot         Plot?          @relation(fields: [plotId], references: [id])
+  listingId    String?
+  listing      Listing?       @relation(fields: [listingId], references: [id])
+  dealId       String?
+  deal         Deal?          @relation(fields: [dealId], references: [id])
+  storageKey   String         @unique
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  sha256       String         @db.Char(64)
+  expiresAt    DateTime?      @db.Date //تاريخ انتهاء المستند (لو له)
+  createdAt    DateTime       @default(now())
+
+  reviews          Review[]
+  kycIdFor         KycProfile?  @relation("KycIdDocument")
+  kycSelfieFor     KycProfile?  @relation("KycSelfie")
+  contractPdfFor   Contract?
+  depositReceiptFor Deposit?
+
+  @@unique([groupId, version])
+  @@index([ownerId])
+  @@index([listingId])
+  @@index([dealId])
+  @@index([status, expiresAt])
+}
+
+/// مراجعة المحامي — نفس بنود شاشة المحامي
+model Review {
+  id         String         @id @default(cuid())
+  documentId String?
+  document   Document?      @relation(fields: [documentId], references: [id])
+  contractId String?
+  contract   Contract?      @relation(fields: [contractId], references: [id])
+  lawyerId   String
+  lawyer     User           @relation(fields: [lawyerId], references: [id])
+  //بنود المراجعة: [{ key, label, passed, note }]
+  checklist  Json
+  decision   ReviewDecision
+  notes      String?
+  createdAt  DateTime       @default(now())
+
+  @@index([documentId])
+  @@index([contractId])
+  @@index([lawyerId])
+}
+
+/// الصفقة: الانتقال بين المراحل له شروط مبرمجة (state machine في الخادم)
+model Deal {
+  id              String     @id @default(cuid())
+  listingId       String
+  listing         Listing    @relation(fields: [listingId], references: [id])
+  buyerId         String
+  buyer           User       @relation("DealBuyer", fields: [buyerId], references: [id])
+  stage           DealStage  @default(INTEREST)
+  status          DealStatus @default(ACTIVE)
+  agreedPrice     Decimal?   @db.Decimal(14, 2)
+  agreedCurrency  Currency?
+  //سعر الصرف المثبّت وقت اتفاق السعر (نسخة من القيمة + المرجع)
+  lockedUsdEgpRate Decimal?  @db.Decimal(12, 4)
+  exchangeRateId  String?
+  exchangeRate    ExchangeRate? @relation(fields: [exchangeRateId], references: [id])
+  // الفريق
+  brokerId        String?
+  broker          User?      @relation("DealBroker", fields: [brokerId], references: [id])
+  lawyerId        String?
+  lawyer          User?      @relation("DealLawyer", fields: [lawyerId], references: [id])
+  agentId         String?
+  agent           User?      @relation("DealAgent", fields: [agentId], references: [id])
+  stageChangedAt  DateTime   @default(now())
+  closedAt        DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  events     DealEvent[]
+  contracts  Contract[]
+  documents  Document[]
+  commission Commission?
+  deposits   Deposit[]
+
+  @@index([stage, status])
+  @@index([listingId])
+  @@index([buyerId])
+  @@index([brokerId])
+}
+
+/// «سجل الصفقة»
+model DealEvent {
+  id        String        @id @default(cuid())
+  dealId    String
+  deal      Deal          @relation(fields: [dealId], references: [id])
+  type      DealEventType
+  fromStage DealStage?
+  toStage   DealStage?
+  actorId   String?
+  actor     User?         @relation(fields: [actorId], references: [id])
+  data      Json?
+  createdAt DateTime      @default(now())
+
+  @@index([dealId, createdAt])
+}
+
+model Contract {
+  id                String         @id @default(cuid())
+  dealId            String
+  deal              Deal           @relation(fields: [dealId], references: [id])
+  type              ContractType
+  templateVersion   String //نسخة النموذج، مثلاً v3
+  status            ContractStatus @default(DRAFT)
+  //التوقيعات من مزود التوقيع المرخّص: [{ userId, role, signedAt, providerRef }]
+  signatures        Json           @default("[]")
+  providerEnvelopeId String?       @unique
+  pdfDocumentId     String?        @unique
+  pdfDocument       Document?      @relation(fields: [pdfDocumentId], references: [id])
+  approvedById      String?
+  approvedBy        User?          @relation("ContractApprover", fields: [approvedById], references: [id])
+  approvedAt        DateTime?
+  signedAt          DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  reviews Review[]
+
+  @@index([dealId, type])
+}
+
+/// النسب بتتنسخ في الصفقة وقت إنشائها — تغيير النسبة في الإعدادات بيسري على الجديد بس
+model Commission {
+  id               String           @id @default(cuid())
+  dealId           String           @unique
+  deal             Deal             @relation(fields: [dealId], references: [id])
+  sellerRatePct    Decimal          @db.Decimal(5, 2)
+  buyerRatePct     Decimal          @db.Decimal(5, 2)
+  sellerAmount     Decimal?         @db.Decimal(14, 2)
+  buyerAmount      Decimal?         @db.Decimal(14, 2)
+  currency         Currency         @default(EGP)
+  status           CommissionStatus @default(PENDING)
+  paidAt           DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+}
+
+/// العربون: الفلوس نفسها عند البنك، النظام بيتابع الحالة بس
+model Deposit {
+  id                String       @id @default(cuid())
+  dealId            String
+  deal              Deal         @relation(fields: [dealId], references: [id])
+  amount            Decimal      @db.Decimal(14, 2)
+  currency          Currency     @default(EGP)
+  receiptDocumentId String?      @unique
+  receiptDocument   Document?    @relation(fields: [receiptDocumentId], references: [id])
+  escrowStatus      EscrowStatus @default(AWAITING_TRANSFER)
+  bankReference     String?
+  heldAt            DateTime?
+  settledAt         DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([dealId])
+}
+
+/// سعر صرف الدولار بالجنيه
+model ExchangeRate {
+  id          String     @id @default(cuid())
+  date        DateTime   @db.Date
+  base        Currency   @default(USD)
+  quote       Currency   @default(EGP)
+  buy         Decimal    @db.Decimal(12, 4)
+  sell        Decimal    @db.Decimal(12, 4)
+  source      RateSource
+  //الإدخال اليدوي بيتسجل باسم اللي دخّله
+  enteredById String?
+  enteredBy   User?      @relation(fields: [enteredById], references: [id])
+  createdAt   DateTime   @default(now())
+
+  deals Deal[]
+
+  @@index([base, quote, date])
+}
+
+/// مؤشر الأسعار — من الصفقات المقفولة بس
+model PriceIndex {
+  id             String   @id @default(cuid())
+  city           City
+  district       String   @default("") //فاضي = المدينة كلها
+  periodStart    DateTime @db.Date
+  periodEnd      DateTime @db.Date
+  avgPricePerSqm Decimal  @db.Decimal(14, 2)
+  currency       Currency @default(EGP)
+  dealCount      Int
+  computedAt     DateTime @default(now())
+
+  @@unique([city, district, periodStart])
+}
+
+/// طلبات الشراء — للمطابقة الآلية مع العروض
+model BuyRequest {
+  id        String           @id @default(cuid())
+  buyerId   String
+  buyer     User             @relation(fields: [buyerId], references: [id])
+  cities    City[]
+  minAreaSqm Decimal?        @db.Decimal(10, 2)
+  maxAreaSqm Decimal?        @db.Decimal(10, 2)
+  budgetMax Decimal?         @db.Decimal(14, 2)
+  currency  Currency         @default(EGP)
+  status    BuyRequestStatus @default(ACTIVE)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([status])
+}
+
+/// أول جدول هيشتغل: فورم صفحة «إنقاذ المهلة».
+/// الطلب ممكن يوصل قبل ما يبقى فيه حساب أو قطعة مسجلة، فبيانات التواصل والقطعة نص حر.
+model ServiceRequest {
+  id           String               @id @default(cuid())
+  type         ServiceType
+  status       ServiceRequestStatus @default(NEW)
+  contactName  String
+  contactPhone String
+  requesterId  String?
+  requester    User?                @relation("ServiceRequester", fields: [requesterId], references: [id])
+  plotId       String?
+  plot         Plot?                @relation(fields: [plotId], references: [id])
+  city         City?
+  district     String?
+  plotCode     String?
+  message      String?
+  fee          Decimal?             @db.Decimal(14, 2)
+  feeCurrency  Currency?
+  assignedToId String?
+  assignedTo   User?                @relation("ServiceAssignee", fields: [assignedToId], references: [id])
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@index([status, createdAt])
+}
+
+/// سجل التدقيق: مين، عمل إيه، على إيه، امتى، منين. ما يتعدلش وما يتمسحش.
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String //مثلاً document.view أو deal.stage_change
+  entityType String
+  entityId   String
+  ip         String?
+  userAgent  String?
+  data       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+}
