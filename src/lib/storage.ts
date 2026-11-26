@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { db } from "./db";
 
@@ -69,6 +69,39 @@ export async function readFile(key: string, fileName: string, mimeType: string):
     { expiresIn: LINK_SECONDS },
   );
   return { kind: "url", url };
+}
+
+/**
+ * نقل الملفات القديمة من قاعدة البيانات لـ S3 — دفعة واحدة كل مرة (عشان حد وقت Vercel).
+ * كل ملف بيترفع بنفس المفتاح، وبنتأكد إن حجمه في S3 مطابق قبل ما نمسحه من القاعدة.
+ */
+export async function moveBlobsToS3(batch = 60) {
+  const store = s3();
+  if (!store) return { moved: 0, failed: 0, remaining: await db.fileBlob.count(), error: "s3_not_configured" as const };
+  const rows = await db.fileBlob.findMany({ take: batch, orderBy: { createdAt: "asc" } });
+  let moved = 0;
+  let failed = 0;
+  for (const b of rows) {
+    try {
+      await store.client.send(
+        new PutObjectCommand({
+          Bucket: store.bucket,
+          Key: b.key,
+          Body: Buffer.from(b.data),
+          ContentType: b.mimeType,
+          ...(process.env.S3_SSE ? { ServerSideEncryption: process.env.S3_SSE as "AES256" } : {}),
+        }),
+      );
+      const head = await store.client.send(new HeadObjectCommand({ Bucket: store.bucket, Key: b.key }));
+      if (head.ContentLength !== b.data.length) throw new Error("size mismatch");
+      await db.fileBlob.delete({ where: { key: b.key } });
+      moved++;
+    } catch (e) {
+      console.error("move to s3 failed", b.key, e);
+      failed++;
+    }
+  }
+  return { moved, failed, remaining: await db.fileBlob.count(), error: null };
 }
 
 /** فورم فيه ملف: يرجّع الملف لو موجود ومسموح، أو رسالة الخطأ */

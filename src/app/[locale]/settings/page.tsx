@@ -5,10 +5,14 @@ import { requireUser } from "@/lib/auth";
 import { getSetting } from "@/lib/settings";
 import { date, dateTime, num, tr } from "@/lib/format";
 import { ACCOUNT_LEVEL, CONTRACT_TYPE, RATE_SOURCE, ROLE, label } from "@/lib/labels";
-import { Badge, Card, Container, Notice, PageHeader, Table, Tabs, btn, field, labelCls } from "@/components/ui";
-import { addManualRate, bumpTemplate, fetchRateNow, saveCommission, saveFees, setUserRole } from "./actions";
+import { Badge, Card, Container, DL, Notice, PageHeader, Table, Tabs, btn, field, labelCls } from "@/components/ui";
+import { addManualRate, bumpTemplate, fetchRateNow, moveFilesToS3, saveCommission, saveFees, setUserRole } from "./actions";
+import { storageMode } from "@/lib/storage";
 
-type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; q?: string; entity?: string; fx?: string }> };
+type Props = {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ tab?: string; q?: string; entity?: string; fx?: string; moved?: string; failed?: string; err?: string }>;
+};
 
 export default async function SettingsPage({ params, searchParams }: Props) {
   const { locale } = await params;
@@ -17,7 +21,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   const L = tr(locale);
   const me = await requireUser(locale, `/${locale}/settings`, ["ADMIN", "FINANCE"]);
   const isAdmin = me.role === "ADMIN";
-  const tabs = isAdmin ? ["users", "fx", "commission", "templates", "audit"] : ["fx"];
+  const tabs = isAdmin ? ["users", "fx", "commission", "templates", "storage", "audit"] : ["fx"];
   const tab = tabs.includes(sp.tab ?? "") ? sp.tab! : tabs[0];
   const base = `/${locale}/settings`;
   const fxStatus = sp.fx;
@@ -36,6 +40,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             { key: "fx", label: L("سعر الصرف", "Exchange rate"), href: `${base}?tab=fx` },
             { key: "commission", label: L("العمولة والرسوم", "Commission and fees"), href: `${base}?tab=commission` },
             { key: "templates", label: L("نماذج العقود", "Contract templates"), href: `${base}?tab=templates` },
+            { key: "storage", label: L("خزنة الملفات", "File vault"), href: `${base}?tab=storage` },
             { key: "audit", label: L("سجل التدقيق", "Audit log"), href: `${base}?tab=audit` },
           ].filter((t) => tabs.includes(t.key))}
         />
@@ -43,6 +48,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         {tab === "fx" && <Fx locale={locale} />}
         {tab === "commission" && <Commission locale={locale} />}
         {tab === "templates" && <Templates locale={locale} />}
+        {tab === "storage" && <Storage locale={locale} />}
         {tab === "audit" && <Audit locale={locale} entity={sp.entity} />}
       </Container>
     </>
@@ -207,6 +213,54 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             </tr>
           ))}
         </Table>
+      </Card>
+    );
+  }
+
+  async function Storage({ locale }: { locale: "ar" | "en" }) {
+    const mode = storageMode();
+    const [inDb, docs] = await Promise.all([db.fileBlob.count(), db.document.count()]);
+    return (
+      <Card
+        title={L("خزنة الملفات", "File vault")}
+        actions={<Badge tone={mode === "s3" ? "green" : "amber"}>{mode === "s3" ? "S3 (Cloudflare R2)" : L("قاعدة البيانات (تجريبي)", "Database (demo)")}</Badge>}
+      >
+        {sp.err === "s3_not_configured" && <Notice tone="red">{L("إعدادات S3 مش موجودة على السيرفر.", "S3 settings are not configured on the server.")}</Notice>}
+        {sp.moved !== undefined && !sp.err && (
+          <Notice tone={Number(sp.failed) > 0 ? "amber" : "green"}>
+            {L(`اتنقل ${num(Number(sp.moved), locale)} ملف`, `${sp.moved} files moved`)}
+            {Number(sp.failed) > 0 && L(`، و${num(Number(sp.failed), locale)} فشلوا (هيتجربوا تاني)`, `, ${sp.failed} failed (will retry)`)}.
+          </Notice>
+        )}
+        <DL
+          items={[
+            [L("المستندات المسجلة", "Documents recorded"), num(docs, locale)],
+            [L("ملفات لسه في قاعدة البيانات", "Files still in the database"), num(inDb, locale)],
+            [L("الملفات الجديدة بتروح", "New files go to"), mode === "s3" ? "S3" : L("قاعدة البيانات", "Database")],
+          ]}
+        />
+        {mode === "s3" ? (
+          inDb > 0 ? (
+            <form action={moveFilesToS3.bind(null, locale)} className="flex flex-col gap-2">
+              <p className="text-sm text-muted">
+                {L(
+                  "بينقل 60 ملف كل ضغطة، وبيتأكد إن كل ملف وصل S3 سليم قبل ما يتمسح من قاعدة البيانات. الملفات بتفضل تتفتح عادي طول النقل.",
+                  "Moves 60 files per click and verifies each one arrived in S3 before removing it from the database. Files stay viewable throughout.",
+                )}
+              </p>
+              <button className={`${btn.primary} self-start`}>{L("انقل دفعة لـ S3", "Move a batch to S3")}</button>
+            </form>
+          ) : (
+            <Notice tone="green">{L("كل الملفات في S3.", "All files are in S3.")}</Notice>
+          )
+        ) : (
+          <Notice tone="amber">
+            {L(
+              "S3 مش متظبط. حط S3_ENDPOINT و S3_BUCKET و S3_ACCESS_KEY_ID و S3_SECRET_ACCESS_KEY في إعدادات Vercel وانشر تاني.",
+              "S3 is not configured. Add S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY in Vercel settings and redeploy.",
+            )}
+          </Notice>
+        )}
       </Card>
     );
   }

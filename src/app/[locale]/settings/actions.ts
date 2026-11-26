@@ -7,6 +7,7 @@ import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { getSetting } from "@/lib/settings";
 import { updateDailyRate } from "@/lib/fx";
+import { moveBlobsToS3 } from "@/lib/storage";
 import { redirect } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 
@@ -52,6 +53,15 @@ export async function fetchRateNow(locale: string) {
   await audit(me.id, "fx.fetch_now", "ExchangeRate", r.status === "unavailable" ? "-" : r.rate.id, { status: r.status });
   refresh(locale);
   redirect(`/${isLocale(locale) ? locale : "ar"}/settings?tab=fx&fx=${r.status}`);
+}
+
+/** نقل دفعة من الملفات القديمة لـ S3 */
+export async function moveFilesToS3(locale: string) {
+  const me = await admin(locale);
+  const r = await moveBlobsToS3();
+  await audit(me.id, "storage.move_to_s3", "FileBlob", "batch", { moved: r.moved, failed: r.failed, remaining: r.remaining });
+  refresh(locale);
+  redirect(`/${isLocale(locale) ? locale : "ar"}/settings?tab=storage&moved=${r.moved}&failed=${r.failed}${r.error ? `&err=${r.error}` : ""}`);
 }
 
 export async function saveCommission(locale: string, form: FormData) {
