@@ -133,7 +133,8 @@ export async function advanceStage(locale: string, dealId: string, form?: FormDa
     en: [`Your deal moved to “${DEAL_STAGE[to!][1]}”`],
     link: `/deals/${dealId}`,
   });
-  done(l, dealId);
+  // MKT-11: حدث «deal_closed» في الصفحة اللي جاية (لو فيه موافقة على التحليلات)
+  done(l, dealId, to === "CLOSED" ? "?ev=deal_closed" : "");
 }
 
 /** الأدمن بس يرجّع الصفقة لمرحلة سابقة، بسبب مكتوب */
@@ -360,7 +361,8 @@ export async function signContract(locale: string, dealId: string, contractId: s
       link: `/deals/${dealId}`,
     });
   }
-  done(l, dealId);
+  // MKT-11: حدث «commission_signed» لما اتفاق العمولة يكمل
+  done(l, dealId, complete && contract!.type === "COMMISSION_AGREEMENT" ? "?ev=commission_signed" : "");
 }
 
 // ─── العربون: المالي بس (الوسيط ما يلمسش الفلوس — 7.4) ───

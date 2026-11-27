@@ -28,6 +28,7 @@ import { getSetting } from "@/lib/settings";
 import { Badge, Card, Container, DL, Empty, FileLink, Notice, PageHeader, btn, field, labelCls } from "@/components/ui";
 import { StageStepper } from "@/components/StageStepper";
 import { AdminReason } from "@/components/AdminReason";
+import { TrackEvent } from "@/components/Analytics";
 import {
   addNote,
   advanceStage,
@@ -50,7 +51,7 @@ import {
   uploadDealDocument,
 } from "../actions";
 
-type Props = { params: Promise<{ locale: string; id: string }>; searchParams: Promise<{ err?: string; ok?: string; new?: string }> };
+type Props = { params: Promise<{ locale: string; id: string }>; searchParams: Promise<{ err?: string; ok?: string; new?: string; ev?: string }> };
 
 // العقد اللي بيتعمل في كل مرحلة (DATA-05)
 const CONTRACT_FOR_STAGE: Partial<Record<string, ContractType[]>> = {
@@ -177,6 +178,8 @@ export default async function DealRoom({ params, searchParams }: Props) {
         }
       />
       <Container className="flex flex-col gap-6">
+        {/* MKT-11 */}
+        <TrackEvent name={sp.new ? "interest_registered" : sp.ev} />
         {sp.new && <Notice tone="green">{L("اهتمامك اتسجل، والوسيط هيكلمك لاتفاق العمولة.", "Your interest is registered. The broker will contact you about the commission agreement.")}</Notice>}
         {sp.ok === "approval_requested" && <Notice tone="amber">{L(`المبلغ فوق حد الأربع عيون (${num(fourEyes, locale)} ج.م) — اتبعت طلب موافقة للأدمن.`, `The amount is above the four-eyes limit (EGP ${fourEyes}) — an approval request was sent to the admin.`)}</Notice>}
         {sp.ok === "agent_requested" && <Notice tone="green">{L("اتبعت طلب مندوب للأدمن.", "A field agent request was sent to the admin.")}</Notice>}

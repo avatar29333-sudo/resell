@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useKeptAction } from "@/components/useKeptAction";
+import { track } from "@/components/Analytics";
 import type { Locale } from "@/i18n/config";
 import { money, num, tr } from "@/lib/format";
 import { CITY, CITY_KEYS, label } from "@/lib/labels";
@@ -157,6 +158,9 @@ export function RescueForm({ locale }: { locale: Locale }) {
         {fe[k]}
       </span>
     ) : null;
+  useEffect(() => {
+    if (state.ok) track("lead_rescue_submitted"); // MKT-11
+  }, [state.ok]);
   if (state.ok)
     return (
       <Notice tone="green">

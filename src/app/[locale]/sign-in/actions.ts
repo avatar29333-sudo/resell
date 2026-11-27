@@ -152,7 +152,8 @@ export async function verify(locale: Locale, next: string | null, prev: SignInSt
   }
   await clearPending();
   await createSession(user.id);
-  const fallback = user.role === "CLIENT" ? `account${"signIn" in pending ? "" : "?welcome=1"}` : homeFor(user.role);
+  // MKT-11: حدث «referral_signup» لو التسجيل جه من رابط إحالة
+  const fallback = user.role === "CLIENT" ? `account${"signIn" in pending ? "" : `?welcome=1${user.referredById ? "&ev=referral_signup" : ""}`}` : homeFor(user.role);
   redirect(safeNext(locale, next) ?? `/${locale}/${fallback}`);
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { track } from "@/components/Analytics";
 import type { Locale } from "@/i18n/config";
 import { money, tr } from "@/lib/format";
 import { CITY, CITY_KEYS, label } from "@/lib/labels";
@@ -18,6 +19,9 @@ export function ValuationForm({ locale, districts, perSqm }: { locale: Locale; d
   const [state, onSubmit, pending] = useKeptAction((p: ValuationState, f: FormData) => submitValuation(locale, p, f), {} as ValuationState);
   const fe = state.fieldErrors ?? {};
   const Err = ({ k }: { k: keyof typeof fe }) => (fe[k] ? <span role="alert" className="text-sm font-semibold text-[#A32020]">{fe[k]}</span> : null);
+  useEffect(() => {
+    if (state.ok) track("valuation_requested"); // MKT-11
+  }, [state.ok]);
   const est = perSqm[city] && Number(area) >= 50 ? Math.round(perSqm[city]! * Number(area)) : null;
 
   if (state.ok)

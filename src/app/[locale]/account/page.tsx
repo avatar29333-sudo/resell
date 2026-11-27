@@ -30,11 +30,12 @@ import { pageMeta, siteUrl } from "@/lib/meta";
 import { ensureReferralCode } from "@/lib/referral";
 import { getSetting } from "@/lib/settings";
 import { ShareButtons } from "@/components/ShareButtons";
+import { TrackEvent } from "@/components/Analytics";
 import { applyAsPartner, createBuyRequest, setBuyRequestStatus, setMyListingStatus, submitKyc, uploadNewVersion } from "./actions";
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string; partner?: string }>;
+  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string; partner?: string; ev?: string }>;
 };
 
 // مراحل العرض من ناحية البائع
@@ -132,6 +133,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
       <Container className="flex flex-col gap-6">
         {sp.welcome && <Notice tone="green">{L("حسابك اتعمل. وثّق هويتك عشان تقدر تبيع أو تشتري.", "Your account is ready. Verify your ID to buy or sell.")}</Notice>}
         {sp.listed && <ClearDraft />}
+        <TrackEvent name={sp.ev} />
         {sp.listed && <Notice tone="green">{L("قطعتك وصلت وهي دلوقتي قيد المراجعة. هنبلغك على واتساب.", "Your plot was received and is now in review. We'll update you on WhatsApp.")}</Notice>}
         {sp.rescue && (
           <Notice tone="amber">

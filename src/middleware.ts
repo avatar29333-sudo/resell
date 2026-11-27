@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SECURITY_HEADERS, buildCsp } from "@/lib/csp";
 import { isPrivatePath } from "@/lib/meta";
+import { analyticsCsp } from "@/lib/analytics";
 import { FT_COOKIE, LT_COOKIE, REF_COOKIE, REF_MAX_AGE, TOUCH_MAX_AGE, encodeTouch, touchFrom } from "@/lib/attribution-core";
 
 /** SEC-08: هيدرز الأمان لكل الصفحات (ملفات /api/files ليها هيدرز خاصة بيها ومش داخلة هنا) */
@@ -19,7 +20,7 @@ export function middleware(req: NextRequest) {
   } catch {
     s3Origin = null;
   }
-  const csp = buildCsp(nonce, { dev: process.env.NODE_ENV !== "production", s3Origin, vercelPreview: process.env.VERCEL_ENV === "preview" });
+  const csp = buildCsp(nonce, { dev: process.env.NODE_ENV !== "production", s3Origin, vercelPreview: process.env.VERCEL_ENV === "preview", analytics: analyticsCsp() });
 
   // Next.js بياخد الـ nonce من هيدر الطلب ويحطه على سكريبتاته
   const requestHeaders = new Headers(req.headers);
