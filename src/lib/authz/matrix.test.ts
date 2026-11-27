@@ -64,11 +64,11 @@ describe("PERM-10 matrix — every role × every action", () => {
   // على حاجات مش مسندة ليه: ولا دور (غير الأدمن ومسؤول الوسطاء والمالي في نطاقهم) يقدر يعمل فعل على صفقة/عرض/مستند
   const unassignedAllowed: Partial<Record<Role, Action[]>> = {
     // مسؤول الوسطاء بيشوف كل حاجة ويسند، ويراجع الهويات (notMine فيه ملف هوية مستني المراجعة)
-    BROKER_LEAD: ["listing.view_private", "listing.view_code", "listing.assign", "deal.view", "deal.view_money", "deal.assign", "deal.note", "deal.internal_note", "deposit.view", "service.view_queue", "service.assign", "service.update", "reports.view", "kyc.view_id", "kyc.decide", "document.view"],
+    BROKER_LEAD: ["listing.view_private", "listing.view_code", "listing.assign", "deal.view", "deal.view_money", "deal.assign", "deal.note", "deal.internal_note", "deposit.view", "service.view_queue", "service.assign", "service.update", "service.site_report", "reports.view", "kyc.view_id", "kyc.decide", "document.view"],
     // المالي شغال على كل الصفقات: ملاحظات، رفع إيصالات، تسجيل وتأكيد عرابين
     FINANCE: ["deal.view", "deal.view_money", "deal.note", "deal.upload_doc", "deposit.view", "deposit.record", "deposit.confirm", "deposit.release", "deposit.refund", "commission.collect", "reports.view", "finance.reconcile", "fx.manual", "audit.view_money", "deal.internal_note", "document.view"],
     // الوسيط: طابور الخدمات + مراجعة هوية مستنية (SEC-06) — مش صفقات ولا عروض مش مسندة ليه
-    BROKER: ["service.view_queue", "service.assign", "service.update", "reports.view", "kyc.view_id", "kyc.decide", "document.view"],
+    BROKER: ["service.view_queue", "service.assign", "service.update", "service.site_report", "reports.view", "kyc.view_id", "kyc.decide", "document.view"],
     LAWYER: ["reports.view"],
     AGENT: ["service.view_queue"],
     CLIENT: ["listing.create", "deal.create"],
@@ -125,6 +125,15 @@ describe("PERM-10 matrix — every role × every action", () => {
   it("only parties sign contracts — not even an admin who isn't a party", () => {
     expect(can(me("ADMIN"), "contract.sign", notMine).allowed).toBe(false);
     expect(can(me("BROKER"), "contract.sign", mine("BROKER")).allowed).toBe(false);
+  });
+
+  it("OPS-02: only the deal's agent updates the authority file, and only at the authority stages", () => {
+    expect(can(me("AGENT"), "deal.authority_update", mine("AGENT")).allowed).toBe(true);
+    expect(can(me("AGENT"), "deal.authority_update", notMine).allowed).toBe(false);
+    const early = { ...mine("AGENT"), deal: { ...mine("AGENT").deal!, stage: "PRICE_AGREED" } };
+    expect(can(me("AGENT"), "deal.authority_update", early).allowed).toBe(false);
+    expect(can(me("AGENT"), "service.site_report", mine("AGENT")).allowed).toBe(true);
+    expect(can(me("AGENT"), "service.site_report", notMine).allowed).toBe(false);
   });
 
   it("SEC-05: unassigned broker sees the deal only when the setting is read", () => {

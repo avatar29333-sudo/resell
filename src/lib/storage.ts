@@ -105,6 +105,20 @@ export async function moveBlobsToS3(batch = 60) {
   return { moved, failed, remaining: await db.fileBlob.count(), error: null };
 }
 
+/** OPS-02: كذا ملف في نفس الحقل (صور المعاينة) — كلهم لازم يعدّوا نفس الفحص */
+export async function filesFromForm(form: FormData, field: string, max = 10) {
+  const out: { name: string; type: string; data: Buffer }[] = [];
+  for (const f of form.getAll(field).slice(0, max)) {
+    if (typeof f === "string" || f.size === 0) continue;
+    if (f.size > MAX_FILE_BYTES) return { error: "size" as const, files: [] };
+    const data = Buffer.from(await f.arrayBuffer());
+    const type = sniffMime(data);
+    if (!type) return { error: "type" as const, files: [] };
+    out.push({ name: f.name, type, data });
+  }
+  return { error: null, files: out };
+}
+
 /** فورم فيه ملف: يرجّع الملف لو موجود ومسموح، أو رسالة الخطأ */
 export async function fileFromForm(form: FormData, field: string) {
   const f = form.get(field);

@@ -151,6 +151,9 @@ export const ACTIONS = [
   "service.assign",
   "service.update",
   "buy_request.manage",
+  // شغل المندوب (OPS-02)
+  "service.site_report",
+  "deal.authority_update",
   // التقارير والإعدادات (5.8)
   "reports.view",
   "finance.reconcile",
@@ -339,6 +342,16 @@ const RULES: Record<Action, Rule[]> = {
   "fx.manual": [{ roles: ["FINANCE"] }],
   // OPS-01: المطابقة الشهرية مع كشف البنك
   "finance.reconcile": [{ roles: ["FINANCE"] }],
+  // OPS-02: تقرير المعاينة (صور بمكانها + تقدير التنفيذ) — المندوب المسند للطلب
+  "service.site_report": [
+    { roles: ["AGENT"], when: (u, c) => c.serviceRequest?.assignedToId === u.id },
+    { roles: ["BROKER", "BROKER_LEAD"] },
+  ],
+  // OPS-02: حالة ملف التنازل في الجهاز — مندوب الصفقة في مرحلة الجهاز، أو وسيطها
+  "deal.authority_update": [
+    { roles: ["AGENT"], when: and(isDealAgent, dealOpen, (_, c) => ["TRANSFER_FILED", "AUTHORITY_APPROVED"].includes(c.deal!.stage)) },
+    { roles: ["BROKER", "BROKER_LEAD"], when: and(isDealBroker, dealOpen, (_, c) => stageAtLeast(c, "TRANSFER_FILED")) },
+  ],
   "settings.fees": [],
   "audit.view": [],
   "audit.view_money": [{ roles: ["FINANCE"] }],

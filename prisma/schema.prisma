@@ -422,6 +422,11 @@ model Document {
   sizeBytes    Int
   sha256       String         @db.Char(64)
   expiresAt    DateTime?      @db.Date //تاريخ انتهاء المستند (لو له)
+  /// OPS-02: مكان ووقت تصوير صورة الموقع
+  geoLat       Float?
+  geoLng       Float?
+  geoAccuracyM Float?
+  takenAt      DateTime?
   createdAt    DateTime       @default(now())
 
   reviews          Review[]
@@ -487,6 +492,9 @@ model Deal {
   agent           User?      @relation("DealAgent", fields: [agentId], references: [id])
   stageChangedAt  DateTime   @default(now())
   closedAt        DateTime?
+  /// OPS-02: حالة ملف التنازل في الجهاز (SUBMITTED / NEEDS_INFO / APPROVED / REJECTED)
+  authorityStatus    String?
+  authorityUpdatedAt DateTime?
   /// DATA-04: صفقة من بيانات التجربة — ما تدخلش في المؤشر ولا العدادات لما DEMO_MODE مقفول
   isDemo          Boolean    @default(false)
   createdAt       DateTime   @default(now())
@@ -666,6 +674,8 @@ model ServiceRequest {
   message      String?
   fee          Decimal?             @db.Decimal(14, 2)
   feeCurrency  Currency?
+  /// OPS-02: تقدير المندوب لنسبة التنفيذ من المعاينة
+  constructionEstimate Int?
   assignedToId String?
   assignedTo   User?                @relation("ServiceAssignee", fields: [assignedToId], references: [id])
   documents    Document[]
