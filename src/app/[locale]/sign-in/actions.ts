@@ -7,6 +7,7 @@ import { DEMO_MODE, checkCode, clearPending, createSession, getPending, homeFor,
 import { maskEmail, type Channel } from "@/lib/notify";
 import { decryptSecret, verifyTotp } from "@/lib/totp";
 import { classifyIdentifier } from "@/lib/identifier";
+import { safeNext } from "@/lib/safe-next";
 import { isValidPhone, maskPhone, normalizePhone } from "@/lib/format";
 import { isLocale, type Locale } from "@/i18n/config";
 
@@ -46,9 +47,6 @@ const M = {
 
 const msg = (locale: Locale, k: keyof typeof M) => (locale === "ar" ? M[k][0] : M[k][1]);
 
-function safeNext(locale: Locale, next: string | null) {
-  return next && next.startsWith(`/${locale}/`) && !next.startsWith("//") ? next : null;
-}
 
 const channelOf = (f: FormData): Channel => (f.get("channel") === "email" ? "email" : "whatsapp");
 
@@ -176,7 +174,7 @@ export async function resend(locale: Locale, prev: SignInState, channel: Channel
 }
 
 /** دخول سريع بحسابات التجربة — السيرفر بيرفضه لو DEMO_MODE مش true (SEC-01) */
-export async function demoSignIn(locale: string, userId: string) {
+export async function demoSignIn(locale: string, userId: string, next?: string | null) {
   if (!DEMO_MODE) {
     await audit(null, "auth.demo_sign_in_rejected", "User", userId);
     throw new Error("Demo sign-in is disabled");
@@ -186,5 +184,5 @@ export async function demoSignIn(locale: string, userId: string) {
   await audit(user.id, "auth.demo_sign_in", "User", user.id);
   await createSession(user.id);
   const loc = isLocale(locale) ? locale : "ar";
-  redirect(`/${loc}/${homeFor(user.role)}`);
+  redirect(safeNext(loc, next) ?? `/${loc}/${homeFor(user.role)}`);
 }

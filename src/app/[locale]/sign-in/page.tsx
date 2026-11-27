@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { safeNext } from "@/lib/safe-next";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { DEMO_MODE, getCurrentUser, homeFor } from "@/lib/auth";
@@ -16,7 +17,8 @@ export default async function SignInPage({ params, searchParams }: Props) {
   const { next } = await searchParams;
   const L = tr(locale);
   const user = await getCurrentUser();
-  if (user) redirect(next?.startsWith(`/${locale}/`) ? next : `/${locale}/${homeFor(user.role)}`);
+  // UX-03: لو داخل بالفعل → يروح للصفحة المطلوبة (مسار داخلي بس)
+  if (user) redirect(safeNext(locale, next) ?? `/${locale}/${homeFor(user.role)}`);
 
   // حسابات التجربة: الفريق + أول عميلين
   const demoUsers = DEMO_MODE
@@ -35,7 +37,7 @@ export default async function SignInPage({ params, searchParams }: Props) {
       />
       <Container className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Card title={L("بياناتك", "Your details")}>
-          <SignInFlow locale={locale} next={next ?? null} demo={DEMO_MODE} />
+          <SignInFlow locale={locale} next={safeNext(locale, next)} demo={DEMO_MODE} />
         </Card>
 
         {DEMO_MODE && demoUsers.length > 0 && (
@@ -49,7 +51,7 @@ export default async function SignInPage({ params, searchParams }: Props) {
             <ul className="grid gap-2 sm:grid-cols-2">
               {demoUsers.map((u, i) => (
                 <li key={u.id}>
-                  <form action={demoSignIn.bind(null, locale, u.id)}>
+                  <form action={demoSignIn.bind(null, locale, u.id, safeNext(locale, next))}>
                     <button
                       type="submit"
                       className="flex min-h-14 w-full flex-col items-start justify-center border border-line px-3 py-2 text-start hover:border-brand hover:bg-paper"
