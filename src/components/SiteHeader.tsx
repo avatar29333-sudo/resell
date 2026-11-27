@@ -9,6 +9,21 @@ import { Logo } from "./Logo";
 
 type Props = { locale: Locale; t: Dictionary; user: User | null; unread?: number };
 
+function Bell({ href, unread, ar }: { href: string; unread: number; ar: boolean }) {
+  return (
+    <Link
+      href={href}
+      aria-label={`${ar ? "الإشعارات" : "Notifications"}${unread ? ` (${unread})` : ""}`}
+      className="relative inline-flex min-h-11 min-w-11 items-center justify-center text-[#D6DCEE] hover:text-white"
+    >
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+        <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+      </svg>
+      {unread > 0 && <span className="absolute top-1 end-0 min-w-5 bg-[#D9480F] px-1 text-center text-xs font-bold text-white">{unread > 99 ? "99+" : unread}</span>}
+    </Link>
+  );
+}
+
 export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
   const other: Locale = locale === "ar" ? "en" : "ar";
   const base = `/${locale}`;
@@ -29,17 +44,75 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
     { href: `${base}/reports`, label: ar ? "التقارير" : "Reports", roles: ["ADMIN", "FINANCE", "BROKER", "BROKER_LEAD", "LAWYER"] },
     { href: `${base}/settings`, label: ar ? "الإعدادات" : "Settings", roles: ["ADMIN", "FINANCE"] },
   ].filter((l) => role && l.roles.includes(role));
+  const menuLink = "flex min-h-11 items-center border-b border-navy-soft py-2 text-[#D6DCEE] hover:text-white";
 
   return (
     <header className="bg-navy text-white print:hidden">
-      <div className="bg-[#FDF3E1] px-5 py-1.5 text-center text-sm text-[#5C3D00]">{t.demo.banner}</div>
-      <div className="mx-auto flex min-h-[68px] max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-3 md:px-8">
+      <div className="bg-[#FDF3E1] px-5 py-1 text-center text-xs text-[#5C3D00] md:py-1.5 md:text-sm">{t.demo.banner}</div>
+
+      {/* UX-06: الموبايل (تحت 768px) — لوجو + «اعرض قطعتك» + ☰ وبس، والهيدر ≤ 72px */}
+      <div className="relative flex h-[64px] items-center justify-between gap-2 px-4 md:hidden">
+        <Link href={base} className="flex items-center text-white no-underline" aria-label="Resell">
+          <Logo />
+        </Link>
+        <div className="flex items-center gap-1">
+          {user && <Bell href={`${base}/notifications`} unread={unread} ar={ar} />}
+          <Link href={`${base}/list-your-plot`} className="inline-flex min-h-11 items-center bg-white px-3 text-sm font-semibold text-navy">
+            {t.nav.listPlot}
+          </Link>
+          <details className="group">
+            <summary aria-label={t.nav.menu} className="flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center text-2xl text-white [&::-webkit-details-marker]:hidden">
+              <span aria-hidden="true" className="group-open:hidden">☰</span>
+              <span aria-hidden="true" className="hidden group-open:inline">✕</span>
+            </summary>
+            <nav aria-label={t.nav.menu} className="absolute inset-x-0 top-full z-50 flex max-h-[80vh] flex-col overflow-y-auto bg-navy px-4 pb-4 shadow-lg">
+              {links.map((l) => (
+                <Link key={l.href} href={l.href} className={menuLink}>
+                  {l.label}
+                </Link>
+              ))}
+              {staffLinks.map((l) => (
+                <Link key={l.href} href={l.href} className={menuLink}>
+                  {l.label}
+                </Link>
+              ))}
+              {user ? (
+                <>
+                  <Link href={dash!} className={menuLink}>
+                    {user.name} · {label(ROLE, user.role, locale)}
+                  </Link>
+                  {user.role !== "CLIENT" && (
+                    <Link href={`${base}/account`} className={menuLink}>
+                      {t.nav.account}
+                    </Link>
+                  )}
+                  <form action={signOut.bind(null, locale)}>
+                    <button type="submit" className={`${menuLink} w-full text-start`}>
+                      {t.nav.signOut}
+                    </button>
+                  </form>
+                </>
+              ) : (
+                <Link href={`${base}/sign-in`} className={menuLink}>
+                  {t.nav.signIn}
+                </Link>
+              )}
+              <Link href={`/${other}`} hrefLang={other} className={menuLink}>
+                {t.nav.otherLanguage}
+              </Link>
+            </nav>
+          </details>
+        </div>
+      </div>
+
+      {/* الشاشات الأكبر */}
+      <div className="mx-auto hidden min-h-[68px] max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-3 md:flex md:px-8">
         <Link href={base} className="flex items-center gap-3 text-white no-underline">
           <Logo />
-          <span className="hidden border-s border-navy-soft ps-3 text-sm text-[#B9C3DE] sm:inline">{t.brand.tagline}</span>
+          <span className="hidden border-s border-navy-soft ps-3 text-sm text-[#B9C3DE] lg:inline">{t.brand.tagline}</span>
         </Link>
 
-        <nav aria-label={t.nav.menu} className="hidden items-center gap-6 text-[15px] lg:flex">
+        <nav aria-label={t.nav.menu} className="flex items-center gap-5 text-[15px]">
           {links.map((l) => (
             <Link key={l.href} href={l.href} className="text-[#D6DCEE] hover:text-white">
               {l.label}
@@ -53,18 +126,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
           </Link>
           {user ? (
             <>
-              <Link
-                href={`${base}/notifications`}
-                aria-label={`${ar ? "الإشعارات" : "Notifications"}${unread ? ` (${unread})` : ""}`}
-                className="relative inline-flex min-h-11 min-w-11 items-center justify-center text-[#D6DCEE] hover:text-white"
-              >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-                  <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-                </svg>
-                {unread > 0 && (
-                  <span className="absolute top-1 end-0 min-w-5 bg-[#D9480F] px-1 text-center text-xs font-bold text-white">{unread > 99 ? "99+" : unread}</span>
-                )}
-              </Link>
+              <Bell href={`${base}/notifications`} unread={unread} ar={ar} />
               <Link href={dash!} className="flex flex-col px-2 py-1 leading-tight text-white hover:text-[#D6DCEE]">
                 <span className="font-semibold">{user.name}</span>
                 <span className="text-xs text-[#B9C3DE]">{label(ROLE, user.role, locale)}</span>
@@ -85,16 +147,13 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
               {t.nav.signIn}
             </Link>
           )}
-          <Link
-            href={`${base}/list-your-plot`}
-            className="inline-flex min-h-11 items-center bg-white px-5 font-semibold text-navy hover:bg-paper"
-          >
+          <Link href={`${base}/list-your-plot`} className="inline-flex min-h-11 items-center bg-white px-5 font-semibold text-navy hover:bg-paper">
             {t.nav.listPlot}
           </Link>
         </div>
 
         {staffLinks.length > 0 && (
-          <nav aria-label={locale === "ar" ? "لوحات الفريق" : "Team dashboards"} className="flex w-full flex-wrap gap-1 border-t border-navy-soft pt-2 text-sm">
+          <nav aria-label={ar ? "لوحات الفريق" : "Team dashboards"} className="flex w-full flex-wrap gap-1 border-t border-navy-soft pt-2 text-sm">
             {staffLinks.map((l) => (
               <Link key={l.href} href={l.href} className="inline-flex min-h-9 items-center bg-navy-soft px-3 text-[#D6DCEE] hover:text-white">
                 {l.label}
@@ -102,17 +161,6 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
             ))}
           </nav>
         )}
-
-        <details className="w-full lg:hidden">
-          <summary className="flex min-h-11 cursor-pointer items-center text-[#D6DCEE]">{t.nav.menu}</summary>
-          <nav aria-label={t.nav.menu} className="flex flex-col gap-1 pb-2">
-            {links.map((l) => (
-              <Link key={l.href} href={l.href} className="min-h-11 py-2 text-[#D6DCEE] hover:text-white">
-                {l.label}
-              </Link>
-            ))}
-          </nav>
-        </details>
       </div>
     </header>
   );
