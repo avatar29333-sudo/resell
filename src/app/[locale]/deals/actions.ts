@@ -330,6 +330,8 @@ export async function signContract(locale: string, dealId: string, contractId: s
       ...all.map((s) => `${s.role}: user ${s.userId.slice(-6)} - ${s.signedAt} - ${s.providerRef}`),
       "",
       "Subject to prior approval of the city authority for any transfer.",
+      // MKT-15: رقم القيد في سجل الوسطاء على كل عقد
+      `Licensed brokerage - broker registry no.: ${(await getSetting("brokerRegistrationNumber")).value || "PENDING"}`,
     ]);
     const s = await saveFile(pdf, "application/pdf", "contracts");
     const doc = await db.document.create({

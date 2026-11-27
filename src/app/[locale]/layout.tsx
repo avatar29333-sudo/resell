@@ -10,6 +10,7 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { LocalizedValidity } from "@/components/LocalizedValidity";
 import { siteUrl } from "@/lib/meta";
 import { ConsentBanner } from "@/components/Analytics";
+import { getSetting } from "@/lib/settings";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
@@ -57,7 +58,7 @@ export default async function LocaleLayout({
       <body className="flex min-h-screen flex-col bg-white">
         <SiteHeader locale={locale} t={t} user={user} unread={unread} />
         <main className="flex-1">{children}</main>
-        <SiteFooter t={t} locale={locale} />
+        <SiteFooter t={t} locale={locale} regNo={(await getSetting("brokerRegistrationNumber")).value} />
         <LocalizedValidity locale={locale} />
         <ConsentBanner ar={locale === "ar"} />
       </body>

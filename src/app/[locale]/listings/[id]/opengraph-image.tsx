@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { latestRate, totalEgp } from "@/lib/listing";
 import { toNum } from "@/lib/format";
 import { CITY } from "@/lib/labels";
+import { getSetting } from "@/lib/settings";
 
 // UX-08: صورة المشاركة (واتساب وغيره) لكل عرض: المدينة والمساحة والسعر واللوجو.
 // مولّد الصور (Satori) ما بيدعمش تشكيل الحروف العربي، فالنص هنا بالإنجليزي والأرقام.
@@ -19,7 +20,8 @@ export default async function Image({ params }: { params: Promise<{ locale: stri
   const district = visible ? (l!.plot.districtEn ?? "") : "";
   const area = visible ? `${toNum(l!.plot.areaSqm).toLocaleString("en-US")} m²` : "";
   const price = visible ? `EGP ${Math.round(totalEgp(l!, toNum(rate?.sell ?? 50))).toLocaleString("en-US")}` : "";
-  const reg = process.env.BROKER_REGISTRATION_NUMBER;
+  // MKT-15: رقم القيد من إعدادات الأدمن
+  const reg = (await getSetting("brokerRegistrationNumber")).value;
 
   return new ImageResponse(
     (
@@ -41,7 +43,7 @@ export default async function Image({ params }: { params: Promise<{ locale: stri
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 26, color: "#B9C3DE" }}>
           <div>Lawyer-checked papers · Licensed brokerage</div>
-          {reg && <div>Reg. {reg}</div>}
+          {reg && <div style={{ display: "flex" }}>{`Broker reg. no. ${reg}`}</div>}
         </div>
       </div>
     ),

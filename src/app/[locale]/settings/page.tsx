@@ -71,6 +71,15 @@ export default async function SettingsPage({ params, searchParams }: Props) {
       <Container className="flex flex-col gap-6">
         {sp.err && sp.err !== "s3_not_configured" && <Notice tone="red">{errorText(sp.err, ar, SETTINGS_ERRORS)}</Notice>}
         {sp.ok && OK[sp.ok] && <Notice tone="green">{OK[sp.ok][ar ? 0 : 1]}</Notice>}
+        {/* MKT-15: تحذير لو رقم القيد فاضي */}
+        {me.role === "ADMIN" && !(await getSetting("brokerRegistrationNumber")).value && (
+          <Notice tone="red">
+            {L("رقم القيد في سجل الوسطاء مش متسجل — لازم يتكتب قبل الإطلاق (بيظهر في الفوتر والعقود وصور المشاركة).", "The broker registry number isn't set — it must be entered before launch (shown in the footer, contracts and share images).")}{" "}
+            <a href={`${base}?tab=commission`} className="font-semibold underline">
+              {L("اكتبه هنا", "Set it here")}
+            </a>
+          </Notice>
+        )}
         <Tabs
           current={tab}
           tabs={[
