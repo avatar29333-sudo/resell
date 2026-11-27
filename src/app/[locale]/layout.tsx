@@ -7,6 +7,7 @@ import { dirOf, isLocale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/dictionaries";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
+import { LocalizedValidity } from "@/components/LocalizedValidity";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
@@ -52,6 +53,7 @@ export default async function LocaleLayout({
         <SiteHeader locale={locale} t={t} user={user} unread={unread} />
         <main className="flex-1">{children}</main>
         <SiteFooter t={t} locale={locale} />
+        <LocalizedValidity locale={locale} />
       </body>
     </html>
   );
