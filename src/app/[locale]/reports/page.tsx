@@ -62,6 +62,11 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
     <>
       <PageHeader title={L("التقارير", "Reports")} subtitle={L("صورة سريعة للمنصة للاجتماع الأسبوعي.", "A quick snapshot for the weekly meeting.")} />
       <Container className="flex flex-col gap-6">
+        {me.role === "ADMIN" && (
+          <Link href={`/${locale}/reports/duplicates`} className="self-start font-semibold text-brand">
+            {L("تقرير القطع المحتمل تكرارها ←", "Possible duplicate plots report →")}
+          </Link>
+        )}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           <Stat label={L("صفقات اتقفلت", "Deals closed")} value={num(closed.length, locale)} hint={money(closedValue, "EGP", locale)} />
           <Stat label={L("عمولات اتحصّلت", "Commission collected")} value={money(paid, "EGP", locale)} />
