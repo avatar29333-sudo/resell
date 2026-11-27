@@ -5,7 +5,9 @@ import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { can, subject } from "@/lib/authz";
-import { scopeAuditFor, scopeUsersFor } from "@/lib/authz/scope";
+import { scopeUsersFor } from "@/lib/authz/scope";
+import { auditWhere } from "@/lib/audit-query";
+import { AUDIT_GROUPS, auditLabel } from "@/lib/audit-labels";
 import { errorText } from "@/lib/errors";
 import { getSetting } from "@/lib/settings";
 import { date, dateTime, money, num, tr } from "@/lib/format";
@@ -18,7 +20,7 @@ import { storageMode } from "@/lib/storage";
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ tab?: string; q?: string; page?: string; role?: string; city?: string;entity?: string; fx?: string; moved?: string; failed?: string; err?: string; ok?: string; buy?: string; sell?: string }>;
+  searchParams: Promise<{ tab?: string; q?: string; page?: string; role?: string; city?: string; from?: string; to?: string; actor?: string; group?: string; entity?: string; fx?: string; moved?: string; failed?: string; err?: string; ok?: string; buy?: string; sell?: string }>;
 };
 
 const PAGE = 50;
@@ -444,21 +446,54 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   }
 
   async function Audit({ locale, entity }: { locale: "ar" | "en"; entity?: string }) {
-    const logs = await db.auditLog.findMany({
-      where: { AND: [scopeAuditFor(me), entity ? { entityType: entity } : {}] },
-      include: { actor: true },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-    });
+    // UX-09: وصف بالعربي/الإنجليزي + فلتر بالتاريخ والمستخدم والمجموعة + تصدير CSV
+    const f = { from: sp.from, to: sp.to, actor: sp.actor, group: sp.group, entity };
+    const logs = await db.auditLog.findMany({ where: auditWhere(me, f), include: { actor: true }, orderBy: { createdAt: "desc" }, take: 200 });
     const types = ["User", "Listing", "Deal", "Document", "ServiceRequest", "AppSetting", "ExchangeRate"];
+    const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v) as [string, string][]).toString();
     return (
-      <Card title={L("سجل التدقيق — آخر 100 عملية", "Audit log — last 100 actions")}>
+      <Card
+        title={L("سجل التدقيق — آخر 200 عملية بالفلاتر", "Audit log — latest 200 matching actions")}
+        actions={
+          <a href={`/api/audit${qs ? `?${qs}&` : "?"}locale=${locale}`} className={`${btn.small} border border-brand text-brand`}>
+            {L("تصدير CSV", "Export CSV")}
+          </a>
+        }
+      >
         <p className="text-sm text-muted">{L("السجل ده ما يتعدلش وما يتمسحش (محمي في قاعدة البيانات).", "This log cannot be edited or deleted (enforced in the database).")}</p>
+        <form className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="tab" value="audit" />
+          {entity && <input type="hidden" name="entity" value={entity} />}
+          <label className={labelCls}>
+            {L("من", "From")}
+            <input name="from" type="date" defaultValue={sp.from} className={`${field} w-40`} />
+          </label>
+          <label className={labelCls}>
+            {L("لحد", "To")}
+            <input name="to" type="date" defaultValue={sp.to} className={`${field} w-40`} />
+          </label>
+          <label className={labelCls}>
+            {L("المستخدم (اسم أو رقم، أو system)", "User (name or number, or system)")}
+            <input name="actor" defaultValue={sp.actor} className={`${field} w-52`} />
+          </label>
+          <label className={labelCls}>
+            {L("المجموعة", "Group")}
+            <select name="group" defaultValue={sp.group ?? ""} className={`${field} w-44`}>
+              <option value="">{L("الكل", "All")}</option>
+              {AUDIT_GROUPS.map((g) => (
+                <option key={g} value={g}>
+                  {auditLabel(`${g}.__`, locale).split(":")[0]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className={btn.secondary}>{L("فلتر", "Filter")}</button>
+        </form>
         <nav className="flex flex-wrap gap-1.5">
           {[undefined, ...types].map((t) => (
             <a
               key={t ?? "all"}
-              href={`/${locale}/settings?tab=audit${t ? `&entity=${t}` : ""}`}
+              href={`/${locale}/settings?tab=audit${t ? `&entity=${t}` : ""}${sp.from ? `&from=${sp.from}` : ""}${sp.to ? `&to=${sp.to}` : ""}${sp.actor ? `&actor=${encodeURIComponent(sp.actor)}` : ""}${sp.group ? `&group=${sp.group}` : ""}`}
               className={`inline-flex min-h-9 items-center border px-2.5 text-sm ${t === entity ? "border-navy bg-navy text-white" : "border-line"}`}
             >
               {t ?? L("الكل", "All")}
@@ -469,9 +504,12 @@ export default async function SettingsPage({ params, searchParams }: Props) {
           {logs.map((a) => (
             <tr key={a.id.toString()}>
               <td className="whitespace-nowrap">{dateTime(a.createdAt, locale)}</td>
-              <td>{a.actor?.name ?? L("زائر", "Visitor")}</td>
-              <td dir="ltr" className="text-start font-mono text-xs">
-                {a.action}
+              <td>{a.actor?.name ?? (a.action.startsWith("cron.") || a.action.startsWith("listing.statement") ? L("النظام", "System") : L("زائر", "Visitor"))}</td>
+              <td>
+                {auditLabel(a.action, locale)}
+                <div dir="ltr" className="text-start font-mono text-[11px] text-muted">
+                  {a.action}
+                </div>
               </td>
               <td className="text-xs">
                 {a.entityType} <span className="text-muted">…{a.entityId.slice(-6)}</span>
