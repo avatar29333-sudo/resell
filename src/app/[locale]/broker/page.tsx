@@ -28,9 +28,11 @@ import {
 import { Badge, Card, Container, Empty, FileLink, Notice, PageHeader, Stat, Table, Tabs, btn, field } from "@/components/ui";
 import { AdminReason } from "@/components/AdminReason";
 import { pageMeta } from "@/lib/meta";
+import { convertValuation } from "./actions";
+import { siteUrl } from "@/lib/meta";
 import { assignListingBroker, kycDecision, moveListing, sendDocsToLawyer, updateServiceRequest } from "./actions";
 
-type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string }> };
+type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string; converted?: string }> };
 
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "لوحة الوسيط", "Broker dashboard", { noindex: true });
 
@@ -84,7 +86,7 @@ export default async function BrokerPage({ params, searchParams }: Props) {
 
         {tab === "queue" && <Queue locale={locale} me={me} />}
         {tab === "deals" && <Deals locale={locale} me={me} counts={counts} status={sp.status} />}
-        {tab === "services" && <Services locale={locale} me={me} />}
+        {tab === "services" && <Services locale={locale} me={me} converted={sp.converted} />}
         {tab === "commissions" && <Commissions locale={locale} me={me} />}
       </Container>
     </>
@@ -309,7 +311,7 @@ async function Deals({ locale, me, counts, status }: { locale: "ar" | "en"; me: 
   );
 }
 
-async function Services({ locale, me }: { locale: "ar" | "en"; me: User }) {
+async function Services({ locale, me, converted }: { locale: "ar" | "en"; me: User; converted?: string }) {
   const L = tr(locale);
   const ar = locale === "ar";
   const canAssign = can(subject(me), "service.assign", { serviceRequest: { requesterId: "", assignedToId: null } });
@@ -330,7 +332,21 @@ async function Services({ locale, me }: { locale: "ar" | "en"; me: User }) {
             </div>
             <div className="text-xs text-muted">{date(r.createdAt, locale)}</div>
           </td>
-          <td>{label(SERVICE_TYPE, r.type, locale)}</td>
+          <td>
+            {label(SERVICE_TYPE, r.type, locale)}
+            {/* MKT-03: تقييم → عرض مسودة بضغطة */}
+            {r.type === "VALUATION" && (
+              <form action={convertValuation.bind(null, locale, r.id)} className="mt-1">
+                <button className={`${btn.small} border border-brand text-brand`}>{L("حوّله لعرض مسودة", "Turn into a draft listing")}</button>
+              </form>
+            )}
+            {converted === r.id && (
+              <div className="mt-1 text-xs">
+                {r.requesterId ? L("وصل لصاحب الطلب إشعار بالرابط.", "The requester was notified with the link.") : L("ابعت الرابط ده لصاحب الطلب على واتساب:", "Send this link to the requester on WhatsApp:")}
+                <div dir="ltr" className="select-all font-mono">{`${siteUrl()}/${locale}/list-your-plot?from=${r.id}`}</div>
+              </div>
+            )}
+          </td>
           <td>
             {r.city ? label(CITY, r.city, locale) : "—"} {r.district && `· ${r.district}`}
             {r.plotCode && (

@@ -179,6 +179,7 @@ export const BUY_REQUEST_STATUS: Map = {
 export const SERVICE_TYPE: Map = {
   DEADLINE_RESCUE: ["إنقاذ المهلة", "Deadline rescue"],
   SITE_INSPECTION: ["معاينة", "Site inspection"],
+  VALUATION: ["تقييم قطعة", "Plot valuation"],
 };
 
 export const SERVICE_STATUS: Map = {

@@ -37,7 +37,7 @@ const FIELD_TEXT: Record<string, Record<string, [string, string]>> = {
   statement: { file: ["الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا", "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB"] },
 };
 
-export function Wizard({ locale, partner = false, districts = [] }: { locale: Locale; partner?: boolean; districts?: District[] }) {
+export function Wizard({ locale, partner = false, districts = [], initial }: { locale: Locale; partner?: boolean; districts?: District[]; initial?: Draft }) {
   const L = tr(locale);
   const ar = locale === "ar";
   const [step, setStep] = useState(0);
@@ -76,6 +76,9 @@ export function Wizard({ locale, partner = false, districts = [] }: { locale: Lo
         setFiles(d.files ?? {});
         setStep(Math.min(2, Math.max(0, d.step ?? 0)));
         setRestored(true);
+      } else if (initial) {
+        // MKT-03: بيانات طلب التقييم
+        setV((cur) => ({ ...cur, ...Object.fromEntries(Object.entries(initial).filter(([, x]) => x)) }));
       }
     } catch {
       /* مسودة بايظة — نتجاهلها */

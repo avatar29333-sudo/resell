@@ -159,6 +159,30 @@ export async function updateServiceRequest(locale: string, id: string, form: For
   revalidatePath(b);
 }
 
+/**
+ * MKT-03: طلب تقييم → عرض مسودة بضغطة: صاحب الطلب بيوصله رابط «اعرض قطعتك» متملي بالمدينة والحي والمساحة
+ * (لو عنده حساب بيوصله إشعار، ولو لأ الوسيط بيبعت الرابط على واتساب).
+ */
+export async function convertValuation(locale: string, id: string) {
+  const l = loc(locale);
+  const b = back(l, "services");
+  const user = await requireUser(l, b);
+  const sr = await db.serviceRequest.findUnique({ where: { id } });
+  if (!sr || sr.type !== "VALUATION") return;
+  await authorize(user, "service.update", { serviceRequest: { requesterId: sr.requesterId, assignedToId: sr.assignedToId } }, { back: b });
+  const link = `/list-your-plot?from=${sr.id}`;
+  await db.serviceRequest.update({ where: { id }, data: { status: "IN_PROGRESS", assignedToId: sr.assignedToId ?? user.id } });
+  await audit(user.id, "valuation.converted", "ServiceRequest", id, { link });
+  await notify([sr.requesterId], {
+    kind: "valuation.ready",
+    ar: ["جهّزنا لك عرض قطعتك", "البيانات اللي بعتها اتملت — كمّل السعر والمستندات."],
+    en: ["Your plot listing is ready to finish", "The details you sent are filled in — add the price and documents."],
+    link,
+  });
+  revalidatePath(`/${l}/broker`);
+  redirect(`${b}&converted=${id}`);
+}
+
 /** الأدمن / مسؤول الوسطاء: تغيير وسيط العرض (القسم 8) */
 export async function assignListingBroker(locale: string, listingId: string, form: FormData) {
   const user = await requireUser(loc(locale), back(locale));

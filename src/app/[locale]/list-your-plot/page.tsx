@@ -11,11 +11,23 @@ import { Wizard } from "./Wizard";
 
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "اعرض قطعتك", "List your plot", { noindex: true });
 
-export default async function ListYourPlotPage({ params }: { params: Promise<{ locale: string }> }) {
+export default async function ListYourPlotPage({ params, searchParams }: { params: Promise<{ locale: string }>; searchParams: Promise<{ from?: string }> }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const L = tr(locale);
-  const user = await requireUser(locale, `/${locale}/list-your-plot`);
+  const { from } = await searchParams;
+  const user = await requireUser(locale, `/${locale}/list-your-plot${from ? `?from=${encodeURIComponent(from)}` : ""}`);
+  // MKT-03: جاي من طلب تقييم → البيانات بتتملى (طلب صاحب الحساب نفسه بس: نفس الحساب أو نفس الرقم)
+  const sr = from ? await db.serviceRequest.findFirst({ where: { id: from, type: "VALUATION", OR: [{ requesterId: user.id }, { contactPhone: user.phone }] } }) : null;
+  const district = sr?.city && sr.district ? await db.district.findFirst({ where: { city: sr.city, nameAr: sr.district } }) : null;
+  const initial = sr
+    ? {
+        city: sr.city ?? "",
+        districtId: district?.id ?? "",
+        area: sr.message?.match(/(\d+(?:\.\d+)?)\s*(?:م²|m²)/)?.[1] ?? "",
+        paymentStatus: sr.message?.includes("مسددة بالكامل") || sr.message?.includes("fully paid") ? "FULLY_PAID" : "INSTALLMENTS",
+      }
+    : undefined;
   const allowed = can(subject(user), "listing.create", {}).allowed;
   const staff = !["CLIENT", "PARTNER_BROKER", "ADMIN"].includes(user.role);
 
@@ -34,6 +46,7 @@ export default async function ListYourPlotPage({ params }: { params: Promise<{ l
             <Wizard
               locale={locale}
               partner={user.role === "PARTNER_BROKER"}
+              initial={initial}
               districts={await db.district.findMany({ where: { active: true }, orderBy: [{ city: "asc" }, { sort: "asc" }], select: { id: true, city: true, nameAr: true, nameEn: true } })}
             />
           </Card>
