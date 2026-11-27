@@ -4,7 +4,7 @@
 import { stageIndex } from "../deal-machine";
 
 export type Role = "CLIENT" | "PARTNER_BROKER" | "BROKER" | "BROKER_LEAD" | "LAWYER" | "AGENT" | "FINANCE" | "ADMIN";
-export type Subject = { id: string; role: Role; accountLevel: "BASIC" | "VERIFIED"; status?: "ACTIVE" | "SUSPENDED"; clientEnabled?: boolean } | null;
+export type Subject = { id: string; role: Role; accountLevel: "BASIC" | "VERIFIED"; status?: "ACTIVE" | "SUSPENDED"; clientEnabled?: boolean; partnerAgreed?: boolean } | null;
 
 export type Ctx = {
   listing?: {
@@ -17,6 +17,10 @@ export type Ctx = {
     maxActiveDealStage?: number;
     /** كل المستندات المطلوبة (تخصيص، إيصالات، إفادة) معتمدة */
     requiredDocsApproved?: boolean;
+    /** PUB-01: المالك وافق على تفويض العرض (نموذج 1) */
+    form1Consented?: boolean;
+    /** PUB-03: المالك أكّد بالكود (لو العرض اتعمل نيابة عنه) */
+    ownerConfirmed?: boolean;
   };
   deal?: {
     buyerId: string;
@@ -90,6 +94,10 @@ const or = (...cs: Check[]): Check => (u, c) => cs.some((f) => f(u, c));
 const not = (f: Check): Check => (u, c) => !f(u, c);
 
 const KYC_TYPES = ["NATIONAL_ID", "PASSPORT", "SELFIE"];
+/** PUB-01 */
+const draftish = (c: Ctx) => ["DRAFT", "WITHDRAWN"].includes(c.listing!.status);
+const publishable = (_: Subject, c: Ctx) => c.listing!.status === "VERIFIED" && !!c.listing!.form1Consented && !!c.listing!.ownerConfirmed;
+
 const PLOT_TYPES = ["ALLOCATION_LETTER", "PAYMENT_RECEIPT", "AUTHORITY_STATEMENT"];
 /** سجلات الصفقة المشتركة بطبيعتها (نسخ العقود الموقّعة) */
 const DEAL_RECORDS = ["CONTRACT_PDF"];
@@ -169,6 +177,9 @@ export const ACTIONS = [
   "service.assign",
   "service.update",
   "buy_request.manage",
+  // PUB-01: نشر طلب شراء / طلب خدمة
+  "buy_request.create",
+  "service.create",
   // شغل المندوب (OPS-02)
   "service.site_report",
   "deal.authority_update",
@@ -199,26 +210,39 @@ const RULES: Record<Action, Rule[]> = {
   "user.suspend": [],
   "user.delete_self": [{ roles: ["CLIENT", "PARTNER_BROKER"], when: isSelf }],
 
+  // PUB-01 — جدول صلاحيات النشر النهائي (اختبار لكل خلية في publishing.test.ts)
+  // إنشاء مسودة: العميل (قطعته، حتى لو أساسي)، الشريك الموثّق (لعميله + تفويض)، الوسيط (نيابة عن عميل)، قائد الوسطاء
   "listing.create": [
-    { roles: ["CLIENT"], when: verified },
+    { roles: ["CLIENT"] },
     { roles: ["PARTNER_BROKER"], when: verified },
+    { roles: ["BROKER", "BROKER_LEAD"] },
   ],
   "listing.edit_draft": [{ roles: ["CLIENT", "PARTNER_BROKER"], when: or(isListingOwner, isListingSubmitter) }],
-  "listing.submit": [{ roles: ["CLIENT", "PARTNER_BROKER"], when: and(or(isListingOwner, isListingSubmitter), (_, c) => ["DRAFT", "WITHDRAWN"].includes(c.listing!.status)) }],
+  // الإرسال للمراجعة: العميل الموثّق + موافقة نموذج 1؛ الشريك + نموذج 10 + تأكيد المالك؛ الوسيط المسؤول؛ القائد
+  "listing.submit": [
+    { roles: ["CLIENT"], when: and(isListingOwner, verified, (_, c) => draftish(c) && !!c.listing!.form1Consented) },
+    { roles: ["PARTNER_BROKER"], when: and(isListingSubmitter, verified, (u, c) => draftish(c) && !!u?.partnerAgreed && !!c.listing!.ownerConfirmed && !!c.listing!.form1Consented) },
+    { roles: ["BROKER"], when: and(isListingBroker, (_, c) => draftish(c) && !!c.listing!.ownerConfirmed && !!c.listing!.form1Consented) },
+    { roles: ["BROKER_LEAD"], when: (_, c) => draftish(c) && !!c.listing!.ownerConfirmed && !!c.listing!.form1Consented },
+  ],
   "listing.edit_price": [{ roles: ["CLIENT", "PARTNER_BROKER"], when: or(isListingOwner, isListingSubmitter) }],
+  // سحب العرض: صاحب العرض بس (الشريك لأ)
   "listing.withdraw": [
     {
-      roles: ["CLIENT", "PARTNER_BROKER"],
-      when: and(or(isListingOwner, isListingSubmitter), (_, c) => (c.listing!.maxActiveDealStage ?? -1) < stageIndex("PRELIMINARY_CONTRACT")),
+      roles: ["CLIENT"],
+      when: and(isListingOwner, (_, c) => (c.listing!.maxActiveDealStage ?? -1) < stageIndex("PRELIMINARY_CONTRACT")),
     },
   ],
   "listing.send_to_lawyer": [{ roles: ["BROKER", "BROKER_LEAD"], when: isListingBroker }],
-  "listing.verify": [{ roles: ["BROKER", "BROKER_LEAD"], when: and(isListingBroker, (_, c) => c.listing!.status === "IN_REVIEW" && !!c.listing!.requiredDocsApproved) }],
-  "listing.publish": [{ roles: ["BROKER", "BROKER_LEAD"], when: and(isListingBroker, (_, c) => c.listing!.status === "VERIFIED") }],
-  "listing.pause": [
-    { roles: ["BROKER", "BROKER_LEAD"], when: isListingBroker },
-    { roles: ["LAWYER"], when: isListingLawyer },
+  // الاعتماد القانوني: المحامي المسند بس (الأدمن بتدخّل + سبب)
+  "listing.verify": [{ roles: ["LAWYER"], when: and(isListingLawyer, (_, c) => c.listing!.status === "IN_REVIEW" && !!c.listing!.requiredDocsApproved) }],
+  // النشر: الوسيط المسؤول بعد اعتماد المحامي وموافقة المالك؛ القائد على أي عرض
+  "listing.publish": [
+    { roles: ["BROKER"], when: and(isListingBroker, publishable) },
+    { roles: ["BROKER_LEAD"], when: publishable },
   ],
+  // إيقاف/إخفاء عرض منشور: الوسيط المسؤول، والقائد
+  "listing.pause": [{ roles: ["BROKER"], when: isListingBroker }, { roles: ["BROKER_LEAD"] }],
   "listing.view_code": [
     // PRIV-01: كود القطعة للمشتري بعد اتفاق العمولة + موافقة البائع على كشفه
     { roles: ["CLIENT", "PARTNER_BROKER"], when: or(isListingOwner, isListingSubmitter, and(isBuyer, (_, c) => !!c.deal?.commissionSigned && !!c.deal?.sellerDisclosed?.includes("plotCode") && isOpen(c))) },
@@ -361,6 +385,10 @@ const RULES: Record<Action, Rule[]> = {
     { roles: ["CLIENT", "PARTNER_BROKER"], when: (u, c) => c.serviceRequest?.requesterId === u.id },
   ],
   "buy_request.manage": [{ roles: ["CLIENT", "PARTNER_BROKER"], when: isSelf }],
+  // طلب شراء: العميل (الأساسي بيظهر بعد مراجعة)، الشريك لعميله، الوسيط، القائد — المحامي لأ
+  "buy_request.create": [{ roles: ["CLIENT", "PARTNER_BROKER", "BROKER", "BROKER_LEAD"] }],
+  // طلب خدمة (إنقاذ مهلة، مراجعة مستندات): نفس الناس
+  "service.create": [{ roles: ["CLIENT", "PARTNER_BROKER", "BROKER", "BROKER_LEAD"] }],
 
   "reports.view": [{ roles: ["BROKER", "BROKER_LEAD", "LAWYER", "FINANCE"] }],
   "fx.manual": [{ roles: ["FINANCE"] }],
@@ -404,6 +432,8 @@ const NATIVE_ADMIN: Action[] = [
   "audit.view",
   "audit.view_money",
   "storage.manage",
+  "buy_request.create",
+  "service.create",
   "export.deal",
   "export.user",
   "service.view_queue",

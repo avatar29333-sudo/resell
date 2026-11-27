@@ -42,7 +42,8 @@ export async function pendingConsents(user: User): Promise<PendingConsent[]> {
     if (p && !(await consentedTo(user.id, "partner_agreement", { versionId: p.v.id }))) out.push({ key: "partner_agreement", title: p.v.template.titleAr, versionId: p.v.id, version: p.v.version, subjectId: null, text: p.text, ok: p.ok });
   }
   // نموذج 1 — تفويض عرض لكل قطعة معروضة
-  const listings = await db.listing.findMany({ where: { sellerId: user.id, status: { in: ["IN_REVIEW", "VERIFIED", "PUBLISHED"] } }, include: { plot: true } });
+  // عروضه هو بنفسه (عروض النيابة المالك بيأكّدها بالكود من رابط الرسالة)
+  const listings = await db.listing.findMany({ where: { sellerId: user.id, status: { in: ["DRAFT", "IN_REVIEW", "VERIFIED", "PUBLISHED"] }, authorizationConsentAt: null, OR: [{ submittedById: null }, { submittedById: user.id }] }, include: { plot: true } });
   for (const l of listings) {
     if (await consentedTo(user.id, "listing_authorization", { listingId: l.id })) continue;
     const r = await rendered("listing_authorization", user, {

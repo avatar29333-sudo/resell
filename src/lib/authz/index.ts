@@ -10,7 +10,7 @@ export type { Action, Ctx } from "./policy";
 
 /** مستخدم قاعدة البيانات → الشكل اللي السياسة بتفهمه */
 export function subject(u: User | null): Subject {
-  return u ? { id: u.id, role: u.role, accountLevel: u.accountLevel, status: u.status, clientEnabled: u.clientEnabled } : null;
+  return u ? { id: u.id, role: u.role, accountLevel: u.accountLevel, status: u.status, clientEnabled: u.clientEnabled, partnerAgreed: !!u.partnerAgreedAt } : null;
 }
 
 const PLOT_REQUIRED = ["ALLOCATION_LETTER", "PAYMENT_RECEIPT", "AUTHORITY_STATEMENT"] as const;
@@ -26,6 +26,8 @@ export function listingCtx(l: {
   status: string;
   documents?: DocLite[];
   deals?: { stage: string; status: string }[];
+  authorizationConsentAt?: Date | null;
+  ownerConfirmedAt?: Date | null;
 }): NonNullable<Ctx["listing"]> {
   const current = (l.documents ?? []).filter((d) => d.status !== "SUPERSEDED");
   return {
@@ -35,6 +37,9 @@ export function listingCtx(l: {
     assignedLawyerId: l.assignedLawyerId,
     status: l.status,
     requiredDocsApproved: PLOT_REQUIRED.every((t) => current.some((d) => d.type === t && d.status === "APPROVED")),
+    // PUB-01: موافقة المالك على نموذج 1، وتأكيده لو حد عرض نيابة عنه
+    form1Consented: !!l.authorizationConsentAt,
+    ownerConfirmed: !l.submittedById || l.submittedById === l.sellerId || !!l.ownerConfirmedAt,
     maxActiveDealStage: Math.max(-1, ...(l.deals ?? []).filter((d) => d.status === "ACTIVE" || d.status === "ON_HOLD").map((d) => stageIndex(d.stage))),
   };
 }

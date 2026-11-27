@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { requireActionCode } from "@/lib/action-otp";
 import { pendingConsents, recordClickwrap } from "@/lib/clickwrap";
+import { submitListingIfReady } from "@/lib/listing-submit";
 import { isLocale } from "@/i18n/config";
 
 /** CON-03: موافقة إلكترونية على نموذج (مربع + كود) — شروط الاستخدام، 1، 9، 10 */
@@ -19,6 +20,13 @@ export async function acceptClickwrap(locale: string, key: string, versionId: st
   await requireActionCode(user, "consent.accept", subjectId, { versionId }, form, `/${l}/account`);
   await recordClickwrap(user, { kind: key, versionId, title: item!.title, version: item!.version, text: item!.text, listingId: key === "listing_authorization" ? subjectId : null, subjectId });
   if (key === "terms_of_use") await db.user.update({ where: { id: user.id }, data: { termsAcceptedAt: new Date() } });
+  // PUB-01: موافقة نموذج 1 → العرض بيتبعت للمراجعة لو صاحبه موثّق
+  if (key === "listing_authorization" && subjectId) {
+    await db.listing.update({ where: { id: subjectId }, data: { authorizationConsentAt: new Date() } });
+    await submitListingIfReady(subjectId, user.id);
+  }
+  // PUB-03: موافقة الشريك على نموذج 10 (مرة واحدة)
+  if (key === "partner_agreement") await db.user.update({ where: { id: user.id }, data: { partnerAgreedAt: new Date() } });
   revalidatePath(`/${l}/account`);
   redirect(`/${l}/account?ok=consent#consents`);
 }

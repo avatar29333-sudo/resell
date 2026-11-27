@@ -131,7 +131,7 @@ export async function GET(req: Request) {
   if (fresh.length) {
     const rate = await latestRate();
     const usd = toNum(rate?.sell ?? 50);
-    const reqs = await db.buyRequest.findMany({ where: { status: "ACTIVE", alertConsentAt: { not: null }, unsubToken: { not: null } }, include: { buyer: { select: { id: true, phone: true, email: true, locale: true, status: true } } } });
+    const reqs = await db.buyRequest.findMany({ where: { status: "ACTIVE", approvedAt: { not: null }, alertConsentAt: { not: null }, unsubToken: { not: null } }, include: { buyer: { select: { id: true, phone: true, email: true, locale: true, status: true } } } });
     const matchesList = reqs.flatMap((r) =>
       r.buyer.status !== "ACTIVE" || (r.lastAlertAt && r.lastAlertAt > since)
         ? []

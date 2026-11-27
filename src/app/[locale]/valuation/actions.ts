@@ -6,6 +6,7 @@ import { allCities } from "@/lib/cities";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
+import { can, subject } from "@/lib/authz";
 import { isValidPhone, normalizePhone } from "@/lib/format";
 import { CITY_KEYS } from "@/lib/labels";
 import { idsByRole, notify } from "@/lib/notifications";
@@ -34,6 +35,8 @@ export async function submitValuation(locale: string, _prev: ValuationState, for
   if (Object.keys(fe).length) return { error: ar ? "راجع الخانات المعلّمة" : "Please check the highlighted fields", fieldErrors: fe };
 
   const user = await getCurrentUser();
+  // PUB-01: طلب خدمة — للعملاء والشركاء والوسطاء (المحامي والفريق التاني لأ)
+  if (user && !can(subject(user), "service.create").allowed) return { error: ar ? "حسابك ما يقدرش يطلب خدمة." : "Your account can't request a service." };
   const source = await readAttribution();
   const req = await db.serviceRequest.create({
     data: {

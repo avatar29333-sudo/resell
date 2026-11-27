@@ -35,10 +35,7 @@ export async function moveListing(locale: string, listingId: string, to: "VERIFI
   await authorize(user, action, { listing: listingCtx(l) }, { back: back(locale), reason: overrideReason(form) });
   const from = { VERIFIED: ["IN_REVIEW"], PUBLISHED: ["VERIFIED"], DRAFT: ["IN_REVIEW", "VERIFIED", "PUBLISHED"] }[to];
   if (!from.includes(l.status)) return;
-  // CON-03: النشر بعد موافقة المالك على تفويض العرض (نموذج 1) بس
-  if (to === "PUBLISHED" && !(await db.consentRecord.findFirst({ where: { kind: "listing_authorization", listingId, userId: l.sellerId }, select: { id: true } }))) {
-    redirect(`${back(locale)}${back(locale).includes("?") ? "&" : "?"}err=authorization`);
-  }
+  // PUB-01: شرط موافقة المالك (نموذج 1) وتأكيده بقى جوه السياسة نفسها (listing.publish)
   await db.listing.update({ where: { id: listingId }, data: { status: to, ...(to === "PUBLISHED" ? { publishedAt: new Date() } : {}) } });
   await audit(user.id, `listing.${to.toLowerCase()}`, "Listing", listingId, { from: l.status, to });
 
@@ -67,7 +64,7 @@ async function notifyMatchingBuyers(listingId: string) {
   const l = await db.listing.findUniqueOrThrow({ where: { id: listingId }, include: { plot: true } });
   const rate = await latestRate();
   const facts = { city: l.plot.city, areaSqm: toNum(l.plot.areaSqm), totalEgp: totalEgp(l, toNum(rate?.sell ?? 50)) };
-  const reqs = await db.buyRequest.findMany({ where: { status: "ACTIVE", buyerId: { not: l.sellerId } } });
+  const reqs = await db.buyRequest.findMany({ where: { status: "ACTIVE", approvedAt: { not: null }, buyerId: { not: l.sellerId } } });
   const buyers = reqs
     .filter((r) =>
       matches(
@@ -204,4 +201,22 @@ export async function assignListingBroker(locale: string, listingId: string, for
     link: `/broker?tab=queue`,
   });
   revalidatePath(`/${loc(locale)}/broker`);
+}
+
+/** PUB-02: الوسيط يستلم عرض غير مسند (بيتسجل) — إلا لو هو طرف فيه (تعارض مصالح) */
+export async function claimListing(locale: string, listingId: string) {
+  const user = await requireUser(loc(locale), back(locale), ["BROKER", "BROKER_LEAD"]);
+  const l = await db.listing.findUnique({ where: { id: listingId }, select: { assignedBrokerId: true, sellerId: true, submittedById: true } });
+  if (!l || l.assignedBrokerId || l.sellerId === user.id || l.submittedById === user.id) redirect(`${back(locale)}&scope=unassigned`);
+  await db.listing.update({ where: { id: listingId }, data: { assignedBrokerId: user.id } });
+  await audit(user.id, "listing.claim", "Listing", listingId, { before: null, after: user.id });
+  redirect(`${back(locale)}&scope=mine`);
+}
+
+/** PUB-01: مراجعة طلب شراء عميل أساسي قبل ما يظهر في المطابقة */
+export async function approveBuyRequest(locale: string, id: string) {
+  const user = await requireUser(loc(locale), back(locale), ["BROKER", "BROKER_LEAD"]);
+  await db.buyRequest.updateMany({ where: { id, approvedAt: null }, data: { approvedAt: new Date() } });
+  await audit(user.id, "buy_request.approved", "BuyRequest", id);
+  redirect(back(locale));
 }

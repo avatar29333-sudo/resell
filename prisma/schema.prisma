@@ -220,8 +220,13 @@ enum ServiceRequestStatus {
 // ───────────────────────── الجداول ─────────────────────────
 
 model User {
+  /// PUB-03: موافقة الشريك على نموذج 10 (مرة واحدة قبل أول عرض)
+  partnerAgreedAt    DateTime?
+  referredDeals      Deal[]              @relation("DealPartnerReferral")
+  partnerReferrals   PartnerReferral[]   @relation("ReferralPartner")
+  referredAsBuyer    PartnerReferral[]   @relation("ReferralBuyer")
   /// REL-03: موظف مسموح له يتعامل كعميل (قاعدة تعارض المصالح بتمنع إسناده لصفقته)
-  clientEnabled    Boolean          @default(false)
+  clientEnabled      Boolean             @default(false)
   exportJobs         ExportJob[]
   approvedTemplates  TemplateVersion[]   @relation("TemplateLawyer")
   bankAccounts       BankAccount[]
@@ -383,34 +388,40 @@ model District {
 }
 
 model Listing {
-  id                 String        @id @default(cuid())
-  plotId             String
-  plot               Plot          @relation(fields: [plotId], references: [id])
-  sellerId           String
-  seller             User          @relation("Seller", fields: [sellerId], references: [id])
-  priceType          PriceType
+  /// PUB-01/03: موافقة المالك على تفويض العرض (نموذج 1) + تأكيده بكود لما شريك/وسيط يعرض نيابة عنه
+  authorizationConsentAt DateTime?
+  ownerConfirmedAt       DateTime?
+  ownerConfirmCodeHash   String?
+  ownerConfirmExpiresAt  DateTime?
+  partnerReferrals       PartnerReferral[]
+  id                     String            @id @default(cuid())
+  plotId                 String
+  plot                   Plot              @relation(fields: [plotId], references: [id])
+  sellerId               String
+  seller                 User              @relation("Seller", fields: [sellerId], references: [id])
+  priceType              PriceType
   //شامل: السعر الكلي. مدفوع + أوفر: قيمة الأوفر بس.
-  price              Decimal       @db.Decimal(14, 2)
-  currency           Currency      @default(EGP)
+  price                  Decimal           @db.Decimal(14, 2)
+  currency               Currency          @default(EGP)
   //في حالة «مدفوع بالدولار + أوفر»: المبلغ اللي اتدفع للجهاز بالدولار
-  paidAmountUsd      Decimal?      @db.Decimal(14, 2)
-  status             ListingStatus @default(DRAFT)
-  publishedAt        DateTime?
+  paidAmountUsd          Decimal?          @db.Decimal(14, 2)
+  status                 ListingStatus     @default(DRAFT)
+  publishedAt            DateTime?
   // PERM-04: الإسناد — الوسيط والمحامي المسؤولين عن العرض
-  assignedBrokerId   String?
-  assignedBroker     User?         @relation("ListingBroker", fields: [assignedBrokerId], references: [id])
-  assignedLawyerId   String?
-  assignedLawyer     User?         @relation("ListingLawyer", fields: [assignedLawyerId], references: [id])
+  assignedBrokerId       String?
+  assignedBroker         User?             @relation("ListingBroker", fields: [assignedBrokerId], references: [id])
+  assignedLawyerId       String?
+  assignedLawyer         User?             @relation("ListingLawyer", fields: [assignedLawyerId], references: [id])
   // PERM-05: السمسار الشريك اللي رفع العرض نيابة عن عميله + موافقة العميل
   /// MKT-02: الأقساط الباقية للجهاز بالدولار (المشتري بيكمّلها)
-  remainingUsd       Decimal?      @db.Decimal(14, 2)
+  remainingUsd           Decimal?          @db.Decimal(14, 2)
   /// DATA-03: إفادة الجهاز انتهت والعرض «محتاج تحديث»
-  statementExpiredAt DateTime?
-  submittedById      String?
-  submittedBy        User?         @relation("ListingSubmitter", fields: [submittedById], references: [id])
-  clientConsentAt    DateTime?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  statementExpiredAt     DateTime?
+  submittedById          String?
+  submittedBy            User?             @relation("ListingSubmitter", fields: [submittedById], references: [id])
+  clientConsentAt        DateTime?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
 
   documents Document[]
   deals     Deal[]
@@ -517,6 +528,9 @@ model Review {
 
 /// الصفقة: الانتقال بين المراحل له شروط مبرمجة (state machine في الخادم)
 model Deal {
+  /// PUB-03: الشريك اللي أحال المشتري
+  referredByPartnerId String?
+  referredByPartner   User?               @relation("DealPartnerReferral", fields: [referredByPartnerId], references: [id])
   /// BANK-01: حساب كل طرف للاستلام/الرد — بيتثبت عند توقيع نموذج 3
   buyerBankAccountId  String?
   buyerBankAccount    BankAccount?        @relation("DealBuyerBank", fields: [buyerBankAccountId], references: [id])
@@ -743,6 +757,8 @@ model PriceIndex {
 
 /// طلبات الشراء — للمطابقة الآلية مع العروض
 model BuyRequest {
+  /// PUB-01: طلب العميل الأساسي بيظهر بعد مراجعة؛ الموثّق مباشر
+  approvedAt     DateTime?
   id             String           @id @default(cuid())
   buyerId        String
   buyer          User             @relation(fields: [buyerId], references: [id])
@@ -1240,4 +1256,20 @@ model ExportJob {
 
   @@index([kind, subjectId])
   @@index([requestedById])
+}
+
+/// PUB-03: الشريك بيحيل مشتري على عرض (بموافقة المشتري) — بيتسجل على الصفقة لما المشتري يبدأها
+model PartnerReferral {
+  id             String   @id @default(cuid())
+  partnerId      String
+  partner        User     @relation("ReferralPartner", fields: [partnerId], references: [id])
+  listingId      String
+  listing        Listing  @relation(fields: [listingId], references: [id])
+  buyerId        String
+  buyer          User     @relation("ReferralBuyer", fields: [buyerId], references: [id])
+  buyerConsentAt DateTime
+  dealId         String?
+  createdAt      DateTime @default(now())
+
+  @@unique([listingId, buyerId])
 }

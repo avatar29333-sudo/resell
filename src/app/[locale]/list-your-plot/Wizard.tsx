@@ -13,7 +13,7 @@ import { createListing, uploadDraftFile, type ListState } from "./actions";
 
 type District = { id: string; city: string; nameAr: string; nameEn: string };
 type Round = { id: string; cityId: string | null; nameAr: string; nameEn: string };
-const TEXT_FIELDS = ["city", "districtId", "offeringRoundId", "code", "area", "paymentStatus", "deadline", "construction", "priceType", "paidUsd", "price", "remainingUsd"] as const;
+const TEXT_FIELDS = ["city", "districtId", "offeringRoundId", "ownerName", "ownerPhone", "ownerNationalId", "code", "area", "paymentStatus", "deadline", "construction", "priceType", "paidUsd", "price", "remainingUsd"] as const;
 const FILES = [
   { name: "allocation", required: true },
   { name: "receipts", required: false },
@@ -340,6 +340,28 @@ export function Wizard({
             <span>{L("مستندات أخرى (اختياري)", "Other documents (optional)")}</span>
             <MultiUpload locale={locale} />
           </div>
+          {partner && (
+            <fieldset className="flex flex-col gap-3 border border-line p-3">
+              {/* PUB-03: بيانات المالك + التفويض الموقّع (نموذج 1 باسمه) — المالك هيوصله كود يأكّد بيه */}
+              <legend className="px-1 font-semibold">{L("بيانات المالك", "Owner details")}</legend>
+              <label className={labelCls}>
+                {L("اسم المالك (زي البطاقة)", "Owner's name (as on ID)")}
+                <input name="ownerName" required minLength={5} value={v.ownerName ?? ""} onChange={set("ownerName")} className={field} />
+              </label>
+              <label className={labelCls}>
+                {L("موبايل المالك (هيوصله كود التأكيد)", "Owner's mobile (receives the confirmation code)")}
+                <input name="ownerPhone" required dir="ltr" inputMode="tel" value={v.ownerPhone ?? ""} onChange={set("ownerPhone")} placeholder="+20 10 …" className={`${field} text-start`} />
+              </label>
+              <label className={labelCls}>
+                {L("رقم البطاقة (14 رقم) أو الباسبور", "National ID (14 digits) or passport")}
+                <input name="ownerNationalId" required dir="ltr" value={v.ownerNationalId ?? ""} onChange={set("ownerNationalId")} className={`${field} text-start`} />
+              </label>
+              <div className={labelCls}>
+                <span>{L("التفويض الموقّع من المالك (نموذج 1)", "Authorization signed by the owner (form 1)")}</span>
+                <MultiUpload locale={locale} single name="authDocIds" titleRequired={false} defaultTitle={L("تفويض المالك", "Owner authorization")} />
+              </div>
+            </fieldset>
+          )}
           {partner && (
             <label className="flex min-h-11 items-center gap-2 text-sm">
               <input type="checkbox" name="clientConsent" className="size-4" />

@@ -1,3 +1,4 @@
+import { getSetting } from "@/lib/settings";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
@@ -34,8 +35,10 @@ export default async function PartnerPage({ params }: { params: Promise<{ locale
     },
     orderBy: { createdAt: "desc" },
   });
-  const sharePct = me.role === "PARTNER_BROKER" ? toNum(me.partnerSharePct ?? 0) : null;
-  const closed = listings.flatMap((l) => l.deals.filter((d) => d.status === "COMPLETED").map((d) => ({ d, pct: toNum(l.submittedBy?.partnerSharePct ?? 0) })));
+  // PUB-03: نسبة الشريك من إعداداته، وإلا الافتراضي من إعدادات الأدمن (مش 0٪)
+  const defaultShare = (await getSetting("partner.defaultSharePct")).value;
+  const sharePct = me.role === "PARTNER_BROKER" ? (me.partnerSharePct != null ? toNum(me.partnerSharePct) : defaultShare) : null;
+  const closed = listings.flatMap((l) => l.deals.filter((d) => d.status === "COMPLETED").map((d) => ({ d, pct: l.submittedBy?.partnerSharePct != null ? toNum(l.submittedBy.partnerSharePct) : defaultShare })));
   const shareOf = (d: (typeof closed)[number]["d"], pct: number) => (d.commission ? ((toNum(d.commission.sellerAmount) + toNum(d.commission.buyerAmount)) * pct) / 100 : 0);
   const earned = closed.reduce((s, x) => s + shareOf(x.d, x.pct), 0);
 
@@ -87,7 +90,7 @@ export default async function PartnerPage({ params }: { params: Promise<{ locale
                           );
                         })}
                   </td>
-                  <td>{money(l.deals.filter((d) => d.status === "COMPLETED").reduce((s, d) => s + shareOf(d, toNum(l.submittedBy?.partnerSharePct ?? 0)), 0), "EGP", locale)}</td>
+                  <td>{money(l.deals.filter((d) => d.status === "COMPLETED").reduce((s, d) => s + shareOf(d, l.submittedBy?.partnerSharePct != null ? toNum(l.submittedBy.partnerSharePct) : defaultShare), 0), "EGP", locale)}</td>
                 </tr>
               ))}
             </Table>

@@ -30,9 +30,9 @@ import { AdminReason } from "@/components/AdminReason";
 import { pageMeta } from "@/lib/meta";
 import { convertValuation } from "./actions";
 import { siteUrl } from "@/lib/meta";
-import { assignListingBroker, kycDecision, moveListing, sendDocsToLawyer, updateServiceRequest } from "./actions";
+import { approveBuyRequest, assignListingBroker, claimListing, kycDecision, moveListing, sendDocsToLawyer, updateServiceRequest } from "./actions";
 
-type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string; converted?: string }> };
+type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string; converted?: string; scope?: string }> };
 
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "لوحة الوسيط", "Broker dashboard", { noindex: true });
 
@@ -84,7 +84,7 @@ export default async function BrokerPage({ params, searchParams }: Props) {
           ]}
         />
 
-        {tab === "queue" && <Queue locale={locale} me={me} />}
+        {tab === "queue" && <Queue locale={locale} me={me} scope={sp.scope} />}
         {tab === "deals" && <Deals locale={locale} me={me} counts={counts} status={sp.status} />}
         {tab === "services" && <Services locale={locale} me={me} converted={sp.converted} />}
         {tab === "commissions" && <Commissions locale={locale} me={me} />}
@@ -93,14 +93,19 @@ export default async function BrokerPage({ params, searchParams }: Props) {
   );
 }
 
-async function Queue({ locale, me }: { locale: "ar" | "en"; me: User }) {
+async function Queue({ locale, me, scope: scopeRaw }: { locale: "ar" | "en"; me: User; scope?: string }) {
   const L = tr(locale);
   const ar = locale === "ar";
   const isAdmin = me.role === "ADMIN";
   const canAssign = can(subject(me), "listing.assign", {}).allowed;
+  // PUB-02: «مسند لي» افتراضياً + «غير مسند» (يقدر يستلمه)؛ «الكل» للقائد والأدمن
+  const seesAll = me.role === "BROKER_LEAD" || isAdmin;
+  const scope = scopeRaw === "unassigned" || (scopeRaw === "all" && seesAll) ? scopeRaw : "mine";
+  const scopeWhere = scope === "unassigned" ? { assignedBrokerId: null } : scope === "all" ? {} : { assignedBrokerId: me.id };
+  const pendingBuys = await db.buyRequest.findMany({ where: { approvedAt: null, status: "ACTIVE" }, include: { buyer: { select: { name: true } } }, orderBy: { createdAt: "asc" }, take: 30 });
   const [listings, kyc, brokers] = await Promise.all([
     db.listing.findMany({
-      where: { AND: [scopePrivateListingsFor(me), { status: { in: ["IN_REVIEW", "VERIFIED"] } }] },
+      where: { AND: [scope === "unassigned" ? {} : scopePrivateListingsFor(me), scopeWhere, { status: { in: ["IN_REVIEW", "VERIFIED"] } }] },
       include: { plot: true, seller: true, assignedBroker: true, documents: { where: { status: { not: "SUPERSEDED" } } }, deals: { select: { stage: true, status: true } } },
       orderBy: { createdAt: "asc" },
     }),
@@ -109,7 +114,37 @@ async function Queue({ locale, me }: { locale: "ar" | "en"; me: User }) {
   ]);
   return (
     <>
+      {pendingBuys.length > 0 && (
+        <Card title={L("طلبات شراء مستنية المراجعة (عملاء أساسيين)", "Buy requests awaiting review (basic clients)")}>
+          <ul className="flex flex-col divide-y divide-line text-sm">
+            {pendingBuys.map((b) => (
+              <li key={b.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span>
+                  {b.buyer.name} — {b.cities.map((c) => label(CITY, c, locale)).join("، ")}
+                  {b.budgetMax ? ` — ${num(b.budgetMax, locale)} ${L("ج.م", "EGP")}` : ""}
+                </span>
+                <form action={approveBuyRequest.bind(null, locale, b.id)}>
+                  <button className={`${btn.small} bg-ok text-white`}>{L("اعتمد الطلب", "Approve")}</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       <Card title={L("العروض", "Listings")}>
+        <nav aria-label={L("فلتر الطابور", "Queue filter")} className="flex flex-wrap gap-2">
+          {(
+            [
+              ["mine", L("مسند لي", "Assigned to me")],
+              ["unassigned", L("غير مسند", "Unassigned")],
+              ...(seesAll ? ([["all", L("الكل", "All")]] as const) : []),
+            ] as const
+          ).map(([k, t]) => (
+            <Link key={k} href={`/${locale}/broker?tab=queue&scope=${k}`} aria-current={scope === k ? "page" : undefined} className={`inline-flex min-h-11 items-center border px-3 text-sm font-semibold ${scope === k ? "border-navy bg-navy text-white" : "border-line"}`}>
+              {t}
+            </Link>
+          ))}
+        </nav>
         {listings.length === 0 ? (
           <Empty>{L("مفيش عروض مسندة ليك في الطابور.", "No listings assigned to you in the queue.")}</Empty>
         ) : (
@@ -125,6 +160,11 @@ async function Queue({ locale, me }: { locale: "ar" | "en"; me: User }) {
               return (
                 <tr key={l.id}>
                   <td>
+                    {!l.assignedBroker && (me.role === "BROKER" || me.role === "BROKER_LEAD") && (
+                      <form action={claimListing.bind(null, locale, l.id)} className="mb-1">
+                        <button className={`${btn.small} border border-brand text-brand`}>{L("استلمه", "Claim")}</button>
+                      </form>
+                    )}
                     <Link href={`/${locale}/listings/${l.id}`} className="font-semibold text-brand">
                       {label(CITY, l.plot.city, locale)} — {districtName(l.plot, locale)}
                     </Link>

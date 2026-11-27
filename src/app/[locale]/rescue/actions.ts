@@ -4,6 +4,7 @@ import { allCities } from "@/lib/cities";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
+import { can, subject } from "@/lib/authz";
 import { fileFromForm, saveFile } from "@/lib/storage";
 import { isValidPhone, normalizePhone } from "@/lib/format";
 import { CITY_KEYS } from "@/lib/labels";
@@ -34,6 +35,8 @@ export async function submitRescue(locale: string, _prev: RescueState, form: For
   if (Object.keys(fieldErrors).length) return { error: ar ? "راجع الخانات المعلّمة" : "Please check the highlighted fields", fieldErrors };
 
   const user = await getCurrentUser();
+  // PUB-01: طلب خدمة — للعملاء والشركاء والوسطاء (المحامي والفريق التاني لأ)
+  if (user && !can(subject(user), "service.create").allowed) return { error: ar ? "حسابك ما يقدرش يطلب خدمة." : "Your account can't request a service." };
   const source = await readAttribution(); // MKT-10
   const req = await db.serviceRequest.create({
     data: {

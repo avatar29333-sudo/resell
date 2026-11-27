@@ -13,7 +13,7 @@ const MAX = 20 * 1024 * 1024;
 const OK_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
 const isHeic = (f: File) => /image\/hei[cf]/i.test(f.type) || /\.(heic|heif)$/i.test(f.name);
 
-export function MultiUpload({ locale, single = false, label, titleRequired = true, defaultTitle }: { locale: string; single?: boolean; label?: string; titleRequired?: boolean; defaultTitle?: string }) {
+export function MultiUpload({ locale, single = false, label, titleRequired = true, defaultTitle, name = "docIds" }: { locale: string; single?: boolean; label?: string; titleRequired?: boolean; defaultTitle?: string; name?: string }) {
   const ar = locale !== "en";
   const L = (a: string, e: string) => (ar ? a : e);
   const [items, setItems] = useState<Item[]>([]);
@@ -128,7 +128,7 @@ export function MultiUpload({ locale, single = false, label, titleRequired = tru
               </div>
               {x.status === "done" && x.id && (
                 <>
-                  <input type="hidden" name="docIds" value={x.id} />
+                  <input type="hidden" name={name} value={x.id} />
                   <label className="flex flex-col gap-1">
                     {L("عنوان المستند", "Document title")}
                     <input

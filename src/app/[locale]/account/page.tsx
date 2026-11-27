@@ -164,7 +164,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
         {sp.welcome && <Notice tone="green">{L("حسابك اتعمل. وثّق هويتك عشان تقدر تبيع أو تشتري.", "Your account is ready. Verify your ID to buy or sell.")}</Notice>}
         {sp.listed && <ClearDraft />}
         <TrackEvent name={sp.ev} />
-        {sp.listed && <Notice tone="green">{L("قطعتك وصلت وهي دلوقتي قيد المراجعة. هنبلغك على واتساب.", "Your plot was received and is now in review. We'll update you on WhatsApp.")}</Notice>}
+        {sp.listed === "1" && <Notice tone="green">{L("قطعتك اتسجلت كمسودة. وافق على «تفويض عرض القطعة» تحت وهتتبعت للمراجعة على طول (لو حسابك موثّق).", "Your plot was saved as a draft. Accept the listing authorization below and it goes to review right away (if your account is verified).")}</Notice>}
+        {sp.listed === "owner" && <Notice tone="green">{L("العرض اتسجل، وبعتنا للمالك كود على واتساب وSMS — أول ما يأكّد هيتبعت للمراجعة.", "The listing was saved and the owner got a code by WhatsApp and SMS — it goes to review once they confirm.")}</Notice>}
         {sp.rescue && (
           <Notice tone="amber">
             {L("تاريخ مهلة البناء اللي كتبته عدّى — العرض اتقبل ومتعلّم «المهلة خلصت».", "The build deadline you entered has passed — the listing was accepted and marked “deadline passed”.")}{" "}

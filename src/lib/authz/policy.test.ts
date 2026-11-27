@@ -59,11 +59,13 @@ describe("SEC-05 — الصفقة حسب الإسناد", () => {
 
 describe("SEC-03 — التوثيق بعد المحامي", () => {
   it("مستند واحد مش معتمد = ما ينفعش يتوثّق", () => {
-    expect(can(u("broker", "BROKER"), "listing.verify", { listing: listing({ requiredDocsApproved: false }) }).allowed).toBe(false);
-    expect(can(u("broker", "BROKER"), "listing.verify", { listing: listing() }).allowed).toBe(true);
+    // PUB-01: الاعتماد القانوني بقى للمحامي المسند
+    expect(can(u("lawyer", "LAWYER"), "listing.verify", { listing: listing({ requiredDocsApproved: false }) }).allowed).toBe(false);
+    expect(can(u("lawyer", "LAWYER"), "listing.verify", { listing: listing() }).allowed).toBe(true);
+    expect(can(u("broker", "BROKER"), "listing.verify", { listing: listing() }).allowed).toBe(false);
   });
   it("الوسيط مش المسند ما يوثّقش", () => {
-    expect(can(u("other", "BROKER"), "listing.verify", { listing: listing() }).allowed).toBe(false);
+    expect(can(u("other", "LAWYER"), "listing.verify", { listing: listing() }).allowed).toBe(false);
   });
 });
 
@@ -152,8 +154,9 @@ describe("قواعد ثابتة (5.9)", () => {
 });
 
 describe("حالة الحساب (القسم 6)", () => {
-  it("BASIC ما يعرضش قطعة ولا يبدي اهتمام", () => {
-    expect(can(u("c", "CLIENT", "BASIC"), "listing.create").allowed).toBe(false);
+  it("BASIC يعمل مسودة بس (ما يبعتهاش للمراجعة) وما يبديش اهتمام", () => {
+    expect(can(u("c", "CLIENT", "BASIC"), "listing.create").allowed).toBe(true);
+    expect(can(u("seller", "CLIENT", "BASIC"), "listing.submit", { listing: listing({ status: "DRAFT", form1Consented: true }) }).allowed).toBe(false);
     expect(can(u("c", "CLIENT", "BASIC"), "deal.create", { listing: listing({ status: "PUBLISHED" }) }).allowed).toBe(false);
     expect(can(u("c", "CLIENT"), "deal.create", { listing: listing({ status: "PUBLISHED" }) }).allowed).toBe(true);
     expect(can(u("seller", "CLIENT"), "deal.create", { listing: listing({ status: "PUBLISHED" }) }).allowed).toBe(false);

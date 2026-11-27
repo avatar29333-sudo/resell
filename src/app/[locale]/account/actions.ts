@@ -54,13 +54,14 @@ export async function createBuyRequest(locale: string, form: FormData) {
   await allCities(); // GEO-01: قايمة المدن من الجدول
   const l = loc(locale);
   const user = await requireUser(l, `/${l}/account`);
-  await authorize(user, "buy_request.manage", { target: { id: user.id } }, { back: `/${l}/account` });
+  // PUB-01: نشر طلب شراء — العميل الأساسي بيظهر بعد مراجعة، الموثّق مباشر
+  await authorize(user, "buy_request.create", { target: { id: user.id } }, { back: `/${l}/account` });
   const cities = form.getAll("cities").map(String).filter((c) => CITY_KEYS.includes(c as never)) as City[];
   const n = (k: string) => (Number(form.get(k)) > 0 ? Number(form.get(k)) : null);
   // MKT-13: تنبيهات واتساب بموافقة صريحة بس (الخانة مش متعلّمة من الأول) + رابط إيقاف
   const alerts = form.get("alerts") === "on";
   const br = await db.buyRequest.create({
-    data: { buyerId: user.id, cities, minAreaSqm: n("minArea"), maxAreaSqm: n("maxArea"), budgetMax: n("budget"), ...(alerts ? { alertConsentAt: new Date(), unsubToken: newToken() } : {}) },
+    data: { buyerId: user.id, cities, minAreaSqm: n("minArea"), maxAreaSqm: n("maxArea"), budgetMax: n("budget"), approvedAt: user.role === "CLIENT" && user.accountLevel !== "VERIFIED" ? null : new Date(), ...(alerts ? { alertConsentAt: new Date(), unsubToken: newToken() } : {}) },
   });
   await audit(user.id, "buy_request.create", "BuyRequest", br.id, { alerts });
   revalidatePath(`/${l}/account`);

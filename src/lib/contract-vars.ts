@@ -63,7 +63,7 @@ export async function userVars(user: { name: string; brokerRegNo?: string | null
     user_name: user.name,
     seller_name: user.name,
     partner_reg_no: user.brokerRegNo ?? "",
-    partner_share_pct: user.partnerSharePct != null ? String(Number(String(user.partnerSharePct))) : "",
+    partner_share_pct: user.partnerSharePct != null ? String(Number(String(user.partnerSharePct))) : String((await getSetting("partner.defaultSharePct")).value),
     rescue_fee_pct: String(rescue.feePct),
     broker_reg_no: await regNo(),
     ...extra,
