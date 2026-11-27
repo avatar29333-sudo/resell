@@ -85,7 +85,9 @@ describe("القسم 4 — كشف البيانات حسب المرحلة", () =>
   const plotDoc = { type: "ALLOCATION_LETTER", ownerId: "seller", uploadedById: "seller", status: "APPROVED" };
   it("المشتري ما يفتحش ملفات القطعة قبل توقيع العقد المبدئي من الطرفين", () => {
     expect(can(u("buyer", "CLIENT"), "document.view", { document: plotDoc, deal: deal({ stage: "PRICE_AGREED", commissionSigned: true }) }).allowed).toBe(false);
-    expect(can(u("buyer", "CLIENT"), "document.view", { document: plotDoc, deal: deal({ stage: "PRELIMINARY_CONTRACT", prelimSigned: true }) }).allowed).toBe(true);
+    // PRIV-01: وبعد التوقيع كمان لازم موافقة البائع على كشف المستندات
+    expect(can(u("buyer", "CLIENT"), "document.view", { document: plotDoc, deal: deal({ stage: "PRELIMINARY_CONTRACT", prelimSigned: true }) }).allowed).toBe(false);
+    expect(can(u("buyer", "CLIENT"), "document.view", { document: plotDoc, deal: deal({ stage: "PRELIMINARY_CONTRACT", prelimSigned: true, sellerDisclosed: ["documents"] }) }).allowed).toBe(true);
   });
   it("لو الصفقة اتلغت المشتري يفقد الوصول فوراً", () => {
     expect(can(u("buyer", "CLIENT"), "document.view", { document: plotDoc, deal: deal({ status: "CANCELLED", prelimSigned: true }) }).allowed).toBe(false);
@@ -93,7 +95,8 @@ describe("القسم 4 — كشف البيانات حسب المرحلة", () =>
   });
   it("كود القطعة بعد توقيع اتفاق العمولة من الطرفين", () => {
     expect(can(u("buyer", "CLIENT"), "listing.view_code", { listing: listing(), deal: deal() }).allowed).toBe(false);
-    expect(can(u("buyer", "CLIENT"), "listing.view_code", { listing: listing(), deal: deal({ commissionSigned: true }) }).allowed).toBe(true);
+    expect(can(u("buyer", "CLIENT"), "listing.view_code", { listing: listing(), deal: deal({ commissionSigned: true }) }).allowed).toBe(false); // PRIV-01: من غير موافقة البائع
+    expect(can(u("buyer", "CLIENT"), "listing.view_code", { listing: listing(), deal: deal({ commissionSigned: true, sellerDisclosed: ["plotCode"] }) }).allowed).toBe(true);
     expect(can(u("fin", "FINANCE"), "listing.view_code", { listing: listing() }).allowed).toBe(false);
   });
 });

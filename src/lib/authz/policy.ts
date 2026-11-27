@@ -39,12 +39,17 @@ export type Ctx = {
     filingReceiptUploaded?: boolean;
     /** سبب الإلغاء يستحق رد العربون */
     refundable?: boolean;
+    /** PRIV-01: اللي وافق البائع/المشتري يتكشف للطرف الآخر (name | plotCode | documents) */
+    sellerDisclosed?: string[];
+    buyerDisclosed?: string[];
   };
   document?: {
     type: string;
     ownerId: string;
     uploadedById: string;
     status: string;
+    /** PRIV-01: PRIVATE | STAFF | SHARED_WITH_COUNTERPARTY */
+    visibility?: string;
   };
   /** المستخدم اللي الفعل عليه (توثيق، دور، إيقاف…) */
   target?: { id: string; role?: Role; kycPending?: boolean };
@@ -86,6 +91,19 @@ const not = (f: Check): Check => (u, c) => !f(u, c);
 
 const KYC_TYPES = ["NATIONAL_ID", "PASSPORT", "SELFIE"];
 const PLOT_TYPES = ["ALLOCATION_LETTER", "PAYMENT_RECEIPT", "AUTHORITY_STATEMENT"];
+/** سجلات الصفقة المشتركة بطبيعتها (نسخ العقود الموقّعة) */
+const DEAL_RECORDS = ["CONTRACT_PDF"];
+/**
+ * PRIV-01: مستند رفعه الطرف الآخر (أو بيخصّه) يظهر لي بس لو اتشارك (SHARED_WITH_COUNTERPARTY) أو سجل صفقة مشترك.
+ * مستند رفعه الفريق جوه الصفقة بيظهر للطرفين لو متعلّم «مشترك».
+ */
+function counterpartyMay(c: Ctx, otherSide: "BUYER" | "SELLER") {
+  const d = c.document!;
+  if (DEAL_RECORDS.includes(d.type)) return true;
+  const otherId = otherSide === "BUYER" ? c.deal?.buyerId : c.deal?.sellerId;
+  const fromOther = d.ownerId === otherId || d.uploadedById === otherId;
+  return fromOther ? d.visibility === "SHARED_WITH_COUNTERPARTY" : d.visibility !== "PRIVATE" && d.visibility !== "STAFF";
+}
 const TEAM: Role[] = ["BROKER", "BROKER_LEAD", "LAWYER", "AGENT", "FINANCE"];
 
 /** قائمة الأفعال الثابتة */
@@ -199,7 +217,8 @@ const RULES: Record<Action, Rule[]> = {
     { roles: ["LAWYER"], when: isListingLawyer },
   ],
   "listing.view_code": [
-    { roles: ["CLIENT", "PARTNER_BROKER"], when: or(isListingOwner, isListingSubmitter, and(isBuyer, (_, c) => !!c.deal?.commissionSigned && isOpen(c))) },
+    // PRIV-01: كود القطعة للمشتري بعد اتفاق العمولة + موافقة البائع على كشفه
+    { roles: ["CLIENT", "PARTNER_BROKER"], when: or(isListingOwner, isListingSubmitter, and(isBuyer, (_, c) => !!c.deal?.commissionSigned && !!c.deal?.sellerDisclosed?.includes("plotCode") && isOpen(c))) },
     // كود القطعة للفريق المسند بس (PERM-03)
     { roles: ["BROKER"], when: or(isListingBroker, isDealBroker) },
     { roles: ["BROKER_LEAD"] },
@@ -232,12 +251,14 @@ const RULES: Record<Action, Rule[]> = {
         !KYC_TYPES.includes(c.document!.type) &&
         (c.document!.ownerId === u.id ||
           c.document!.uploadedById === u.id ||
-          isListingOwner(u, c) ||
-          isListingSubmitter(u, c) ||
-          isDealSubmitter(u, c) ||
-          (isSeller(u, c) && !!c.deal) ||
-          // المشتري: ملفات القطعة من مرحلة ٤ بعد توقيع العقد المبدئي من الطرفين، والصفقة مش ملغية
-          (isBuyer(u, c) && isOpen(c) && (!PLOT_TYPES.includes(c.document!.type) || !!c.deal?.prelimSigned))),
+          // صاحب العرض/الشريك: مستندات العرض والصفقة — إلا خاص المشتري اللي ما شاركهوش (PRIV-01)
+          ((isListingOwner(u, c) || isListingSubmitter(u, c) || isDealSubmitter(u, c)) && !(c.deal && !counterpartyMay(c, "BUYER"))) ||
+          // البائع: مستندات الصفقة — اللي رفعها المشتري بتظهر بس لو شاركها (PRIV-01)
+          (isSeller(u, c) && !!c.deal && counterpartyMay(c, "BUYER")) ||
+          // المشتري: ملفات القطعة بعد توقيع العقد المبدئي + موافقة البائع على كشف المستندات (PRIV-01)
+          (isBuyer(u, c) &&
+            isOpen(c) &&
+            (PLOT_TYPES.includes(c.document!.type) ? !!c.deal?.prelimSigned && !!c.deal?.sellerDisclosed?.includes("documents") : counterpartyMay(c, "SELLER")))),
     },
     { roles: ["BROKER", "BROKER_LEAD"], when: (u, c) => !KYC_TYPES.includes(c.document!.type) && (isListingBroker(u, c) || isDealBroker(u, c)) },
     {

@@ -389,3 +389,33 @@ export async function toggleRound(locale: string, id: string) {
   await audit(me.id, "round.toggle", "OfferingRound", id, { before: r.isActive, after: !r.isActive });
   refresh(l);
 }
+
+/** PRIV-01: تسجيل طلب جهة رسمية — الجهة ورقم الطلب واللي اتسلّم، وتنبيه المستخدم إلا لو ممنوع قانوناً */
+export async function recordOfficialRequest(locale: string, form: FormData) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  if (me.role !== "ADMIN") redirect(back(l, "official"));
+  const s = (k: string) => String(form.get(k) ?? "").trim().slice(0, 1000);
+  const authority = s("authority");
+  const referenceNo = s("referenceNo");
+  const delivered = s("delivered");
+  if (authority.length < 3 || referenceNo.length < 2 || delivered.length < 5) redirect(`${back(l, "official")}&err=official`);
+  const phone = s("phone");
+  const target = phone ? await db.user.findFirst({ where: { phone }, select: { id: true } }) : null;
+  const gagged = form.get("gagged") === "on";
+  const r = await db.officialRequest.create({
+    data: { authority, referenceNo, delivered, gagged, userId: target?.id ?? null, dealId: s("dealId") || null, createdById: me.id, notifiedAt: target && !gagged ? new Date() : null },
+  });
+  await audit(me.id, "privacy.official_request", "OfficialRequest", r.id, { authority, referenceNo, userId: target?.id, gagged });
+  if (target && !gagged) {
+    const { notify } = await import("@/lib/notifications");
+    await notify([target.id], {
+      kind: "privacy.official_request",
+      ar: ["جهة رسمية طلبت بيانات تخصّك", `${authority} — طلب رقم ${referenceNo}. اللي اتسلّم: ${delivered}`],
+      en: ["An authority requested data about you", `${authority} — request no. ${referenceNo}. Delivered: ${delivered}`],
+      link: `/account/security#privacy`,
+    });
+  }
+  refresh(l);
+  redirect(`${back(l, "official")}&ok=official`);
+}

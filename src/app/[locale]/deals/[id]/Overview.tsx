@@ -141,7 +141,7 @@ export function DealOverview(p: Props) {
                         </span>
                         <span className="flex items-center gap-2">
                           <span className="font-semibold tabular-nums">
-                            {l.status === "ESTIMATE" && !l.amount ? L("بيتحدد من الجهاز", "Set by the authority") : `${l.sign < 0 ? "− " : ""}${money(l.amount, l.currency, p.locale)}`}
+                            {l.status === "ESTIMATE" && !l.amount ? L("بيتحدد لاحقاً", "Set later") : `${l.sign < 0 ? "− " : ""}${money(l.amount, l.currency, p.locale)}`}
                           </span>
                           <Badge tone={STATUS[l.status][2]}>{STATUS[l.status][ar ? 0 : 1]}</Badge>
                         </span>

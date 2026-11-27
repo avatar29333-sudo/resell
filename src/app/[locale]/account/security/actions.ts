@@ -85,3 +85,28 @@ export async function setOtpChannel(locale: string, form: FormData) {
   await audit(user.id, "user.otp_channel", "User", user.id, { before: user.otpChannel, after: ch });
   redirect(`${page(locale)}?ok=channel`);
 }
+
+/** PRIV-01: «صحّح بياناتي» — طلب للإدارة (بيتسجل) */
+export async function requestCorrection(locale: string, form: FormData) {
+  const user = await requireUser(loc(locale), page(locale));
+  const text = String(form.get("text") ?? "").trim().slice(0, 1000);
+  if (text.length < 10) redirect(`${page(locale)}?err=correction#privacy`);
+  const { idsByRole, notify } = await import("@/lib/notifications");
+  await audit(user.id, "privacy.correction_request", "User", user.id, { text });
+  await notify(await idsByRole("ADMIN"), {
+    kind: "privacy.correction",
+    ar: [`طلب تصحيح بيانات من ${user.name}`, text],
+    en: [`Data correction request from ${user.name}`, text],
+    link: `/settings?tab=users&q=${encodeURIComponent(user.phone)}`,
+  });
+  redirect(`${page(locale)}?ok=correction#privacy`);
+}
+
+/** PRIV-01: «اسحب موافقتي التسويقية» (أو رجّعها) */
+export async function toggleMarketing(locale: string) {
+  const user = await requireUser(loc(locale), page(locale));
+  const optOut = user.marketingOptOutAt ? null : new Date();
+  await db.user.update({ where: { id: user.id }, data: { marketingOptOutAt: optOut } });
+  await audit(user.id, "privacy.marketing", "User", user.id, { optedOut: !!optOut });
+  redirect(`${page(locale)}?ok=${optOut ? "marketing_off" : "marketing_on"}#privacy`);
+}

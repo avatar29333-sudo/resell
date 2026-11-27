@@ -64,7 +64,7 @@ export default async function ListingPage({ params }: Props) {
   const myDeal = user
     ? await db.deal.findFirst({
         where: { listingId: id, buyerId: user.id, status: { in: ["ACTIVE", "ON_HOLD", "COMPLETED"] } },
-        include: { contracts: true, listing: true, documents: { select: { type: true, status: true } } },
+        include: { contracts: true, listing: true, documents: { select: { type: true, status: true } }, disclosures: { where: { revokedAt: null } } },
         orderBy: { createdAt: "desc" },
       })
     : null;

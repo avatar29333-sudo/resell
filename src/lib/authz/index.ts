@@ -55,7 +55,10 @@ export function dealCtx(d: {
   contracts?: ContractLite[];
   documents?: DocLite[];
   events?: { type: string; data: Prisma.JsonValue }[];
+  /** PRIV-01: موافقات الكشف السارية */
+  disclosures?: { userId: string; fields: string[]; revokedAt: Date | null }[];
 }): NonNullable<Ctx["deal"]> {
+  const disclosed = (uid: string) => [...new Set((d.disclosures ?? []).filter((x) => x.userId === uid && !x.revokedAt).flatMap((x) => x.fields))];
   const cancelReason = d.events?.find((e) => e.type === "CANCELLED")?.data as { reason?: string } | undefined;
   return {
     buyerId: d.buyerId,
@@ -72,6 +75,8 @@ export function dealCtx(d: {
     approvalLetterApproved: (d.documents ?? []).some((x) => x.type === "AUTHORITY_STATEMENT" && x.status === "APPROVED"),
     filingReceiptUploaded: (d.documents ?? []).some((x) => x.type === "FILING_RECEIPT" && x.status !== "REJECTED"),
     refundable: ["authority_refused", "seller_withdrew", "documents_invalid"].includes(cancelReason?.reason ?? ""),
+    sellerDisclosed: disclosed(d.listing.sellerId),
+    buyerDisclosed: disclosed(d.buyerId),
   };
 }
 

@@ -7,6 +7,7 @@ import { requestActionCode, CHANNEL_LABEL } from "@/lib/action-otp";
 import { dealRef, isActionKey, type ActionKey } from "@/lib/action-otp-core";
 import { CONTRACT_TYPE } from "@/lib/labels";
 import { toNum } from "@/lib/format";
+import { normIban } from "@/lib/bank-rules";
 import { isLocale } from "@/i18n/config";
 
 export type CodeRequest = { ok?: boolean; error?: string; summary?: string; channel?: string; demoCode?: string | null };
@@ -22,6 +23,8 @@ export async function requestCode(locale: string, action: string, subjectId: str
   const ar = l === "ar";
   if (!isActionKey(action)) return { error: "action" };
   const user = await requireUser(l, `/${l}/account`);
+  // نفس التوحيد اللي السيرفر بيعمله وقت التنفيذ (وإلا الكود ما يطابقش)
+  if (action === "bank.add") fields = { ...fields, iban: normIban(fields.iban ?? "") };
   let summary: string | null = null;
 
   if (action.startsWith("listing.")) {
@@ -46,6 +49,15 @@ export async function requestCode(locale: string, action: string, subjectId: str
     const contract = fields.contractId ? deal.contracts.find((c) => c.id === fields.contractId) : null;
     const deposit = fields.depositId ? deal.deposits.find((d) => d.id === fields.depositId) : null;
     const k = action as ActionKey;
+    // الملخص بيتبني من الحساب نفسه (القيم المربوطة بالكود بتفضل accountId بس)
+    let bankLast4 = "";
+    if (k === "bank.select") {
+      const acc = fields.accountId ? await db.bankAccount.findFirst({ where: { id: fields.accountId, userId: user.id }, select: { ibanLast4: true } }) : null;
+      if (!acc) return { error: "forbidden" };
+      bankLast4 = acc.ibanLast4;
+    }
+    const FIELD_AR: Record<string, [string, string]> = { name: ["اسمك", "your name"], plotCode: ["كود القطعة", "the plot code"], documents: ["مستندات القطعة", "the plot documents"] };
+    const fieldsText = String(fields.fields ?? "").split(",").filter(Boolean).map((f) => FIELD_AR[f]?.[ar ? 0 : 1] ?? f).join(ar ? " + " : " + ");
     const t: Partial<Record<ActionKey, [string, string]>> = {
       "price.accept": [`كود موافقتك على سعر ${egp(toNum(deal.proposedPrice), true)} — صفقة ${ref}`, `Your approval of the price ${egp(toNum(deal.proposedPrice), false)} — deal ${ref}`],
       "price.offer": [`كود عرضك بسعر ${egp(Number(fields.price), true)} — صفقة ${ref}`, `Your offer of ${egp(Number(fields.price), false)} — deal ${ref}`],
@@ -55,8 +67,8 @@ export async function requestCode(locale: string, action: string, subjectId: str
       "deposit.received": [`كود تأكيدك إنك استلمت ${egp(toNum(deposit?.amount), true)} — صفقة ${ref}`, `Your confirmation that you received ${egp(toNum(deposit?.amount), false)} — deal ${ref}`],
       "deal.cancel_request": [`كود طلبك إلغاء الصفقة ${ref}`, `Your request to cancel deal ${ref}`],
       "document.share": [`كود موافقتك على مشاركة مستند مع الطرف الآخر — صفقة ${ref}`, `Your approval to share a document with the other party — deal ${ref}`],
-      "disclosure.consent": [`كود موافقتك على كشف ${fields.fields ?? ""} للطرف الآخر — صفقة ${ref}`, `Your consent to disclose ${fields.fields ?? ""} to the other party — deal ${ref}`],
-      "bank.select": [`كود اختيارك الحساب البنكي المنتهي بـ ${fields.last4 ?? ""} — صفقة ${ref}`, `Your choice of the bank account ending ${fields.last4 ?? ""} — deal ${ref}`],
+      "disclosure.consent": [`كود موافقتك على كشف ${fieldsText} للطرف الآخر — صفقة ${ref}`, `Your consent to disclose ${fieldsText} to the other party — deal ${ref}`],
+      "bank.select": [`كود اختيارك الحساب البنكي المنتهي بـ ${bankLast4} لاستلام/رد الفلوس — صفقة ${ref}`, `Your choice of the bank account ending ${bankLast4} for payouts/refunds — deal ${ref}`],
     };
     if (contract && ["contract.sign", "commission.approve", "closing.approve", "cancellation.approve"].includes(k)) {
       const name = CONTRACT_TYPE[contract.type] ?? [contract.type, contract.type];

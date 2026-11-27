@@ -85,3 +85,19 @@ describe("DOC-01 document requests become a task", () => {
     expect(nextActionFor(f, "BUYER", true)?.text).not.toContain("خطاب من الجهاز");
   });
 });
+
+describe("FEE-01 transfer fees are on the recipient", () => {
+  it("a refunded deposit shows the buyer the amount, the fee and the net", () => {
+    const deposits = [{ ...base.deposits[0], escrowStatus: "REFUNDED_TO_BUYER", payoutFeeEgp: 150, payoutNetEgp: 335_850 }];
+    const b = moneyFor("BUYER", { ...money, deposits });
+    const rows = Object.fromEntries(b.lines.map((l) => [l.label[0], l.amount]));
+    expect(rows["رد العربون — المبلغ المحوَّل"]).toBe(336_000);
+    expect(rows["مصاريف التحويل (يتحملها المستلم)"]).toBe(150);
+    expect(rows["الصافي اللي وصلك"]).toBe(335_850);
+  });
+  it("the seller's expected net deducts the bank fee they bear, never the platform", () => {
+    const s = moneyFor("SELLER", { ...money, fees: { ...money.fees, bankFeeEstimateEgp: 200 } });
+    expect(s.total.amount).toBe(3_360_000 - 50_400 - 200);
+    expect(s.lines.find((l) => l.label[0].includes("مصاريف التحويل"))?.payer[0]).toBe("أنت");
+  });
+});

@@ -4,6 +4,7 @@ import { isLocale } from "@/i18n/config";
 import { tr } from "@/lib/format";
 import { pageMeta } from "@/lib/meta";
 import { Container, Notice, PageHeader } from "@/components/ui";
+import { ALLOWED_THIRD_PARTIES } from "@/lib/third-parties";
 
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "سياسة الخصوصية", "Privacy policy");
 
@@ -36,8 +37,8 @@ export default async function PrivacyPage({ params }: { params: Promise<{ locale
     [
       L("مين يشوفها", "Who sees it"),
       L(
-        "رقمك وبياناتك ما بتظهرش للطرف التاني قبل توقيع اتفاق العمولة، والمستندات ما بتتفتحش للمشتري قبل العقد المبدئي. فريقنا (الوسيط والمحامي والمندوب) بيشوف اللي محتاجه لشغله بس. ممكن نشارك بيانات مع الجهاز أو البنك أو مزوّد التوقيع الإلكتروني عشان إتمام الصفقة.",
-        "Your number and details are not shown to the other party before the commission agreement is signed, and documents are not opened to the buyer before the preliminary contract. Our team (broker, lawyer, field agent) sees only what their work needs. We may share data with the city authority, the bank or the e-signature provider to complete the deal.",
+        "المعلومات اللي بترفعها سرية: ما بتتعرضش للطرف التاني غير بموافقتك الصريحة (بكود تأكيد) — الاسم وكود القطعة والمستندات كل واحد بموافقة. أي مستند ترفعه في الصفقة بيفضل «خاص» لحد ما تضغط «شارك مع الطرف الآخر». فريقنا بيشوف حسب الدور والإسناد بس (الوسيط المسؤول، المحامي المراجع، والمالية للمدفوعات)، وكل فتح لمستند بيتسجل وتقدر تشوفه في «مين شاف ملفاتي؟».",
+        "What you upload is confidential: it's shown to the other party only with your explicit consent (confirmed by code) — name, plot code and documents each need consent. Any document you upload in a deal stays private until you choose “Share with the other party”. Our team sees data by role and assignment only (the assigned broker, the reviewing lawyer, and finance for payments), and every document view is logged — see “Who viewed my files?”.",
       ),
     ],
     [
@@ -52,6 +53,32 @@ export default async function PrivacyPage({ params }: { params: Promise<{ locale
       L(
         "تقدر تعرف إيه البيانات اللي عندنا، تطلب تصحيحها، أو تحذف حسابك من صفحة «الخصوصية والأمان» في حسابك. لأي طلب تاني كلّمنا على [إيميل الخصوصية].",
         "You can see what data we hold, ask for corrections, or delete your account from the Privacy & security page in your account. For anything else contact [PRIVACY EMAIL].",
+      ),
+    ],
+    [
+      L("مش بنبيع بياناتك", "We never sell your data"),
+      L(
+        "ممنوع أي بيع أو مشاركة لبياناتك لأغراض إعلانية أو تسويقية. أدوات القياس عندنا ما بتستلمش اسم ولا موبايل ولا إيميل. تصدير بيانات المستخدمين للأدمن بس وبيتسجل.",
+        "Your data is never sold or shared for advertising or marketing. Our analytics never receive names, phone numbers or emails. Exporting user data is admin-only and logged.",
+      ),
+    ],
+    [
+      L("الجهات الخارجية المسموحة بس", "Only these external parties"),
+      ALLOWED_THIRD_PARTIES.map((p) => (locale === "ar" ? `${p.ar}: ${p.purposeAr}` : `${p.en}: ${p.purposeEn}`)).join(" · ") +
+        L(". أي إضافة على القائمة بقرار أدمن مسجّل وتحديث للسياسة دي.", ". Any addition requires a logged admin decision and an update to this policy."),
+    ],
+    [
+      L("الحسابات البنكية", "Bank accounts"),
+      L(
+        "بنحفظ رقم حسابك (IBAN) متشفّر، وما بيظهرش كامل غير للمالية وكل عرض بيتسجل. الغرض: تحويل مستحقاتك أو رد العربون بس. المدة: طول التعامل + المدة القانونية (قانون 151 لسنة 2020). أي عمولات أو مصاريف تحويل بنكي يتحملها المحوَّل له، ولا تتحملها المنصة.",
+        "Your IBAN is stored encrypted and shown in full only to finance, with every view logged. Purpose: paying you or refunding your deposit only. Retention: the relationship plus the legal period (Law 151/2020). Any bank transfer fees are borne by the recipient, never by the platform.",
+      ),
+    ],
+    [
+      L("طلبات الجهات الرسمية", "Requests from authorities"),
+      L(
+        "لو جهة رسمية طلبت بيانات بسند قانوني، بنسجل الجهة ورقم الطلب واللي اتسلّم، وبنبلّغك إلا لو القانون بيمنع.",
+        "If an authority requests data with a legal basis, we record the authority, request number and what was delivered, and notify you unless the law forbids it.",
       ),
     ],
   ];

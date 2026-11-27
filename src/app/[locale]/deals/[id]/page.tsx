@@ -34,6 +34,8 @@ import { AdminReason } from "@/components/AdminReason";
 import { TrackEvent } from "@/components/Analytics";
 import { OtpConfirm } from "@/components/OtpConfirm";
 import { MultiUpload } from "@/components/MultiUpload";
+import { PAYOUT_ERRORS } from "@/lib/bank";
+import { FEE_NOTICE } from "@/lib/bank-rules";
 import { OTP_ERRORS } from "@/lib/action-otp";
 import { contractActionKey } from "@/lib/action-otp-core";
 import { storyConsent } from "../actions";
@@ -58,6 +60,10 @@ import {
   signContract,
   respondPrice,
   attachDealDocuments,
+  grantDisclosure,
+  selectDealBank,
+  revokeDisclosure,
+  shareDocument,
   replaceDealDocument,
   requestDocument,
   verifyContract,
@@ -89,7 +95,9 @@ const CANCEL_REASONS: [string, string, string][] = [
 
 const ERRORS: Record<string, [string, string]> = {
   ...OTP_ERRORS,
+  ...Object.fromEntries(Object.entries(PAYOUT_ERRORS).map(([k, v]) => [`payout_${k}`, v])),
   title: ["لازم عنوان لكل مستند (3 حروف على الأقل).", "Each document needs a title (at least 3 characters)."],
+  bank_locked: ["الحساب مثبّت على الصفقة — كلّم المالية للتغيير.", "The account is locked to the deal — contact finance to change it."],
   verify_checklist: ["لازم تأكد كل بنود المطابقة.", "Confirm every checklist item."],
   forbidden: ["الفعل ده مش متاح لحسابك على الصفقة دي.", "This action isn't available to you on this deal."],
   reason_required: ["لازم تكتب سبب التدخّل (5 حروف على الأقل).", "Please write an override reason (at least 5 characters)."],
@@ -162,7 +170,12 @@ export default async function DealRoom({ params, searchParams }: Props) {
   const to = nextStage(facts.stage);
   const lc = { listing: listingCtx(deal.listing), deal: dc };
   const codeVisible = can(subject(me), "listing.view_code", lc).allowed;
-  const namesVisible = partyNameVisible({ viewerIsParty: !!side, commissionSigned: !!dc.commissionSigned, dealOpen: open });
+  const namesVisible = partyNameVisible({
+    viewerIsParty: !!side,
+    commissionSigned: !!dc.commissionSigned,
+    dealOpen: open,
+    consented: (side === "BUYER" ? dc.sellerDisclosed : dc.buyerDisclosed)?.includes("name"),
+  });
   const team = p["deal.assign"].allowed ? await db.user.findMany({ where: { role: { in: ["BROKER", "BROKER_LEAD", "LAWYER", "AGENT"] }, status: "ACTIVE" }, orderBy: { name: "asc" } }) : [];
   const neededContracts = (CONTRACT_FOR_STAGE[deal.stage] ?? []).filter((t) => !deal.contracts.some((c) => c.type === t && c.status !== "VOID"));
   const plot = deal.listing.plot;
@@ -178,12 +191,15 @@ export default async function DealRoom({ params, searchParams }: Props) {
     ...deal.listing.documents.filter((d) => d.type !== "SITE_PHOTO").map((d) => ({ ...d, uploadedBy: null, scope: "listing" as const })),
   ].map((d) => ({
     ...d,
-    canOpen: can(subject(me), "document.view", { ...lc, document: { type: d.type, ownerId: d.ownerId, uploadedById: d.uploadedById, status: d.status } }).allowed,
+    canOpen: can(subject(me), "document.view", { ...lc, document: { type: d.type, ownerId: d.ownerId, uploadedById: d.uploadedById, status: d.status, visibility: d.visibility } }).allowed,
   }));
   // DOC-01: مستندات أخرى + طلبات المستندات المفتوحة
   const docRequests = await db.documentRequest.findMany({ where: { dealId: id, status: "OPEN" }, orderBy: { createdAt: "asc" } });
   const otherDocs = docs.filter((d) => d.scope === "deal" && d.type === "OTHER" && d.status !== "SUPERSEDED");
   const canRequestDoc = [deal.lawyerId, deal.brokerId].includes(me.id) || me.role === "ADMIN";
+  // BANK-01: حسابات الطرف اللي ينفع يختار منها
+  const myAccounts = side ? await db.bankAccount.findMany({ where: { userId: me.id, status: { in: ["PENDING", "VERIFIED"] } }, orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }] }) : [];
+  const myDealAccount = side === "BUYER" ? deal.buyerBankAccount : side === "SELLER" ? deal.sellerBankAccount : null;
   const ovw = { ...overviewOf(deal), docRequests: docRequests.map((r) => ({ side: r.side, title: r.title })) };
   const dealFees = await getSetting("deal.fees");
   const logFilter = (["money", "docs", "comms", "stage"] as const).find((x) => x === sp.log) as EventCategory | undefined;
@@ -460,6 +476,81 @@ export default async function DealRoom({ params, searchParams }: Props) {
               )}
             </Card>
 
+            {/* BANK-01: الحساب اللي هتستلم عليه / يترد لك عليه */}
+            {side && open && (
+              <Card title={<span id="bank" className="scroll-mt-24">{side === "SELLER" ? L("الحساب اللي هتستلم عليه", "Account to receive payment") : L("الحساب اللي يترد لك عليه (لو حصل رد)", "Account for any refund")}</span>}>
+                {myDealAccount ? (
+                  <p className="flex flex-wrap items-center gap-2">
+                    <span dir="ltr" className="tabular-nums">{myDealAccount.country}•• •••• •••• {myDealAccount.ibanLast4}</span>
+                    <span>· {myDealAccount.bankName}</span>
+                    <Badge tone={myDealAccount.status === "VERIFIED" ? "green" : "amber"}>{myDealAccount.status === "VERIFIED" ? L("متحقق منه", "Verified") : L("مستني تحقق المالية", "Awaiting finance verification")}</Badge>
+                    {deal.bankLockedAt && <Badge tone="navy">{L("مثبّت على الصفقة", "Locked to the deal")}</Badge>}
+                  </p>
+                ) : (
+                  <p className="text-sm text-[#8A5A00]">{L("لسه ما اخترتش حساب — الصرف ما بيتمش غير على حساب متحقق منه باسمك.", "No account chosen yet — payouts go only to a verified account in your name.")}</p>
+                )}
+                {deal.bankLockedAt ? (
+                  <p className="text-sm text-muted">{L("الحساب اتثبت مع توقيع العقد الابتدائي — أي تغيير محتاج موافقة المالية.", "The account was locked when the preliminary contract was signed — changes need finance approval.")}</p>
+                ) : myAccounts.length === 0 ? (
+                  <Link href={`/${locale}/account/bank`} className={`${btn.secondary} self-start`}>{L("أضف حساب بنكي", "Add a bank account")}</Link>
+                ) : (
+                  <OtpConfirm locale={locale} action="bank.select" subjectId={id} fields={["accountId"]} preview={L("اختيار الحساب ده للصفقة", "Choosing this account for the deal")} submitLabel={L("اختار الحساب", "Choose account")} formAction={selectDealBank.bind(null, locale, id)}>
+                    <label className={labelCls}>
+                      {L("حساباتك", "Your accounts")}
+                      <select name="accountId" defaultValue={myDealAccount?.id ?? myAccounts[0]?.id} className={field}>
+                        {myAccounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.bankName} · {a.currency} · •••• {a.ibanLast4} {a.status === "VERIFIED" ? "✓" : L("(مستني تحقق)", "(pending)")}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </OtpConfirm>
+                )}
+                <p className="text-[13px] text-muted">{ar ? FEE_NOTICE[0] : FEE_NOTICE[1]}</p>
+              </Card>
+            )}
+
+            {/* PRIV-01: الكشف للطرف الآخر بالموافقة */}
+            {side && open && (() => {
+              const mine = (side === "SELLER" ? dc.sellerDisclosed : dc.buyerDisclosed) ?? [];
+              const want = side === "SELLER" ? ["documents", "name", "plotCode"] : ["name"];
+              const FIELD: Record<string, string> = { name: L("اسمك", "your name"), plotCode: L("كود القطعة", "the plot code"), documents: L("مستندات القطعة (خطاب التخصيص، الإيصالات، إفادة الجهاز)", "the plot documents (allocation letter, receipts, authority statement)") };
+              const text = want.map((f) => FIELD[f]).join(" + ");
+              const granted = want.every((f) => mine.includes(f));
+              return (
+                <Card title={<span id="disclosure" className="scroll-mt-24">{L("اللي بيتعرض للطرف الآخر", "What the other party can see")}</span>}>
+                  <p className="text-sm leading-6 text-muted">
+                    {L("🔒 بياناتك سرية ومش بتتعرض للطرف الآخر غير بموافقتك، ومش بتتباع لأي جهة.", "🔒 Your data is confidential, shown to the other party only with your consent, and never sold.")}
+                  </p>
+                  {granted ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge tone="green">{L("وافقت", "Consented")}</Badge>
+                      <span className="text-sm">{L(`بيتعرض: ${text}`, `Shown: ${text}`)}</span>
+                      <form action={revokeDisclosure.bind(null, locale, id)}>
+                        <button className={`${btn.small} border border-line`}>{L("اسحب الموافقة", "Withdraw consent")}</button>
+                      </form>
+                    </div>
+                  ) : (
+                    <OtpConfirm
+                      locale={locale}
+                      action="disclosure.consent"
+                      subjectId={id}
+                      fields={["fields"]}
+                      preview={L(`هيتعرض للطرف الآخر: ${text} — موافق؟`, `The other party will see: ${text} — do you agree?`)}
+                      submitLabel={L("موافق", "I agree")}
+                      formAction={grantDisclosure.bind(null, locale, id)}
+                    >
+                      {want.map((f) => (
+                        <input key={f} type="hidden" name="field" value={f} />
+                      ))}
+                      <input type="hidden" name="fields" value={want.join(",")} />
+                    </OtpConfirm>
+                  )}
+                </Card>
+              );
+            })()}
+
             {/* DOC-01: مستندات أخرى — لكل طرف، مع مين رفع وإمتى. ممنوع الحذف: استبدال بنسخة أحدث */}
             <Card title={<span id="other-docs" className="scroll-mt-24">{L("مستندات أخرى", "Other documents")}</span>}>
               {docRequests.length > 0 && (
@@ -501,10 +592,19 @@ export default async function DealRoom({ params, searchParams }: Props) {
                             <span className="flex flex-wrap items-center gap-2">
                               {d.canOpen ? <FileLink id={d.id}>{d.title ?? d.fileName}</FileLink> : <span>{d.title ?? d.fileName}</span>}
                               {d.version > 1 && <Badge tone="blue">{L(`نسخة ${num(d.version, locale)}`, `v${d.version}`)}</Badge>}
+                              {k !== "TEAM" && <Badge tone={d.visibility === "SHARED_WITH_COUNTERPARTY" ? "green" : "gray"}>{d.visibility === "SHARED_WITH_COUNTERPARTY" ? L("مشترك مع الطرف الآخر", "Shared with the other party") : L("خاص", "Private")}</Badge>}
                             </span>
                             <span className="text-[13px] text-muted">
                               {d.uploadedBy && (k === "TEAM" || namesVisible || d.uploadedById === me.id) ? d.uploadedBy.name : k === "BUYER" ? L("المشتري", "Buyer") : L("البائع", "Seller")} · {dateTime(d.createdAt, locale)}
                             </span>
+                            {open && d.uploadedById === me.id && side && d.visibility !== "SHARED_WITH_COUNTERPARTY" && (
+                              <details>
+                                <summary className="min-h-11 cursor-pointer py-2 text-sm text-brand">{L("شارك مع الطرف الآخر", "Share with the other party")}</summary>
+                                <OtpConfirm locale={locale} action="document.share" subjectId={id} fields={["documentId"]} preview={L(`مشاركة «${d.title ?? d.fileName}» مع الطرف الآخر`, `Share “${d.title ?? d.fileName}” with the other party`)} submitLabel={L("شارك", "Share")} formAction={shareDocument.bind(null, locale, id, d.id)}>
+                                  <input type="hidden" name="documentId" value={d.id} />
+                                </OtpConfirm>
+                              </details>
+                            )}
                             {open && p["deal.upload_doc"].allowed && (d.uploadedById === me.id || [deal.brokerId, deal.lawyerId, deal.agentId].includes(me.id) || me.role === "ADMIN") && (
                               <details>
                                 <summary className="min-h-11 cursor-pointer py-2 text-sm text-brand">{L("استبدال بنسخة أحدث", "Replace with a newer version")}</summary>
@@ -766,11 +866,18 @@ export default async function DealRoom({ params, searchParams }: Props) {
                           {L(`طلب ${pending.action === "RELEASED_TO_SELLER" ? "صرف للبائع" : "رد للمشتري"} مستني موافقة الأدمن`, `${pending.action === "RELEASED_TO_SELLER" ? "Release" : "Refund"} request awaiting admin approval`)}
                           {p["payment.approve"].allowed && pending.requestedById !== me.id && (
                             <form action={decidePayment.bind(null, locale, id, pending.id)} className="mt-2 flex flex-wrap gap-2">
+                              <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-9 w-36`} />
                               <button name="decision" value="APPROVED" className={`${btn.small} bg-ok text-white`}>{L("وافق ونفّذ", "Approve and execute")}</button>
                               <button name="decision" value="REJECTED" className={`${btn.small} border border-[#A32020] text-[#A32020]`}>{L("ارفض", "Reject")}</button>
                             </form>
                           )}
                         </Notice>
+                      )}
+                      {(p["deposit.release"].allowed || p["deposit.refund"].allowed) && d.escrowStatus === "HELD" && <p className="text-[13px] text-muted">{ar ? FEE_NOTICE[0] : FEE_NOTICE[1]}</p>}
+                      {d.payoutNetEgp && (
+                        <span className="text-sm tabular-nums">
+                          {L("اتحوّل", "Transferred")} {money(d.amount, d.currency, locale)} · {L("مصاريف التحويل (على المستلم)", "Transfer fee (recipient)")} {money(d.payoutFeeEgp, "EGP", locale)} · {L("الصافي", "Net")} {money(d.payoutNetEgp, "EGP", locale)}
+                        </span>
                       )}
                       {!pending && (
                         <div className="flex flex-wrap gap-1.5">
@@ -782,13 +889,15 @@ export default async function DealRoom({ params, searchParams }: Props) {
                             </form>
                           )}
                           {p["deposit.release"].allowed && d.escrowStatus === "HELD" && (
-                            <form action={settleDeposit.bind(null, locale, id, d.id, "RELEASED_TO_SELLER")} className="flex gap-1.5">
+                            <form action={settleDeposit.bind(null, locale, id, d.id, "RELEASED_TO_SELLER")} className="flex flex-wrap gap-1.5">
+                              <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-9 w-36`} />
                               <AdminReason show={ov("deposit.release")} ar={ar} />
                               <button className={`${btn.small} border border-ok text-ok`}>{L("اصرف للبائع", "Release to seller")}</button>
                             </form>
                           )}
                           {p["deposit.refund"].allowed && d.escrowStatus === "HELD" && (
-                            <form action={settleDeposit.bind(null, locale, id, d.id, "REFUNDED_TO_BUYER")} className="flex gap-1.5">
+                            <form action={settleDeposit.bind(null, locale, id, d.id, "REFUNDED_TO_BUYER")} className="flex flex-wrap gap-1.5">
+                              <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-9 w-36`} />
                               <AdminReason show={ov("deposit.refund")} ar={ar} />
                               <button className={`${btn.small} border border-[#A32020] text-[#A32020]`}>{L("رد للمشتري", "Refund buyer")}</button>
                             </form>

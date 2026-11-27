@@ -21,7 +21,7 @@ export async function canViewDocument(user: User | null, docId: string) {
     where: { id: docId },
     include: {
       listing: { include: { documents: { select: { type: true, status: true } }, deals: { select: { stage: true, status: true } } } },
-      deal: { include: { contracts: true, documents: { select: { type: true, status: true } }, listing: true, events: { where: { type: "CANCELLED" } } } },
+      deal: { include: { contracts: true, documents: { select: { type: true, status: true } }, listing: true, events: { where: { type: "CANCELLED" } }, disclosures: { where: { revokedAt: null } } } },
     },
   });
   if (!doc) return null;
@@ -29,7 +29,10 @@ export async function canViewDocument(user: User | null, docId: string) {
   if (doc.type === "SITE_PHOTO" && doc.status === "APPROVED" && ["PUBLISHED", "IN_DEAL"].includes(doc.listing?.status ?? "")) return doc;
   if (!user) return null;
 
-  const base: Ctx = { document: { type: doc.type, ownerId: doc.ownerId, uploadedById: doc.uploadedById, status: doc.status } };
+  // BANK-01: إثبات ملكية حساب بنكي — المالية والأدمن بس (غير صاحبه)
+  if ((user.role === "FINANCE" || user.role === "ADMIN") && doc.type === "OTHER" && (await db.bankAccount.findFirst({ where: { proofDocumentId: doc.id }, select: { id: true } }))) return doc;
+
+  const base: Ctx = { document: { type: doc.type, ownerId: doc.ownerId, uploadedById: doc.uploadedById, status: doc.status, visibility: doc.visibility } };
   if (doc.listing) base.listing = listingCtx(doc.listing);
 
   // ملفات الهوية: مربوطة بملف توثيق
@@ -52,7 +55,7 @@ export async function canViewDocument(user: User | null, docId: string) {
   if (doc.listingId && !doc.deal) {
     const deals = await db.deal.findMany({
       where: { listingId: doc.listingId, OR: [{ buyerId: user.id }, { brokerId: user.id }, { lawyerId: user.id }, { agentId: user.id }] },
-      include: { contracts: true, documents: { select: { type: true, status: true } }, listing: true, events: { where: { type: "CANCELLED" } } },
+      include: { contracts: true, documents: { select: { type: true, status: true } }, listing: true, events: { where: { type: "CANCELLED" } }, disclosures: { where: { revokedAt: null } } },
     });
     for (const d of deals) contexts.push({ ...base, deal: dealCtx(d) });
   }
@@ -96,6 +99,9 @@ async function loadDeal(dealId: string) {
       deposits: { orderBy: { createdAt: "asc" }, include: { receiptDocument: true, approvals: { where: { status: "PENDING" } } } },
       commission: true,
       events: { orderBy: { createdAt: "desc" }, include: { actor: true } },
+      disclosures: { where: { revokedAt: null } },
+      buyerBankAccount: true,
+      sellerBankAccount: true,
     },
   });
 }
@@ -124,7 +130,7 @@ export function overviewOf(deal: LoadedDeal): import("./deal-overview").Overview
     buyerPriceOkAt: deal.buyerPriceOkAt,
     sellerPriceOkAt: deal.sellerPriceOkAt,
     contracts: deal.contracts.map((c) => ({ id: c.id, type: c.type, status: c.status, signatures: ((c.signatures as { role: string }[] | null) ?? []).map((s) => ({ role: s.role })) })),
-    deposits: deal.deposits.map((d) => ({ id: d.id, amount: n(d.amount) ?? 0, escrowStatus: d.escrowStatus, buyerSentAt: d.buyerSentAt, sellerReceivedAt: d.sellerReceivedAt, bankReference: d.bankReference, heldAt: d.heldAt, settledAt: d.settledAt })),
+    deposits: deal.deposits.map((d) => ({ id: d.id, amount: n(d.amount) ?? 0, escrowStatus: d.escrowStatus, buyerSentAt: d.buyerSentAt, sellerReceivedAt: d.sellerReceivedAt, bankReference: d.bankReference, heldAt: d.heldAt, settledAt: d.settledAt, payoutFeeEgp: n(d.payoutFeeEgp), payoutNetEgp: n(d.payoutNetEgp) })),
     stageEnteredAt: entered ?? deal.createdAt,
   };
 }

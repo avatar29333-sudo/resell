@@ -220,52 +220,59 @@ enum ServiceRequestStatus {
 // ───────────────────────── الجداول ─────────────────────────
 
 model User {
+  bankAccounts       BankAccount[]
+  verifiedBanks      BankAccount[]       @relation("BankVerifier")
+  disclosures        DisclosureConsent[]
+  officialRequests   OfficialRequest[]   @relation("OfficialRequestUser")
+  officialFiled      OfficialRequest[]   @relation("OfficialRequestBy")
+  /// PRIV-01: سحب الموافقة التسويقية
+  marketingOptOutAt  DateTime?
   uploadSessions     UploadSession[]
   documentRequests   DocumentRequest[]
-  id                 String            @id @default(cuid())
+  id                 String              @id @default(cuid())
   name               String
-  phone              String            @unique //بصيغة دولية E.164 زي +201001234567
-  email              String?           @unique
-  countryOfResidence String?           @db.Char(2) //كود الدولة ISO، مثلاً EG أو SA
-  locale             Locale            @default(ar)
-  role               Role              @default(CLIENT)
-  accountLevel       AccountLevel      @default(BASIC)
-  twoFactorEnabled   Boolean           @default(false) //إجباري للفريق
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  phone              String              @unique //بصيغة دولية E.164 زي +201001234567
+  email              String?             @unique
+  countryOfResidence String?             @db.Char(2) //كود الدولة ISO، مثلاً EG أو SA
+  locale             Locale              @default(ar)
+  role               Role                @default(CLIENT)
+  accountLevel       AccountLevel        @default(BASIC)
+  twoFactorEnabled   Boolean             @default(false) //إجباري للفريق
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
   //حذف بالطلب (قانون 151): البيانات الشخصية بتتمسح والسجل يفضل
   anonymizedAt       DateTime?
   /// MKT-10: مصدر التسجيل (first/last touch: utm + referrer + كود الإحالة)
   source             Json?
   /// MKT-06: كود الإحالة بتاع المستخدم + مين أحاله
-  referralCode       String?           @unique
+  referralCode       String?             @unique
   referredById       String?
-  referredBy         User?             @relation("Referral", fields: [referredById], references: [id])
-  referrals          User[]            @relation("Referral")
-  rewardsEarned      ReferralReward[]  @relation("RewardReferrer")
-  rewardsAsReferred  ReferralReward[]  @relation("RewardReferred")
+  referredBy         User?               @relation("Referral", fields: [referredById], references: [id])
+  referrals          User[]              @relation("Referral")
+  rewardsEarned      ReferralReward[]    @relation("RewardReferrer")
+  rewardsAsReferred  ReferralReward[]    @relation("RewardReferred")
   /// DEAL-03: قناة كود التحقق الافتراضية (whatsapp | sms | email | totp)
-  otpChannel         String            @default("whatsapp")
+  otpChannel         String              @default("whatsapp")
   actionCodes        ActionCode[]
   consentRecords     ConsentRecord[]
   /// MKT-07: نصيب السمسار الشريك من العمولة (%)
-  partnerSharePct    Decimal?          @db.Decimal(5, 2)
+  partnerSharePct    Decimal?            @db.Decimal(5, 2)
   // التحقق الثنائي (تطبيق Authenticator) — السر متشفّر بـ AES-GCM
   totpSecret         String?
   totpEnabledAt      DateTime?
   // موافقة صريحة على الشروط وسياسة الخصوصية (قانون 151)
   termsAcceptedAt    DateTime?
   // PERM-07: إيقاف الحساب
-  status             AccountStatus     @default(ACTIVE)
+  status             AccountStatus       @default(ACTIVE)
   suspendedAt        DateTime?
   suspendReason      String?
   // PERM-08: بيزيد مع تغيير الدور أو الإيقاف → كل الجلسات القديمة بتتقفل
-  sessionVersion     Int               @default(0)
+  sessionVersion     Int                 @default(0)
   // PERM-05: السمسار الشريك — رقم القيد بيتراجع من الأدمن قبل التفعيل
   brokerRegNo        String?
   partnerApprovedAt  DateTime?
   // عدد مرات رفض التوثيق (بعد 3 = مراجعة أدمن)
-  kycRejections      Int               @default(0)
+  kycRejections      Int                 @default(0)
 
   notifications          Notification[]
   reconciliations        Reconciliation[]  @relation("ReconciliationBy")
@@ -454,6 +461,9 @@ model Document {
   fileName         String
   /// DOC-01: عنوان «مستند آخر» (إجباري للنوع OTHER)
   title            String?
+  /// PRIV-01: PRIVATE | STAFF | SHARED_WITH_COUNTERPARTY
+  visibility       String          @default("PRIVATE")
+  bankProofFor     BankAccount[]
   mimeType         String
   sizeBytes        Int
   sha256           String          @db.Char(64)
@@ -501,47 +511,54 @@ model Review {
 
 /// الصفقة: الانتقال بين المراحل له شروط مبرمجة (state machine في الخادم)
 model Deal {
-  documentRequests   DocumentRequest[]
-  issuedDocuments    IssuedDocument[]
-  id                 String            @id @default(cuid())
-  listingId          String
-  listing            Listing           @relation(fields: [listingId], references: [id])
-  buyerId            String
-  buyer              User              @relation("DealBuyer", fields: [buyerId], references: [id])
-  stage              DealStage         @default(INTEREST)
-  status             DealStatus        @default(ACTIVE)
-  agreedPrice        Decimal?          @db.Decimal(14, 2)
-  agreedCurrency     Currency?
+  /// BANK-01: حساب كل طرف للاستلام/الرد — بيتثبت عند توقيع نموذج 3
+  buyerBankAccountId  String?
+  buyerBankAccount    BankAccount?        @relation("DealBuyerBank", fields: [buyerBankAccountId], references: [id])
+  sellerBankAccountId String?
+  sellerBankAccount   BankAccount?        @relation("DealSellerBank", fields: [sellerBankAccountId], references: [id])
+  bankLockedAt        DateTime?
+  disclosures         DisclosureConsent[]
+  documentRequests    DocumentRequest[]
+  issuedDocuments     IssuedDocument[]
+  id                  String              @id @default(cuid())
+  listingId           String
+  listing             Listing             @relation(fields: [listingId], references: [id])
+  buyerId             String
+  buyer               User                @relation("DealBuyer", fields: [buyerId], references: [id])
+  stage               DealStage           @default(INTEREST)
+  status              DealStatus          @default(ACTIVE)
+  agreedPrice         Decimal?            @db.Decimal(14, 2)
+  agreedCurrency      Currency?
   // السعر المقترح من الوسيط — بيتسجل «متفق» بعد ما الطرفين يوافقوا جوه الغرفة
-  proposedPrice      Decimal?          @db.Decimal(14, 2)
-  buyerPriceOkAt     DateTime?
-  sellerPriceOkAt    DateTime?
+  proposedPrice       Decimal?            @db.Decimal(14, 2)
+  buyerPriceOkAt      DateTime?
+  sellerPriceOkAt     DateTime?
   // DATA-01: سعر الصرف بيتثبت مرة واحدة لحظة توقيع العقد المبدئي
-  rateLockedAt       DateTime?
+  rateLockedAt        DateTime?
   //سعر الصرف المثبّت وقت اتفاق السعر (نسخة من القيمة + المرجع)
-  lockedUsdEgpRate   Decimal?          @db.Decimal(12, 4)
-  exchangeRateId     String?
-  exchangeRate       ExchangeRate?     @relation(fields: [exchangeRateId], references: [id])
+  lockedUsdEgpRate    Decimal?            @db.Decimal(12, 4)
+  exchangeRateId      String?
+  exchangeRate        ExchangeRate?       @relation(fields: [exchangeRateId], references: [id])
   // الفريق
-  brokerId           String?
-  broker             User?             @relation("DealBroker", fields: [brokerId], references: [id])
-  lawyerId           String?
-  lawyer             User?             @relation("DealLawyer", fields: [lawyerId], references: [id])
-  agentId            String?
-  agent              User?             @relation("DealAgent", fields: [agentId], references: [id])
-  stageChangedAt     DateTime          @default(now())
-  closedAt           DateTime?
+  brokerId            String?
+  broker              User?               @relation("DealBroker", fields: [brokerId], references: [id])
+  lawyerId            String?
+  lawyer              User?               @relation("DealLawyer", fields: [lawyerId], references: [id])
+  agentId             String?
+  agent               User?               @relation("DealAgent", fields: [agentId], references: [id])
+  stageChangedAt      DateTime            @default(now())
+  closedAt            DateTime?
   /// OPS-02: حالة ملف التنازل في الجهاز (SUBMITTED / NEEDS_INFO / APPROVED / REJECTED)
-  authorityStatus    String?
-  authorityUpdatedAt DateTime?
+  authorityStatus     String?
+  authorityUpdatedAt  DateTime?
   /// DEAL-01: مصدر سعر الصرف المثبّت
-  fxSource           String?
+  fxSource            String?
   /// MKT-10: مصدر المشتري لما أبدى اهتمام
-  source             Json?
+  source              Json?
   /// DATA-04: صفقة من بيانات التجربة — ما تدخلش في المؤشر ولا العدادات لما DEMO_MODE مقفول
-  isDemo             Boolean           @default(false)
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  isDemo              Boolean             @default(false)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
   events         DealEvent[]
   contracts      Contract[]
@@ -625,23 +642,28 @@ model Commission {
 
 /// العربون: الفلوس نفسها عند البنك، النظام بيتابع الحالة بس
 model Deposit {
-  id                String            @id @default(cuid())
-  dealId            String
-  deal              Deal              @relation(fields: [dealId], references: [id])
-  amount            Decimal           @db.Decimal(14, 2)
-  currency          Currency          @default(EGP)
-  receiptDocumentId String?           @unique
-  receiptDocument   Document?         @relation(fields: [receiptDocumentId], references: [id])
-  approvals         PaymentApproval[]
-  escrowStatus      EscrowStatus      @default(AWAITING_TRANSFER)
-  bankReference     String?
+  /// FEE-01: المصاريف الفعلية على المستلم + الصافي، والحساب اللي اتصرف عليه
+  payoutBankAccountId String?
+  payoutBankAccount   BankAccount?      @relation(fields: [payoutBankAccountId], references: [id])
+  payoutFeeEgp        Decimal?          @db.Decimal(14, 2)
+  payoutNetEgp        Decimal?          @db.Decimal(14, 2)
+  id                  String            @id @default(cuid())
+  dealId              String
+  deal                Deal              @relation(fields: [dealId], references: [id])
+  amount              Decimal           @db.Decimal(14, 2)
+  currency            Currency          @default(EGP)
+  receiptDocumentId   String?           @unique
+  receiptDocument     Document?         @relation(fields: [receiptDocumentId], references: [id])
+  approvals           PaymentApproval[]
+  escrowStatus        EscrowStatus      @default(AWAITING_TRANSFER)
+  bankReference       String?
   /// DEAL-03 بند 7: المشتري أكد «حوّلت العربون» والبائع أكد «استلمت المبلغ» (بكود تحقق)
-  buyerSentAt       DateTime?
-  sellerReceivedAt  DateTime?
-  heldAt            DateTime?
-  settledAt         DateTime?
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+  buyerSentAt         DateTime?
+  sellerReceivedAt    DateTime?
+  heldAt              DateTime?
+  settledAt           DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
 
   @@index([dealId])
 }
@@ -1062,4 +1084,72 @@ model DocumentRequest {
   fulfilledAt   DateTime?
 
   @@index([dealId, status])
+}
+
+/// BANK-01: «حساباتي البنكية» — IBAN مشفّر، العرض مخفي، تحقق المالية، 48 ساعة قبل أي صرف، ممنوع الحذف
+model BankAccount {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id])
+  holderName       String
+  bankName         String
+  country          String
+  currency         String
+  ibanEnc          String
+  ibanLast4        String
+  ibanHash         String
+  accountNumberEnc String?
+  swiftBic         String?
+  branch           String?
+  isDefault        Boolean   @default(false)
+  status           String    @default("PENDING") // PENDING | VERIFIED | REJECTED | DISABLED
+  nameMatches      Boolean   @default(false)
+  verifiedById     String?
+  verifiedBy       User?     @relation("BankVerifier", fields: [verifiedById], references: [id])
+  verifiedAt       DateTime?
+  rejectReason     String?
+  proofDocumentId  String?
+  proofDocument    Document? @relation(fields: [proofDocumentId], references: [id])
+  usableAfter      DateTime
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  dealsAsBuyer  Deal[]    @relation("DealBuyerBank")
+  dealsAsSeller Deal[]    @relation("DealSellerBank")
+  payouts       Deposit[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([ibanHash])
+}
+
+/// PRIV-01: الكشف للطرف الآخر بالموافقة (name | plotCode | documents)
+model DisclosureConsent {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  dealId    String
+  deal      Deal      @relation(fields: [dealId], references: [id])
+  fields    String[]
+  source    String    @default("USER")
+  grantedAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  @@index([dealId, userId])
+}
+
+/// PRIV-01: طلب من جهة رسمية — بيتسجل ومش بيتعدّل
+model OfficialRequest {
+  id          String    @id @default(cuid())
+  authority   String
+  referenceNo String
+  userId      String?
+  user        User?     @relation("OfficialRequestUser", fields: [userId], references: [id])
+  dealId      String?
+  delivered   String
+  gagged      Boolean   @default(false)
+  notifiedAt  DateTime?
+  createdById String
+  createdBy   User      @relation("OfficialRequestBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
 }

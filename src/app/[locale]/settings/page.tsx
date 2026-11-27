@@ -15,7 +15,7 @@ import { date, dateTime, money, num, tr } from "@/lib/format";
 import { ACCOUNT_LEVEL, ACCOUNT_STATUS, CITY, CITY_KEYS, CONTRACT_TYPE, RATE_SOURCE, ROLE, label } from "@/lib/labels";
 import { Badge, Card, Container, DL, Notice, PageHeader, Table, Tabs, btn, field, labelCls } from "@/components/ui";
 import { saveMarketing, setPartnerShare } from "./actions";
-import { saveCity, saveRound, toggleCity, toggleRound } from "./actions";
+import { recordOfficialRequest, saveCity, saveRound, toggleCity, toggleRound } from "./actions";
 import { codeHint } from "@/lib/plot-code";
 import { addDistrict, addManualRate, bumpTemplate, fetchRateNow, moveFilesToS3, saveCommission, saveFees, saveOps, setUserRole, suspendUser, toggleDistrict, unsuspendUser } from "./actions";
 import { RoleForm } from "./RoleForm";
@@ -35,6 +35,7 @@ const SETTINGS_ERRORS: Record<string, [string, string]> = {
   city: ["راجع بيانات المدينة: الاسم الإنجليزي لاتيني، البادئة 2–4 حروف كبيرة، والصيغة فيها {prefix} و{number} وفواصلها شرطة.", "Check the city: Latin English name, a 2–4 capital-letter prefix, and a pattern with {prefix} and {number} separated by dashes."],
   city_prefix: ["البادئة دي مستخدمة لمدينة تانية.", "That prefix is used by another city."],
   city_exists: ["المدينة دي موجودة بالفعل.", "That city already exists."],
+  official: ["اكتب الجهة ورقم الطلب واللي اتسلّم.", "Enter the authority, request number and what was delivered."],
   round: ["اكتب اسم الطرح بالعربي والإنجليزي (لاتيني) ورقمه.", "Enter the round's Arabic and Latin English names and its number."],
   rate_invalid: ["سعر البيع لازم يكون أكبر من أو يساوي سعر الشراء.", "The sell rate must be greater than or equal to the buy rate."],
   rate_deviation: ["السعر بعيد عن آخر سعر آلي أكتر من الحد المسموح — علّم على «متأكد» لو ده مقصود.", "The rate is further from the last automatic rate than allowed — tick “I'm sure” if intended."],
@@ -57,6 +58,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
     commission: can(s, "commission.rates").allowed,
     templates: can(s, "template.edit").allowed,
     cities: can(s, "settings.fees").allowed,
+    official: me.role === "ADMIN",
     districts: can(s, "settings.fees").allowed,
     storage: can(s, "storage.manage").allowed,
     audit: can(s, "audit.view").allowed || can(s, "audit.view_money").allowed,
@@ -70,6 +72,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
     suspended: ["الحساب اتوقف، وصفقاته الشغالة اتعلّقت.", "Account suspended; its active deals were put on hold."],
     unsuspended: ["الحساب اتفعّل تاني.", "Account reactivated."],
     city: ["المدينة اتحفظت وظهرت في المعالج والفلاتر.", "City saved; it now shows in the wizard and filters."],
+    official: ["الطلب اتسجل (ومش بيتعدّل).", "The request was recorded (it can't be edited)."],
   };
 
   return (
@@ -100,6 +103,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             { key: "cities", label: L("المدن", "Cities"), href: `${base}?tab=cities` },
             { key: "districts", label: L("الأحياء والطروحات", "Districts & rounds"), href: `${base}?tab=districts` },
             { key: "storage", label: L("خزنة الملفات", "File vault"), href: `${base}?tab=storage` },
+            { key: "official", label: L("طلبات الجهات الرسمية", "Official requests"), href: `${base}?tab=official` },
             { key: "audit", label: L("سجل التدقيق", "Audit log"), href: `${base}?tab=audit` },
           ].filter((t) => tabs.includes(t.key as never))}
         />
@@ -110,6 +114,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         {tab === "cities" && <Cities locale={locale} />}
         {tab === "districts" && <Districts locale={locale} />}
         {tab === "storage" && <Storage locale={locale} />}
+        {tab === "official" && <Official locale={locale} />}
         {tab === "audit" && <Audit locale={locale} entity={sp.entity} />}
       </Container>
     </>
@@ -607,6 +612,53 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         <h3 className="font-bold">{L("مدينة جديدة", "New city")}</h3>
         {cityForm()}
         <p className="text-sm text-muted">{L("الصيغة: {prefix} البادئة، {block} البلوك، {number} الرقم — والفاصل شرطة.", "Pattern: {prefix} the prefix, {block} the block, {number} the number — separated by dashes.")}</p>
+      </Card>
+    );
+  }
+
+  /** PRIV-01: طلبات الجهات الرسمية — سجل ما بيتعدّلش */
+  async function Official({ locale }: { locale: "ar" | "en" }) {
+    const rows = await db.officialRequest.findMany({ orderBy: { createdAt: "desc" }, take: 50, include: { user: { select: { name: true } }, createdBy: { select: { name: true } } } });
+    return (
+      <Card title={L("طلبات الجهات الرسمية", "Requests from authorities")}>
+        <form action={recordOfficialRequest.bind(null, locale)} className="grid gap-2 sm:grid-cols-2">
+          <label className={labelCls}>
+            {L("الجهة", "Authority")}
+            <input name="authority" required minLength={3} className={field} />
+          </label>
+          <label className={labelCls}>
+            {L("رقم الطلب / السند", "Request / legal reference no.")}
+            <input name="referenceNo" required className={field} />
+          </label>
+          <label className={labelCls}>
+            {L("موبايل المستخدم المعني (اختياري)", "Affected user's mobile (optional)")}
+            <input name="phone" dir="ltr" className={field} />
+          </label>
+          <label className={labelCls}>
+            {L("رقم الصفقة (اختياري)", "Deal id (optional)")}
+            <input name="dealId" dir="ltr" className={field} />
+          </label>
+          <label className={`${labelCls} sm:col-span-2`}>
+            {L("إيه اللي اتسلّم", "What was delivered")}
+            <textarea name="delivered" required minLength={5} rows={2} className={field} />
+          </label>
+          <label className="flex min-h-11 items-center gap-2">
+            <input type="checkbox" name="gagged" className="size-5" /> {L("ممنوع قانوناً إبلاغ المستخدم", "Notifying the user is legally prohibited")}
+          </label>
+          <button className={`${btn.primary} self-end`}>{L("سجّل الطلب", "Record request")}</button>
+        </form>
+        <Table head={[L("التاريخ", "Date"), L("الجهة", "Authority"), L("الرقم", "No."), L("المستخدم", "User"), L("اتبلّغ", "Notified"), L("سجّله", "By")]}>
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <td>{date(r.createdAt, locale)}</td>
+              <td>{r.authority}</td>
+              <td dir="ltr">{r.referenceNo}</td>
+              <td>{r.user?.name ?? "—"}</td>
+              <td>{r.gagged ? L("ممنوع قانوناً", "Prohibited") : r.notifiedAt ? L("أيوه", "Yes") : "—"}</td>
+              <td>{r.createdBy.name}</td>
+            </tr>
+          ))}
+        </Table>
       </Card>
     );
   }

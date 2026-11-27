@@ -29,9 +29,10 @@ export function phoneFor(
 }
 
 /** اسم الطرف التاني: من مرحلة ٢ بعد توقيع الطرفين على اتفاق العمولة، وبيتقفل لو الصفقة اتلغت */
-export function partyNameVisible(opts: { viewerIsParty: boolean; commissionSigned: boolean; dealOpen: boolean }) {
+export function partyNameVisible(opts: { viewerIsParty: boolean; commissionSigned: boolean; dealOpen: boolean; consented?: boolean }) {
   if (!opts.viewerIsParty) return true; // الفريق
-  return opts.commissionSigned && opts.dealOpen;
+  // PRIV-01: وكمان الطرف التاني وافق على كشف اسمه
+  return opts.commissionSigned && opts.dealOpen && opts.consented === true;
 }
 
 export const HIDDEN = "•••";

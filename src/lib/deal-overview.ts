@@ -13,7 +13,7 @@ export type OverviewInput = Omit<DealFacts, "contracts" | "deposits"> & {
   buyerPriceOkAt: Date | null;
   sellerPriceOkAt: Date | null;
   contracts: { id: string; type: string; status: string; signatures: { role: string }[] }[];
-  deposits: { id: string; amount: number; escrowStatus: string; buyerSentAt: Date | null; sellerReceivedAt: Date | null; bankReference: string | null; heldAt: Date | null; settledAt: Date | null }[];
+  deposits: { id: string; amount: number; escrowStatus: string; buyerSentAt: Date | null; sellerReceivedAt: Date | null; bankReference: string | null; heldAt: Date | null; settledAt: Date | null; payoutFeeEgp?: number | null; payoutNetEgp?: number | null }[];
   /** تاريخ دخول المرحلة الحالية */
   stageEnteredAt: Date;
   /** DOC-01: مستندات طلبها المحامي/الوسيط ولسه ما اترفعتش */
@@ -100,7 +100,7 @@ export function nextActionFor(f: OverviewInput, side: Side | null, ar: boolean):
 export type MoneyStatus = "DUE" | "PAID" | "HELD" | "RELEASED" | "REFUNDED" | "ESTIMATE";
 export type MoneyLine = { label: Tx; amount: number; currency: "EGP" | "USD"; payer: Tx; payee: Tx; status: MoneyStatus; ref?: string | null; sign: 1 | -1 };
 
-export type Fees = { transferFeeEgp: number; notaryFeeEgp: number };
+export type Fees = { transferFeeEgp: number; notaryFeeEgp: number; bankFeeEstimateEgp?: number };
 
 /**
  * البائع: الثمن − عمولته − رسومه = الصافي.  المشتري: الثمن + عمولته + رسوم التنازل والتوثيق، وبعدها الأقساط المتبقية للجهاز.
@@ -125,14 +125,26 @@ export function moneyFor(
     lines.push({ label: ["ثمن القطعة", "Plot price"], amount: i.price, currency: "EGP", payer: ["المشتري", "Buyer"], payee: ["أنت", "You"], status: "DUE", sign: 1 });
     if (held) lines.push({ label: ["منه: العربون", "Of which: deposit"], amount: held.amount, currency: "EGP", payer: ["المشتري (عبر حساب الضمان)", "Buyer (via escrow)"], payee: ["أنت", "You"], status: depStatus(held), ref: held.bankReference, sign: 1 });
     if (i.commission) lines.push({ label: [`عمولة المنصة (${i.commission.sellerRatePct}%)`, `Platform commission (${i.commission.sellerRatePct}%)`], amount: i.commission.sellerAmount, currency: "EGP", payer: ["أنت", "You"], payee: ["Resell", "Resell"], status: cStatus, sign: -1 });
-    const net = i.price - (i.commission?.sellerAmount ?? 0);
-    return { lines, total: { label: ["صافي هتستلمه", "Net you receive"] as Tx, amount: net } };
+    // FEE-01: مصاريف التحويل البنكي على المستلم — تقديرية لحد ما المالية تدخل الفعلي
+    const actualFee = held?.payoutFeeEgp ?? null;
+    const bankFee = actualFee ?? i.fees.bankFeeEstimateEgp ?? 0;
+    lines.push({ label: ["مصاريف التحويل البنكي (يتحملها المستلم)", "Bank transfer fees (borne by the recipient)"], amount: bankFee, currency: "EGP", payer: ["أنت", "You"], payee: ["البنك", "Bank"], status: actualFee !== null ? "PAID" : "ESTIMATE", sign: -1 });
+    const net = i.price - (i.commission?.sellerAmount ?? 0) - bankFee;
+    return { lines, total: { label: ["الصافي المتوقع وصوله", "Expected net to arrive"] as Tx, amount: net } };
   }
   lines.push({ label: ["ثمن القطعة", "Plot price"], amount: i.price, currency: "EGP", payer: ["أنت", "You"], payee: ["البائع", "Seller"], status: "DUE", sign: 1 });
   if (held) lines.push({ label: ["منه: العربون", "Of which: deposit"], amount: held.amount, currency: "EGP", payer: ["أنت", "You"], payee: ["حساب الضمان بالبنك", "Bank escrow"], status: depStatus(held), ref: held.bankReference, sign: 1 });
   if (i.commission) lines.push({ label: [`عمولة المنصة (${i.commission.buyerRatePct}%)`, `Platform commission (${i.commission.buyerRatePct}%)`], amount: i.commission.buyerAmount, currency: "EGP", payer: ["أنت", "You"], payee: ["Resell", "Resell"], status: cStatus, sign: 1 });
   lines.push({ label: ["رسوم التنازل في الجهاز (تقديري)", "Authority transfer fee (estimate)"], amount: i.fees.transferFeeEgp, currency: "EGP", payer: ["أنت", "You"], payee: ["الجهاز", "City authority"], status: "ESTIMATE", sign: 1 });
   lines.push({ label: ["رسوم التوثيق (تقديري)", "Notary fees (estimate)"], amount: i.fees.notaryFeeEgp, currency: "EGP", payer: ["أنت", "You"], payee: ["الشهر العقاري", "Notary office"], status: "ESTIMATE", sign: 1 });
+  // FEE-01: لو العربون اترد — المبلغ المحوَّل والمصاريف (على المستلم) والصافي
+  const refunded = i.deposits.find((d) => d.escrowStatus === "REFUNDED_TO_BUYER");
+  if (refunded) {
+    const fee = refunded.payoutFeeEgp ?? i.fees.bankFeeEstimateEgp ?? 0;
+    lines.push({ label: ["رد العربون — المبلغ المحوَّل", "Deposit refund — amount transferred"], amount: refunded.amount, currency: "EGP", payer: ["حساب الضمان", "Escrow"], payee: ["أنت", "You"], status: "REFUNDED", ref: refunded.bankReference, sign: -1 });
+    lines.push({ label: ["مصاريف التحويل (يتحملها المستلم)", "Transfer fees (borne by the recipient)"], amount: fee, currency: "EGP", payer: ["أنت", "You"], payee: ["البنك", "Bank"], status: refunded.payoutFeeEgp != null ? "PAID" : "ESTIMATE", sign: 1 });
+    lines.push({ label: ["الصافي اللي وصلك", "Net received"], amount: refunded.payoutNetEgp ?? refunded.amount - fee, currency: "EGP", payer: ["حساب الضمان", "Escrow"], payee: ["أنت", "You"], status: "REFUNDED", sign: -1 });
+  }
   const total = i.price + (i.commission?.buyerAmount ?? 0) + i.fees.transferFeeEgp + i.fees.notaryFeeEgp;
   const after = i.remainingUsd ? { label: ["الأقساط المتبقية للجهاز (بتتدفع للجهاز مباشرة، مش للمنصة)", "Remaining installments to the authority (paid to the authority, not the platform)"] as Tx, amount: i.remainingUsd, currency: "USD" as const } : null;
   return { lines, total: { label: ["إجمالي هتدفعه الآن", "Total you pay now"] as Tx, amount: total }, after };

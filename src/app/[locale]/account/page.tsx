@@ -380,9 +380,15 @@ export default async function AccountPage({ params, searchParams }: Props) {
                 ],
               ]}
             />
-            <Link href={`/${locale}/account/security`} className={`${btn.small} self-start border border-brand text-brand`}>
-              {L("الخصوصية والأمان", "Privacy & security")}
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href={`/${locale}/account/security`} className={`${btn.small} border border-brand text-brand`}>
+                {L("الخصوصية والأمان", "Privacy & security")}
+              </Link>
+              {/* BANK-01 */}
+              <Link href={`/${locale}/account/bank`} className={`${btn.small} border border-brand text-brand`}>
+                {L("حساباتي البنكية", "My bank accounts")}
+              </Link>
+            </div>
           </Card>
 
           {/* UX-11: حسابات الفريق الموثّقة (أو أي حساب موثّق من غير ملف) ما يتطلبش منها توثيق */}

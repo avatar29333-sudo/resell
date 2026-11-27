@@ -108,6 +108,7 @@ export function MultiUpload({ locale, single = false, label, titleRequired = tru
       >
         <span className="font-semibold">{label ?? (single ? L("اختار ملف أو اسحبه هنا", "Choose a file or drop it here") : L("اختار ملفات أو اسحبها هنا", "Choose files or drop them here"))}</span>
         <span className="text-[13px] text-muted">{L("PDF أو JPG أو PNG أو HEIC — لحد 20 ميجا للملف", "PDF, JPG, PNG or HEIC — up to 20 MB each")}</span>
+        <span className="text-[13px] text-muted">{L("🔒 ملفاتك سرية: ما بتتعرضش غير بموافقتك، ومش بتتباع لأي جهة.", "🔒 Your files are confidential: shown only with your consent, never sold.")}</span>
         <input ref={input} type="file" multiple={!single} accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" className="sr-only" tabIndex={-1} onChange={(e) => add(e.target.files)} />
       </div>
       {items.length > 0 && (

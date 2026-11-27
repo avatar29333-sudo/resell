@@ -26,6 +26,8 @@ import { isDemoMode } from "@/lib/demo";
 import { requireActionCode } from "@/lib/action-otp";
 import { contractActionKey } from "@/lib/action-otp-core";
 import { cleanTitle } from "@/lib/upload-rules";
+import { payoutTarget } from "@/lib/bank";
+import { netAfterFees } from "@/lib/bank-rules";
 
 const loc = (l: string): Locale => (isLocale(l) ? l : "ar");
 
@@ -372,6 +374,8 @@ export async function signContract(locale: string, dealId: string, contractId: s
       await audit(user.id, "deal.rate_locked", "Deal", dealId, { rateId: locked.id, sell: toNum(locked.sell), rateDate: locked.date.toISOString(), source: locked.source });
     }
   }
+  // BANK-01: الحسابات البنكية للصفقة بتتثبت لحظة اكتمال توقيع نموذج 3
+  if (complete && contract!.type === "PRELIMINARY_CONTRACT" && !deal.bankLockedAt) await db.deal.update({ where: { id: dealId }, data: { bankLockedAt: new Date() } });
   await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, signedBy: side, complete });
   if (complete) {
     await notify([deal.buyerId, deal.listing.sellerId, deal.brokerId], {
@@ -518,6 +522,14 @@ export async function settleDeposit(locale: string, dealId: string, depositId: s
   await requireRecentAuth(user, l, back);
   const dep = deal.deposits.find((x) => x.id === depositId);
   if (!dep || dep.escrowStatus !== "HELD") finish(l, dealId, form);
+  // BANK-01: الصرف على حساب VERIFIED بتاع المستلم بس (في السيرفر، مش الواجهة بس)
+  const target = await payoutTarget(deal, to);
+  if (target.block) {
+    await audit(user.id, "payment.blocked", "Deposit", depositId, { to, reason: target.block });
+    finish(l, dealId, form, `?err=payout_${target.block}`);
+  }
+  // FEE-01: مصاريف التحويل الفعلية على المستلم
+  const fee = Math.max(0, Number(form?.get("payoutFeeEgp") ?? 0) || 0);
   if (dep!.approvals.length) finish(l, dealId, form, "?err=approval_pending");
   const limit = (await getSetting("payments.fourEyes")).limitEgp;
   if (user.role !== "ADMIN" && toNum(dep!.amount) > limit) {
@@ -531,13 +543,18 @@ export async function settleDeposit(locale: string, dealId: string, depositId: s
     });
     finish(l, dealId, form, "?ok=approval_requested");
   }
-  await executeSettlement(user, deal, depositId, to);
+  await executeSettlement(user, deal, depositId, to, fee);
   finish(l, dealId, form, "?ok=settled");
 }
 
-async function executeSettlement(user: User, deal: LoadedDeal, depositId: string, to: "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER") {
-  await db.deposit.update({ where: { id: depositId }, data: { escrowStatus: to, settledAt: new Date() } });
-  await event(deal, user, "DEPOSIT_UPDATED", { depositId, status: to });
+async function executeSettlement(user: User, deal: LoadedDeal, depositId: string, to: "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER", fee = 0) {
+  // BANK-01: دفاع تاني جوه التنفيذ نفسه (طريق الموافقة كمان)
+  const target = await payoutTarget(deal, to);
+  if (target.block) throw new Error(`payout blocked: ${target.block}`);
+  const dep = deal.deposits.find((x) => x.id === depositId);
+  const n = netAfterFees(toNum(dep?.amount), fee);
+  await db.deposit.update({ where: { id: depositId }, data: { escrowStatus: to, settledAt: new Date(), payoutBankAccountId: target.acc!.id, payoutFeeEgp: n.fee, payoutNetEgp: n.net } });
+  await event(deal, user, "DEPOSIT_UPDATED", { depositId, status: to, amount: n.amount, fee: n.fee, net: n.net, account: `•••• ${target.acc!.ibanLast4}` });
   await notify([to === "RELEASED_TO_SELLER" ? deal.listing.sellerId : deal.buyerId], {
     kind: `deposit.${to.toLowerCase()}`,
     ar: [to === "RELEASED_TO_SELLER" ? "العربون اتصرف لك" : "العربون اترد لك بالكامل"],
@@ -560,7 +577,11 @@ export async function decidePayment(locale: string, dealId: string, approvalId: 
     data: { status: approve ? "APPROVED" : "REJECTED", decidedById: user.id, decidedAt: new Date(), note: String(form.get("note") ?? "") || null },
   });
   await audit(user.id, `payment.${approve ? "approved" : "rejected"}`, "PaymentApproval", approvalId, { depositId: a!.depositId, action: a!.action });
-  if (approve) await executeSettlement(user, deal, a!.depositId, a!.action as "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER");
+  if (approve) {
+    const target = await payoutTarget(deal, a!.action as "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER");
+    if (target.block) done(l, dealId, `?err=payout_${target.block}`);
+    await executeSettlement(user, deal, a!.depositId, a!.action as "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER", Math.max(0, Number(form.get("payoutFeeEgp") ?? 0) || 0));
+  }
   await notify([a!.requestedById], {
     kind: "payment.decided",
     ar: [approve ? "الأدمن وافق على طلب الصرف واتنفذ" : "الأدمن رفض طلب الصرف"],
@@ -623,6 +644,8 @@ export async function uploadDealDocument(locale: string, dealId: string, form: F
       mimeType: f.file!.type,
       // خطاب الجهاز بيتعمد من المحامي المسند قبل ما الصفقة تتقفل
       status: type === "AUTHORITY_STATEMENT" ? "IN_REVIEW" : "UPLOADED",
+      // PRIV-01: رفع الطرف خاص لحد ما يشاركه؛ رفع الفريق (إيصال التقديم، خطاب الجهاز) للطرفين
+      visibility: side === "BUYER" || side === "SELLER" ? "PRIVATE" : "SHARED_WITH_COUNTERPARTY",
     },
   });
   if (type === "TRANSFER_RECEIPT") {
@@ -757,7 +780,7 @@ export async function attachDealDocuments(locale: string, dealId: string, form: 
   const side = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
   const req = requestId ? await db.documentRequest.findFirst({ where: { id: requestId, dealId, status: "OPEN", side: side ?? "-" } }) : null;
   for (const [i, d] of drafts.entries()) {
-    await db.document.update({ where: { id: d.id }, data: { dealId, title: titles[i] } });
+    await db.document.update({ where: { id: d.id }, data: { dealId, title: titles[i], visibility: side ? "PRIVATE" : "SHARED_WITH_COUNTERPARTY" } });
     await event(deal, user, "DOCUMENT_ADDED", { documentId: d.id, type: "OTHER", title: titles[i] });
   }
   if (req) {
@@ -815,4 +838,62 @@ export async function requestDocument(locale: string, dealId: string, form: Form
     link: `/deals/${dealId}#other-docs`,
   });
   done(l, dealId, "#other-docs");
+}
+
+// ─── PRIV-01: الكشف بالموافقة ومشاركة مستند ───
+
+const DISCLOSABLE = { SELLER: ["name", "plotCode", "documents"], BUYER: ["name"] } as const;
+
+/** «هيتعرض للطرف الآخر: … — موافق؟» بكود تأكيد */
+export async function grantDisclosure(locale: string, dealId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  const side = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
+  if (!side) done(l, dealId, "?err=forbidden");
+  const allowed: readonly string[] = DISCLOSABLE[side!];
+  const fields = form.getAll("field").map(String).filter((f) => allowed.includes(f)).sort();
+  if (!fields.length) done(l, dealId, "#disclosure");
+  await requireActionCode(user, "disclosure.consent", dealId, { fields: fields.join(",") }, form, back);
+  await db.disclosureConsent.create({ data: { userId: user.id, dealId, fields } });
+  await event(deal, user, "NOTE", { disclosureGranted: fields, by: side });
+  await notify([deal.brokerId, side === "SELLER" ? deal.buyerId : deal.listing.sellerId], {
+    kind: "deal.disclosure",
+    ar: [side === "SELLER" ? "البائع وافق على كشف بيانات للطرف الآخر" : "المشتري وافق على كشف اسمه"],
+    en: [side === "SELLER" ? "The seller agreed to disclose details to the other party" : "The buyer agreed to disclose their name"],
+    link: `/deals/${dealId}`,
+  });
+  done(l, dealId, "#disclosure");
+}
+
+/** سحب الموافقة — بيوقف الكشف من دلوقتي (العقود الموقّعة بتفضل محفوظة للمدة القانونية) */
+export async function revokeDisclosure(locale: string, dealId: string) {
+  const { l, user, deal } = await ctx(locale, dealId);
+  const n = await db.disclosureConsent.updateMany({ where: { dealId, userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } });
+  if (n.count) await event(deal, user, "NOTE", { disclosureRevoked: true });
+  done(l, dealId, "#disclosure");
+}
+
+/** «شارك مع الطرف الآخر» — بكود تأكيد */
+export async function shareDocument(locale: string, dealId: string, documentId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  const d = deal.documents.find((x) => x.id === documentId);
+  if (!d || (d.ownerId !== user.id && d.uploadedById !== user.id)) done(l, dealId, "?err=forbidden#other-docs");
+  await requireActionCode(user, "document.share", dealId, { documentId }, form, back);
+  await db.document.update({ where: { id: documentId }, data: { visibility: "SHARED_WITH_COUNTERPARTY" } });
+  await event(deal, user, "NOTE", { documentShared: d!.title ?? d!.type });
+  done(l, dealId, "#other-docs");
+}
+
+/** BANK-01: كل طرف يختار الحساب اللي هيستلم عليه (أو يترد له عليه) — بكود؛ بعد توقيع نموذج 3 التغيير محتاج المالية */
+export async function selectDealBank(locale: string, dealId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  const side = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
+  if (!side) done(l, dealId, "?err=forbidden");
+  if (deal.bankLockedAt) done(l, dealId, "?err=bank_locked#bank");
+  const accountId = String(form.get("accountId") ?? "");
+  const acc = await db.bankAccount.findFirst({ where: { id: accountId, userId: user.id, status: { in: ["PENDING", "VERIFIED"] } } });
+  if (!acc) done(l, dealId, "?err=forbidden#bank");
+  await requireActionCode(user, "bank.select", dealId, { accountId }, form, back);
+  await db.deal.update({ where: { id: dealId }, data: side === "BUYER" ? { buyerBankAccountId: accountId } : { sellerBankAccountId: accountId } });
+  await event(deal, user, "NOTE", { bankSelected: `•••• ${acc!.ibanLast4}`, by: side });
+  done(l, dealId, "#bank");
 }
