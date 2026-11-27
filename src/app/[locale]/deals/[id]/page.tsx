@@ -35,6 +35,8 @@ import { TrackEvent } from "@/components/Analytics";
 import { OtpConfirm } from "@/components/OtpConfirm";
 import { MultiUpload } from "@/components/MultiUpload";
 import { ContractSlots } from "./ContractSlots";
+import { requestExport } from "../../exports/actions";
+import { REASON_AR } from "@/lib/export-core";
 import { renderTemplate } from "@/lib/templates";
 import { dealVars } from "@/lib/contract-vars";
 import { PAYOUT_ERRORS } from "@/lib/bank";
@@ -170,6 +172,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
       "payment.approve",
       "commission.collect",
       "commission.waive",
+      "export.deal",
     ],
     { deal: dc },
   );
@@ -216,6 +219,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
     const tv = await db.templateVersion.findUnique({ where: { id: c.templateVersionId! }, include: { template: true } });
     if (tv) clickwraps[c.id] = { title: tv.template.titleAr, version: tv.version, text: renderTemplate(tv.bodyMarkdown, await dealVars(deal, tv.version)).text };
   }
+  const exportsLog = p["export.deal"].allowed ? await db.exportJob.findMany({ where: { kind: "DEAL", subjectId: id }, orderBy: { createdAt: "desc" }, take: 10, include: { requestedBy: { select: { name: true } } } }) : [];
   const ovw = { ...overviewOf(deal), docRequests: docRequests.map((r) => ({ side: r.side, title: r.title })) };
   const dealFees = await getSetting("deal.fees");
   const logFilter = (["money", "docs", "comms", "stage"] as const).find((x) => x === sp.log) as EventCategory | undefined;
@@ -994,6 +998,42 @@ export default async function DealRoom({ params, searchParams }: Props) {
                     </label>
                   </OtpConfirm>
                 </details>
+              </Card>
+            )}
+
+            {/* ADM-EXP-01/03: ملف الصفقة كاملاً — بتأكيد هوية + سبب، وسجل التصديرات */}
+            {p["export.deal"].allowed && (
+              <Card title={<span id="export" className="scroll-mt-24">{L("تنزيل ملف الصفقة", "Download the deal file")}</span>}>
+                {sp.ok === "export" && <Notice tone="green">{L("التصدير شغال في الخلفية — هيوصلك تنبيه بالرابط (مرة واحدة لمدة ساعة) وتنبيه منفصل بكلمة السر.", "The export runs in the background — you'll get a notification with the link (one use, one hour) and a separate one with the password.")}</Notice>}
+                {sp.err === "export_reason" && <Notice tone="red">{L("اختار سبب التصدير (ولو «أخرى» اكتب الشرح).", "Choose an export reason (and explain if “Other”).")}</Notice>}
+                <form action={requestExport.bind(null, locale, "DEAL", id)} className="flex flex-col gap-2">
+                  <label className={labelCls}>
+                    {L("سبب التصدير", "Export reason")}
+                    <select name="reason" required className={field}>
+                      {Object.entries(REASON_AR).map(([k, v]) => (
+                        <option key={k} value={k}>
+                          {ar ? v : k}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <input name="reasonNote" aria-label={L("شرح (لو أخرى)", "Details (if other)")} placeholder={L("شرح (لو أخرى)", "Details (if other)")} className={field} />
+                  <span className="text-[13px] text-muted">{L("هيطلب منك تأكيد هويتك بكود. الملف ZIP مشفّر بكلمة سر (افتحه بـ 7-Zip أو The Unarchiver)، وكل PDF عليه ختم باسمك.", "You'll be asked to confirm your identity with a code. The ZIP is password-encrypted (open with 7-Zip or The Unarchiver) and every PDF is stamped with your name.")}{me.role !== "ADMIN" && L(" نسخة المحامي من غير أرقام الحسابات البنكية الكاملة.", " The lawyer's copy excludes full bank account numbers.")}</span>
+                  <button className={`${btn.secondary} self-start`}>{L("صدّر ملف الصفقة", "Export the deal file")}</button>
+                </form>
+                {exportsLog.length > 0 && (
+                  <ul className="flex flex-col divide-y divide-line text-sm">
+                    {exportsLog.map((x) => (
+                      <li key={x.id} className="flex flex-wrap justify-between gap-2 py-2">
+                        <span>
+                          {x.requestedBy.name} — {REASON_AR[x.reason] ?? x.reason} — {x.status}
+                          {x.sizeBytes ? ` — ${Math.round(x.sizeBytes / 1024)} KB — ${x.fileCount} ${L("ملف", "files")}` : ""}
+                        </span>
+                        <span className="text-[13px] text-muted">{dateTime(x.createdAt, locale)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </Card>
             )}
 

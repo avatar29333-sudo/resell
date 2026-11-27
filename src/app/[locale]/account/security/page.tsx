@@ -28,10 +28,15 @@ export default async function SecurityPage({ params, searchParams }: Props) {
   const channel = effectiveChannel(me);
   // PRIV-01: كل فتح لمستند متسجل — المستخدم يشوف مين فتح ملفاته (الدور والاسم الأول)
   const myDocs = await db.document.findMany({ where: { OR: [{ ownerId: me.id }, { uploadedById: me.id }] }, select: { id: true, type: true, title: true } });
-  const views = myDocs.length
-    ? await db.auditLog.findMany({ where: { action: "document.view", entityType: "Document", entityId: { in: myDocs.map((d) => d.id) }, actorId: { not: me.id } }, orderBy: { createdAt: "desc" }, take: 50, include: { actor: { select: { name: true, role: true } } } })
-    : [];
+  // + أي تصدير ملف صفقة/مستخدم فيه بياناتك (إلا طلب جهة رسمية ممنوع الإخطار بيه — ADM-EXP-03)
+  const views = await db.auditLog.findMany({
+    where: { actorId: { not: me.id }, OR: [{ action: "document.view", entityType: "Document", entityId: { in: myDocs.map((d) => d.id) } }, { action: "export.included", entityType: "User", entityId: me.id }] },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: { actor: { select: { name: true, role: true } } },
+  });
   const docName = (id: string) => {
+    if (id === me.id) return L("ملف تصدير فيه بياناتك", "An export that includes your data");
     const d = myDocs.find((x) => x.id === id);
     return d ? (d.title ?? label(DOC_TYPE, d.type, locale)) : "—";
   };

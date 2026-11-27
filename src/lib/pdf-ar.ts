@@ -356,3 +356,32 @@ export async function imagesToPdf(images: { data: Uint8Array; mime: string }[]) 
   const bytes = Buffer.from(await doc.save());
   return { bytes, pages: images.length, lowQualityPage, sha256: createHash("sha256").update(bytes).digest("hex") };
 }
+
+/**
+ * ADM-EXP-03: ختم على كل صفحة في PDF موجود: «صادر بواسطة … — التاريخ — للاستخدام الداخلي».
+ * لو الملف مش PDF سليم (أو متشفّر) بيرجع زي ما هو.
+ */
+export async function stampPdf(bytes: Uint8Array, text: string) {
+  try {
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: false, updateMetadata: false });
+    doc.registerFontkit(fontkit);
+    const font = await doc.embedFont(fontBytes().bold, { subset: false, features: { calt: false } });
+    const size = 9;
+    const color = rgb(0.64, 0.13, 0.13);
+    for (const page of doc.getPages()) {
+      const { width, height } = page.getSize();
+      const runs = bidiRuns(text);
+      const widths = runs.map((r) => runWidth(font, r.rtl ? rtlGlyphText(r.text) : r.text, size));
+      const total = widths.reduce((a, c) => a + c, 0);
+      page.drawRectangle({ x: width - total - 24, y: height - 22, width: total + 16, height: 16, color: rgb(1, 1, 1), opacity: 0.85 });
+      let x = width - 16;
+      runs.forEach((r, i) => {
+        x -= widths[i];
+        drawRun(page, font, r.rtl ? rtlGlyphText(r.text) : r.text, x, height - 17, size, color);
+      });
+    }
+    return new Uint8Array(await doc.save());
+  } catch {
+    return bytes;
+  }
+}

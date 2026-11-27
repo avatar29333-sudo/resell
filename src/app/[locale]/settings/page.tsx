@@ -24,7 +24,7 @@ import { storageMode } from "@/lib/storage";
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ tab?: string; q?: string; page?: string; role?: string; city?: string; from?: string; to?: string; actor?: string; group?: string; entity?: string; fx?: string; moved?: string; failed?: string; err?: string; ok?: string; buy?: string; sell?: string }>;
+  searchParams: Promise<{ tab?: string; q?: string; page?: string; role?: string; city?: string; from?: string; to?: string; actor?: string; group?: string; entity?: string; fx?: string; moved?: string; failed?: string; err?: string; ok?: string; buy?: string; sell?: string; has?: string }>;
 };
 
 const PAGE = 50;
@@ -129,16 +129,22 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         scopeUsersFor(me),
         { anonymizedAt: null },
         roleFilter ? { role: roleFilter as never } : {},
+        // REL-02: «عنده عروض» / «عنده صفقات شراء» / «الاتنين»
+        sp.has === "listings" ? { listings: { some: {} } } : sp.has === "buys" ? { dealsAsBuyer: { some: {} } } : sp.has === "both" ? { listings: { some: {} }, dealsAsBuyer: { some: {} } } : {},
         q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { phone: { contains: q } }, { email: { contains: q, mode: "insensitive" } }] } : {},
       ],
     };
     const [users, total] = await Promise.all([
-      db.user.findMany({ where, orderBy: [{ role: "desc" }, { name: "asc" }], skip: (page - 1) * PAGE, take: PAGE }),
+      db.user.findMany({ where, orderBy: [{ role: "desc" }, { name: "asc" }], skip: (page - 1) * PAGE, take: PAGE, include: { _count: { select: { listings: true, dealsAsBuyer: true, buyRequests: true } } } }),
       db.user.count({ where }),
     ]);
     const pages = Math.max(1, Math.ceil(total / PAGE));
     const roleOptions = Object.keys(ROLE).map((k) => ({ key: k, label: label(ROLE, k, locale) }));
-    const qs = (p: number) => `${base}?tab=users${q ? `&q=${encodeURIComponent(q)}` : ""}${roleFilter ? `&role=${roleFilter}` : ""}&page=${p}`;
+    const qs = (p: number) => `${base}?tab=users${q ? `&q=${encodeURIComponent(q)}` : ""}${roleFilter ? `&role=${roleFilter}` : ""}${sp.has ? `&has=${sp.has}` : ""}&page=${p}`;
+    // REL-02: صفقات كبائع لكل مستخدم في الصفحة دي
+    const sellerDeals = await db.deal.groupBy({ by: ["listingId"], where: { listing: { sellerId: { in: users.map((u) => u.id) } } }, _count: true });
+    const listingOwner = new Map((await db.listing.findMany({ where: { id: { in: sellerDeals.map((s) => s.listingId) } }, select: { id: true, sellerId: true } })).map((x) => [x.id, x.sellerId]));
+    const sellCount = (uid: string) => sellerDeals.filter((s) => listingOwner.get(s.listingId) === uid).reduce((a, s) => a + s._count, 0);
     return (
       <Card title={L(`المستخدمين (${num(total, locale)})`, `Users (${total})`)}>
         <form className="flex flex-wrap gap-2">
@@ -152,13 +158,21 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               </option>
             ))}
           </select>
+          <select name="has" defaultValue={sp.has ?? ""} className={`${field} w-48`} aria-label={L("النشاط", "Activity")}>
+            <option value="">{L("كل النشاط", "Any activity")}</option>
+            <option value="listings">{L("عنده عروض", "Has listings")}</option>
+            <option value="buys">{L("عنده صفقات شراء", "Has purchases")}</option>
+            <option value="both">{L("الاتنين", "Both")}</option>
+          </select>
           <button className={btn.secondary}>{L("بحث", "Search")}</button>
         </form>
-        <Table head={[L("الاسم", "Name"), L("الموبايل", "Mobile"), L("المستوى", "Level"), L("الحالة", "Status"), L("الدور", "Role")]}>
+        <Table head={[L("الاسم", "Name"), L("الموبايل", "Mobile"), L("عروض / بيع / شراء / طلبات", "Listings / sell / buy / requests"), L("المستوى", "Level"), L("الحالة", "Status"), L("الدور", "Role")]}>
           {users.map((u) => (
             <tr key={u.id}>
               <td className="font-semibold">
-                {u.name}
+                <Link href={`/${locale}/settings/users/${u.id}`} className="text-brand underline">
+                  {u.name}
+                </Link>
                 {u.brokerRegNo && (
                   <div className="text-xs font-normal text-muted" dir="ltr">
                     #{u.brokerRegNo}
@@ -176,6 +190,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               <td dir="ltr" className="text-start">
                 {u.phone}
               </td>
+              <td className="tabular-nums">{num(u._count.listings, locale)} / {num(sellCount(u.id), locale)} / {num(u._count.dealsAsBuyer, locale)} / {num(u._count.buyRequests, locale)}</td>
               <td>
                 <Badge tone={u.accountLevel === "VERIFIED" ? "green" : "gray"}>{label(ACCOUNT_LEVEL, u.accountLevel, locale)}</Badge>
               </td>

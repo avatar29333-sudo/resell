@@ -45,3 +45,20 @@ describe("PRIV-01 disclosure by consent", () => {
     expect(can(strangerBroker, "document.view", { listing, deal: deal(["documents"]), document: doc("ALLOCATION_LETTER", "seller", "SHARED_WITH_COUNTERPARTY") }).allowed).toBe(false);
   });
 });
+
+describe("ADM-EXP-03 export permissions", () => {
+  const broker: Subject = { id: "broker", role: "BROKER", accountLevel: "VERIFIED", status: "ACTIVE" };
+  const lawyer: Subject = { id: "lawyer", role: "LAWYER", accountLevel: "VERIFIED", status: "ACTIVE" };
+  const otherLawyer: Subject = { id: "l2", role: "LAWYER", accountLevel: "VERIFIED", status: "ACTIVE" };
+  it("a broker can't export a deal, even their own", () => {
+    expect(can(broker, "export.deal", { deal: deal() }).allowed).toBe(false);
+  });
+  it("only the assigned lawyer can export the deal file", () => {
+    expect(can(lawyer, "export.deal", { deal: deal() }).allowed).toBe(true);
+    expect(can(otherLawyer, "export.deal", { deal: deal() }).allowed).toBe(false);
+  });
+  it("user files are admin-only", () => {
+    expect(can(lawyer, "export.user", {}).allowed).toBe(false);
+    expect(can({ id: "a", role: "ADMIN", accountLevel: "VERIFIED", status: "ACTIVE" }, "export.user", {}).allowed).toBe(true);
+  });
+});

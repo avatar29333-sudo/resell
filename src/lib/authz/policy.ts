@@ -180,6 +180,9 @@ export const ACTIONS = [
   "audit.view",
   "audit.view_money",
   "storage.manage",
+  // ADM-EXP-03: صلاحيات التصدير منفصلة
+  "export.deal",
+  "export.user",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -376,6 +379,9 @@ const RULES: Record<Action, Rule[]> = {
   "settings.fees": [],
   "audit.view": [],
   "audit.view_money": [{ roles: ["FINANCE"] }],
+  // ADM-EXP-03: المحامي ينزّل ملف صفقته المسندة له بس (من غير البيانات البنكية الكاملة)؛ ملف المستخدم للأدمن بس
+  "export.deal": [{ roles: ["LAWYER"], when: isDealLawyer }],
+  "export.user": [],
   "storage.manage": [],
 };
 
@@ -398,6 +404,8 @@ const NATIVE_ADMIN: Action[] = [
   "audit.view",
   "audit.view_money",
   "storage.manage",
+  "export.deal",
+  "export.user",
   "service.view_queue",
   "service.assign",
   "service.update",

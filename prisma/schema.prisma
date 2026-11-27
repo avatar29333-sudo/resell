@@ -220,6 +220,7 @@ enum ServiceRequestStatus {
 // ───────────────────────── الجداول ─────────────────────────
 
 model User {
+  exportJobs         ExportJob[]
   approvedTemplates  TemplateVersion[]   @relation("TemplateLawyer")
   bankAccounts       BankAccount[]
   verifiedBanks      BankAccount[]       @relation("BankVerifier")
@@ -1211,4 +1212,30 @@ model TemplateVersion {
   contracts          Contract[]
 
   @@unique([templateId, version])
+}
+
+/// ADM-EXP: تصدير ملف صفقة/مستخدم — في الخلفية، ZIP مشفّر، رابط لمرة واحدة لمدة ساعة، والملف المؤقت بيتشال بعدها
+model ExportJob {
+  id            String    @id @default(cuid())
+  kind          String // DEAL | USER | DEALS_MONTH
+  subjectId     String
+  reason        String
+  reasonNote    String?
+  requestedById String
+  requestedBy   User      @relation(fields: [requestedById], references: [id])
+  status        String    @default("PENDING") // PENDING | READY | DOWNLOADED | EXPIRED | FAILED
+  storageKey    String?
+  fileName      String?
+  sha256        String?
+  sizeBytes     Int?
+  fileCount     Int?
+  tokenHash     String?
+  error         String?
+  readyAt       DateTime?
+  expiresAt     DateTime?
+  downloadedAt  DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([kind, subjectId])
+  @@index([requestedById])
 }

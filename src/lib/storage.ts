@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { db } from "./db";
 import { sniffMime } from "./file-sniff";
@@ -138,4 +138,22 @@ export async function fileFromForm(form: FormData, field: string) {
   const type = sniffMime(data);
   if (!type) return { error: "type" as const };
   return { file: { name: f.name, type, data } };
+}
+
+/** ADM-EXP: بايتات الملف نفسه (من القاعدة أو من S3) — للتصدير */
+export async function readBytes(key: string): Promise<Uint8Array | null> {
+  const blob = await db.fileBlob.findUnique({ where: { key } });
+  if (blob) return blob.data;
+  const store = s3();
+  if (!store) return null;
+  const r = await store.client.send(new GetObjectCommand({ Bucket: store.bucket, Key: key }));
+  return r.Body ? await r.Body.transformToByteArray() : null;
+}
+
+/** ADM-EXP: مسح ملف تصدير مؤقت بعد التنزيل/الانتهاء (المستندات الأصلية عمرها ما بتتمسح من هنا) */
+export async function deleteExportFile(key: string) {
+  if (!key.startsWith("exports/")) throw new Error("only export files can be deleted");
+  await db.fileBlob.deleteMany({ where: { key } });
+  const store = s3();
+  if (store) await store.client.send(new DeleteObjectCommand({ Bucket: store.bucket, Key: key })).catch(() => {});
 }

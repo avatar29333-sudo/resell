@@ -84,7 +84,7 @@ describe("PERM-10 matrix — every role × every action", () => {
   }
 
   // أفعال الأدمن بس — ولا دور تاني
-  const adminOnly: Action[] = ["user.list", "user.set_role", "user.suspend", "deal.revert", "template.edit", "payment.approve", "commission.waive", "commission.rates", "settings.fees", "audit.view", "storage.manage"];
+  const adminOnly: Action[] = ["user.list", "user.set_role", "user.suspend", "deal.revert", "template.edit", "payment.approve", "commission.waive", "commission.rates", "settings.fees", "audit.view", "storage.manage", "export.user"];
   it("admin-only actions are denied to every other role, even when assigned", () => {
     for (const role of ROLES.filter((r) => r !== "ADMIN"))
       for (const a of adminOnly) expect(can(me(role), a, mine(role)).allowed, `${role} ${a}`).toBe(false);
