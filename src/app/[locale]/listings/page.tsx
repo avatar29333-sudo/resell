@@ -5,6 +5,7 @@ import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { latestRate, totalEgp } from "@/lib/listing";
 import { getSetting } from "@/lib/settings";
+import { arrangeListings, registerHref } from "@/lib/register";
 import { daysUntil, money, num, toNum, tr } from "@/lib/format";
 import { districtName } from "@/lib/district";
 import { CITY, CITY_KEYS, LISTING_STATUS, PAYMENT_STATUS, PRICE_TYPE, label, toneOf } from "@/lib/labels";
@@ -12,7 +13,7 @@ import { Badge, Container, Empty, PageHeader, btn, field, labelCls } from "@/com
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ city?: string; area?: string; budget?: string; sort?: string; paid?: string }>;
+  searchParams: Promise<{ city?: string; area?: string; budget?: string; sort?: string; paid?: string; inDeal?: string; page?: string }>;
 };
 
 export default async function ListingsPage({ params, searchParams }: Props) {
@@ -45,10 +46,15 @@ export default async function ListingsPage({ params, searchParams }: Props) {
     orderBy: { publishedAt: "desc" },
   });
 
-  let listings = rows.map((l) => ({ ...l, total: totalEgp(l, usd) }));
-  if (budget) listings = listings.filter((l) => l.total <= budget);
-  if (sp.sort === "price") listings.sort((a, b) => a.total - b.total);
-  if (sp.sort === "sqm") listings.sort((a, b) => a.total / toNum(a.plot.areaSqm) - b.total / toNum(b.plot.areaSqm));
+  // UX-07: اللي في صفقة في الآخر (أو مستخبي)، و24 عرض في الصفحة، والفلاتر في الرابط
+  const inDeal = sp.inDeal === "1";
+  const arranged = arrangeListings(
+    rows.map((l) => ({ ...l, total: totalEgp(l, usd), areaSqm: toNum(l.plot.areaSqm) })),
+    { sort: sp.sort, inDeal, budget, page: Number(sp.page) || 1 },
+  );
+  const listings = arranged.items;
+  const base = `/${locale}/listings`;
+  const keep = { city: sp.city, area: sp.area, budget: sp.budget, sort: sp.sort, paid: sp.paid, inDeal: sp.inDeal };
 
   return (
     <>
@@ -92,13 +98,17 @@ export default async function ListingsPage({ params, searchParams }: Props) {
             <input type="checkbox" name="paid" value="1" defaultChecked={sp.paid === "1"} className="size-5" />
             {L("مسدد بالكامل بس", "Fully paid only")}
           </label>
+          <label className="flex min-h-11 items-center gap-2 text-sm font-medium text-muted">
+            <input type="checkbox" name="inDeal" value="1" defaultChecked={inDeal} className="size-5" />
+            {L("اعرض اللي في صفقة كمان", "Also show listings in a deal")}
+          </label>
           <button type="submit" className={btn.primary}>
             {L("ابحث", "Search")}
           </button>
         </form>
 
         <p className="text-muted">
-          {L(`${num(listings.length, locale)} عرض`, `${listings.length} listings`)} ·{" "}
+          {L(`${num(arranged.total, locale)} عرض`, `${arranged.total} listings`)} ·{" "}
           {L(`سعر الدولار المستخدم: ${num(usd, locale, 2)} ج.م`, `USD rate used: EGP ${num(usd, locale, 2)}`)}
         </p>
 
@@ -160,6 +170,31 @@ export default async function ListingsPage({ params, searchParams }: Props) {
               );
             })}
           </ul>
+        )}
+
+        {arranged.pages > 1 && (
+          <nav aria-label={L("صفحات العروض", "Listing pages")} className="flex flex-wrap items-center justify-center gap-2">
+            {arranged.page > 1 && (
+              <Link href={registerHref(base, keep, { page: String(arranged.page - 1) })} className={btn.secondary}>
+                {L("السابق", "Previous")}
+              </Link>
+            )}
+            {Array.from({ length: arranged.pages }, (_, i) => i + 1).map((p) => (
+              <Link
+                key={p}
+                href={registerHref(base, keep, { page: p === 1 ? undefined : String(p) })}
+                aria-current={p === arranged.page ? "page" : undefined}
+                className={`inline-flex min-h-11 min-w-11 items-center justify-center border px-3 font-semibold ${p === arranged.page ? "border-navy bg-navy text-white" : "border-line hover:border-navy"}`}
+              >
+                {num(p, locale)}
+              </Link>
+            ))}
+            {arranged.page < arranged.pages && (
+              <Link href={registerHref(base, keep, { page: String(arranged.page + 1) })} className={btn.secondary}>
+                {L("التالي", "Next")}
+              </Link>
+            )}
+          </nav>
         )}
       </Container>
     </>
