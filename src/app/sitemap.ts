@@ -1,13 +1,31 @@
 import type { MetadataRoute } from "next";
 import { db } from "@/lib/db";
 import { siteUrl } from "@/lib/meta";
+import { CITY_SLUG, slugify } from "@/lib/slugs";
+import { GUIDES } from "@/content/guides";
 
 // UX-08: خريطة الموقع — الصفحات العامة بالعربي والإنجليزي + العروض المنشورة
 export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = siteUrl();
-  const pages = ["", "/listings", "/price-index", "/rescue", "/privacy", "/terms"];
+  const districts = await db.district.findMany({ where: { active: true }, select: { city: true, nameEn: true } });
+  const pages = [
+    "",
+    "/listings",
+    "/price-index",
+    "/rescue",
+    "/valuation",
+    "/remind-me",
+    "/guides",
+    "/privacy",
+    "/terms",
+    // MKT-08: صفحات المدن والأحياء
+    ...Object.values(CITY_SLUG).map((s) => `/beit-el-watan/${s}`),
+    ...districts.map((d) => `/beit-el-watan/${CITY_SLUG[d.city]}/${slugify(d.nameEn)}`),
+    // MKT-09: الأدلة
+    ...GUIDES.map((g) => `/guides/${g.slug}`),
+  ];
   const listings = await db.listing.findMany({
     where: { status: { in: ["PUBLISHED", "IN_DEAL"] }, seller: { status: "ACTIVE" } },
     select: { id: true, updatedAt: true },
