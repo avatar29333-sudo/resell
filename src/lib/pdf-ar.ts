@@ -257,7 +257,14 @@ export async function renderPdf(meta: PdfMeta, blocks: Block[]) {
   const qr = meta.verifyUrl ? await doc.embedPng(await QRCode.toBuffer(meta.verifyUrl, { margin: 1, width: 180 })) : null;
   w.pages.forEach((page, i) => {
     const top = A4[1] - M;
-    w.line("Resell", 14, { bold: true, color: NAVY, page, y: top - 14, align: "end" });
+    // الرمز قبل الكلمة (من الشمال) زي مجموعة الشعار
+    const markX = rtl ? M : A4[0] - M - w.measure("Resell", 14, true) - 26;
+    w.line("Resell", 14, { bold: true, color: NAVY, page, y: top - 14, x: markX + 25, w: 120, align: rtl ? "end" : "start" });
+    // شعار Resell (سهم البيع + علامة الصح) جنب الاسم — نفس مسارات مجموعة الشعار
+    const markY = top - 18 + 20;
+    page.drawSvgPath("M49.34 18.46A22 22 0 1 1 23.76 11.60", { x: markX, y: markY, scale: 20 / 64, borderColor: NAVY, borderWidth: 7.5 });
+    page.drawSvgPath("M35.17 10.23L19.09 3.81L26.59 20.18Z", { x: markX, y: markY, scale: 20 / 64, color: NAVY });
+    page.drawSvgPath("M21 32.5l7.5 7.5L43 25", { x: markX, y: markY, scale: 20 / 64, borderColor: rgb(0.17, 0.33, 0.84), borderWidth: 7.5, borderLineCap: 1 });
     w.line(meta.title, 12, { bold: true, color: NAVY, page, y: top - 14, align: "start" });
     if (meta.subtitle) w.line(meta.subtitle, 9, { color: MUTED, page, y: top - 30, align: "start" });
     page.drawLine({ start: { x: M, y: top - 38 }, end: { x: A4[0] - M, y: top - 38 }, thickness: 1, color: NAVY });

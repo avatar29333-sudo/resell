@@ -61,7 +61,7 @@ export default async function InspectionReport({ params }: { params: Promise<{ l
       <div className="flex flex-wrap items-center justify-between gap-3 border-b-[3px] border-navy pb-4">
         <div className="flex flex-col gap-1">
           <span className="text-navy">
-            <Logo />
+            <Logo tone="color" size={30} />
           </span>
           <h1 className="text-2xl font-bold">{L("تقرير معاينة قطعة", "Plot inspection report")}</h1>
           <span className="text-sm text-muted">

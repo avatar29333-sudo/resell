@@ -56,7 +56,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
       {/* UX-06: الموبايل (تحت 768px) — لوجو + «اعرض قطعتك» + ☰ وبس، والهيدر ≤ 72px */}
       <div className="relative flex h-[64px] items-center justify-between gap-2 px-4 md:hidden">
         <Link href={base} className="flex items-center text-white no-underline" aria-label="Resell">
-          <Logo />
+          <Logo tone="white" size={30} />
         </Link>
         <div className="flex items-center gap-1">
           {user && <Bell href={`${base}/notifications`} unread={unread} ar={ar} />}
@@ -105,7 +105,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
       {/* الشاشات الأكبر */}
       <div className="mx-auto hidden min-h-[68px] max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-3 md:flex md:px-8">
         <Link href={base} className="flex items-center gap-3 text-white no-underline">
-          <Logo />
+          <Logo tone="white" size={30} />
           <span className="hidden border-s border-navy-soft ps-3 text-sm text-[#B9C3DE] lg:inline">{t.brand.tagline}</span>
         </Link>
 

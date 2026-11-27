@@ -9,7 +9,7 @@ export function SiteFooter({ t, locale, regNo }: { t: Dictionary; locale: Locale
   return (
     <footer className="bg-navy py-10 text-sm leading-7 text-[#B9C3DE] print:hidden">
       <div className="mx-auto flex max-w-6xl flex-col gap-4 px-5 md:px-8">
-        <Logo className="text-white" />
+        <Logo tone="white" size={30} />
         <p className="max-w-3xl">{t.footer.legal}</p>
         {/* MKT-15: رقم القيد في سجل الوسطاء */}
         {regNo && (
