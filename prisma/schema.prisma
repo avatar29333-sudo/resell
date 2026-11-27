@@ -343,6 +343,8 @@ model Listing {
   assignedLawyerId String?
   assignedLawyer   User?      @relation("ListingLawyer", fields: [assignedLawyerId], references: [id])
   // PERM-05: السمسار الشريك اللي رفع العرض نيابة عن عميله + موافقة العميل
+  /// DATA-03: إفادة الجهاز انتهت والعرض «محتاج تحديث»
+  statementExpiredAt DateTime?
   submittedById    String?
   submittedBy      User?      @relation("ListingSubmitter", fields: [submittedById], references: [id])
   clientConsentAt  DateTime?

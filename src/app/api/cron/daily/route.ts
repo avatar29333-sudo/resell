@@ -3,6 +3,8 @@ import { audit } from "@/lib/audit";
 import { updateDailyRate } from "@/lib/fx";
 import { idsByRole, notify } from "@/lib/notifications";
 import { CITY, DOC_TYPE } from "@/lib/labels";
+import { getSetting } from "@/lib/settings";
+import { validityState } from "@/lib/validity";
 
 // مهمة يومية (Vercel Cron الساعة 8 الصبح بتوقيت القاهرة — vercel.json):
 // 1) سعر صرف النهارده  2) المستندات اللي انتهت  3) المستندات اللي هتنتهي خلال 30 يوم
@@ -61,6 +63,46 @@ export async function GET(req: Request) {
     });
   }
   report.expiringSoon = soon;
+
+  // 3ب) DATA-03: إفادة الجهاز للعروض المنشورة — انتهت → «محتاج تحديث»، وتنبيه قبلها بـ warnDays
+  const validity = await getSetting("documents.validity");
+  const live = await db.listing.findMany({
+    where: { status: { in: ["VERIFIED", "PUBLISHED"] } },
+    include: { plot: true, documents: { where: { type: "AUTHORITY_STATEMENT", status: { not: "SUPERSEDED" } }, orderBy: { createdAt: "desc" }, take: 1 } },
+  });
+  let needsUpdate = 0;
+  let warned = 0;
+  for (const l of live) {
+    const st = l.documents[0];
+    const state = st ? validityState(st.expiresAt, now, validity.warnDays) : "ok";
+    const place = (i: 0 | 1) => `${CITY[l.plot.city][i]} — ${l.plot.district}`;
+    if ((state === "expired" || st?.status === "EXPIRED") && !l.statementExpiredAt) {
+      await db.listing.update({ where: { id: l.id }, data: { statementExpiredAt: now } });
+      await audit(null, "listing.statement_expired", "Listing", l.id, { documentId: st?.id ?? null });
+      await notify([l.sellerId, l.submittedById, l.assignedBrokerId], {
+        kind: "listing.needs_update",
+        ar: [`إفادة الجهاز لقطعتك انتهت: ${place(0)}`, "العرض بقى «محتاج تحديث» — ارفع إفادة حديثة من حسابك."],
+        en: [`The authority statement for your plot expired: ${place(1)}`, "The listing now needs an update — upload a recent statement from your account."],
+        link: `/listings/${l.id}`,
+      });
+      needsUpdate++;
+    } else if (state === "warn" && st) {
+      // تنبيه مرة واحدة بس لكل مستند
+      const already = await db.auditLog.findFirst({ where: { action: "listing.statement_warned", entityId: st.id }, select: { id: true } });
+      if (!already) {
+        await audit(null, "listing.statement_warned", "Document", st.id, { listingId: l.id, expiresAt: st.expiresAt?.toISOString() ?? null });
+        await notify([l.sellerId, l.submittedById, l.assignedBrokerId], {
+          kind: "listing.statement_expiring",
+          ar: [`إفادة الجهاز لقطعتك هتنتهي قريب: ${place(0)}`, "جهّز إفادة حديثة عشان العرض يفضل ظاهر."],
+          en: [`The authority statement for your plot expires soon: ${place(1)}`, "Get a recent statement so the listing stays visible."],
+          link: `/account`,
+        });
+        warned++;
+      }
+    }
+  }
+  report.needsUpdate = needsUpdate;
+  report.statementWarned = warned;
 
   // 4) مهلة البناء خلال 60 يوم (للعروض الشغالة)
   const plots = await db.plot.findMany({

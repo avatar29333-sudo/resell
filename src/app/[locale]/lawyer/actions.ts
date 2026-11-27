@@ -11,6 +11,8 @@ import { notify } from "@/lib/notifications";
 import { DOC_TYPE } from "@/lib/labels";
 import { checkReview } from "./review-rules";
 import { CHECKLISTS } from "./checklists";
+import { getSetting } from "@/lib/settings";
+import { statementExpiry } from "@/lib/validity";
 
 /** مراجعة مستند (SEC-02): الاعتماد بكل البنود بس، والرفض/التعديل بملاحظة ≥ 10 حروف */
 export async function reviewDocument(locale: string, documentId: string, form: FormData) {
@@ -48,7 +50,15 @@ export async function reviewDocument(locale: string, documentId: string, form: F
   }
 
   await db.review.create({ data: { documentId, lawyerId: user.id, checklist, decision, notes } });
-  await db.document.update({ where: { id: documentId }, data: { status: decision === "APPROVED" ? "APPROVED" : "REJECTED" } });
+  // DATA-03: إفادة الجهاز المعتمدة ليها تاريخ انتهاء (إعداد بالشهور من تاريخها)
+  const months = (await getSetting("documents.validity")).authorityStatementMonths;
+  const expiresAt = decision === "APPROVED" && doc.type === "AUTHORITY_STATEMENT" && !doc.expiresAt ? statementExpiry(doc.createdAt, months) : undefined;
+  await db.document.update({ where: { id: documentId }, data: { status: decision === "APPROVED" ? "APPROVED" : "REJECTED", ...(expiresAt ? { expiresAt } : {}) } });
+  // إفادة جديدة اتعتمدت → العرض يرجع طبيعي
+  if (decision === "APPROVED" && doc.type === "AUTHORITY_STATEMENT" && doc.listing?.statementExpiredAt) {
+    await db.listing.update({ where: { id: doc.listing.id }, data: { statementExpiredAt: null } });
+    await audit(user.id, "listing.statement_renewed", "Listing", doc.listing.id, { documentId });
+  }
   await audit(user.id, "document.review", "Document", documentId, { decision, before: doc.status, after: decision === "APPROVED" ? "APPROVED" : "REJECTED" });
   const t = DOC_TYPE[doc.type] ?? ["مستند", "Document"];
   if (decision !== "APPROVED") {

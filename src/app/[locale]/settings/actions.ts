@@ -202,6 +202,11 @@ export async function saveOps(locale: string, form: FormData) {
   await saveSetting(me.id, "payments.fourEyes", { limitEgp: limit });
   await saveSetting(me.id, "fx.manual", { maxDeviationPct: dev });
   await saveSetting(me.id, "deals.unassignedBrokers", { access });
+  await saveSetting(me.id, "documents.validity", {
+    authorityStatementMonths: Math.min(24, Math.max(1, Number(form.get("statementMonths")) || 3)),
+    warnDays: Math.min(120, Math.max(1, Number(form.get("warnDays")) || 30)),
+    expiredListing: form.get("expiredListing") === "hide" ? "hide" : "badge",
+  });
   refresh(l);
 }
 

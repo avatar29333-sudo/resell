@@ -4,6 +4,7 @@ import type { City } from "@prisma/client";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { latestRate, totalEgp } from "@/lib/listing";
+import { getSetting } from "@/lib/settings";
 import { daysUntil, money, num, toNum, tr } from "@/lib/format";
 import { CITY, CITY_KEYS, LISTING_STATUS, PAYMENT_STATUS, PRICE_TYPE, label, toneOf } from "@/lib/labels";
 import { Badge, Container, Empty, PageHeader, btn, field, labelCls } from "@/components/ui";
@@ -25,11 +26,14 @@ export default async function ListingsPage({ params, searchParams }: Props) {
 
   const rate = await latestRate();
   const usd = toNum(rate?.sell ?? 50);
+  const validity = await getSetting("documents.validity");
 
   const rows = await db.listing.findMany({
     where: {
       status: { in: ["PUBLISHED", "IN_DEAL"] },
       seller: { status: "ACTIVE" },
+      // DATA-03: العرض اللي إفادته انتهت يختفي (لو الإعداد «hide») أو يظهر بشارة
+      ...(validity.expiredListing === "hide" ? { statementExpiredAt: null } : {}),
       plot: {
         ...(city ? { city } : {}),
         ...(minArea ? { areaSqm: { gte: minArea } } : {}),
@@ -144,7 +148,11 @@ export default async function ListingsPage({ params, searchParams }: Props) {
                     </dl>
                     <div className="mt-auto flex flex-wrap gap-1.5">
                       {verified.has("ALLOCATION_LETTER") && <Badge tone="green">{L("✓ خطاب التخصيص", "✓ Allocation letter")}</Badge>}
-                      {verified.has("AUTHORITY_STATEMENT") && <Badge tone="green">{L("✓ إفادة الجهاز", "✓ Authority statement")}</Badge>}
+                      {l.statementExpiredAt ? (
+                        <Badge tone="amber">{L("⚠ محتاج تحديث — إفادة الجهاز انتهت", "⚠ Needs update — authority statement expired")}</Badge>
+                      ) : (
+                        verified.has("AUTHORITY_STATEMENT") && <Badge tone="green">{L("✓ إفادة الجهاز", "✓ Authority statement")}</Badge>
+                      )}
                     </div>
                   </Link>
                 </li>

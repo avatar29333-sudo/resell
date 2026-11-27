@@ -228,12 +228,13 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   }
 
   async function Commission({ locale }: { locale: "ar" | "en" }) {
-    const [rates, fees, fourEyes, fxCfg, brokersCfg] = await Promise.all([
+    const [rates, fees, fourEyes, fxCfg, brokersCfg, validity] = await Promise.all([
       getSetting("commission.rates"),
       getSetting("service.fees"),
       getSetting("payments.fourEyes"),
       getSetting("fx.manual"),
       getSetting("deals.unassignedBrokers"),
+      getSetting("documents.validity"),
     ]);
     return (
       <div className="grid gap-6 lg:grid-cols-2">
@@ -289,6 +290,21 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               <select name="unassignedBrokers" defaultValue={brokersCfg.access} className={`${field} w-56`}>
                 <option value="none">{L("ما يشوفوهاش", "Can't see it")}</option>
                 <option value="read">{L("قراءة بس", "Read only")}</option>
+              </select>
+            </label>
+            <label className={labelCls}>
+              {L("صلاحية إفادة الجهاز (شهور)", "Authority statement validity (months)")}
+              <input name="statementMonths" type="number" min={1} max={24} defaultValue={validity.authorityStatementMonths} className={`${field} w-28`} />
+            </label>
+            <label className={labelCls}>
+              {L("التنبيه قبل الانتهاء (يوم)", "Warn before expiry (days)")}
+              <input name="warnDays" type="number" min={1} max={120} defaultValue={validity.warnDays} className={`${field} w-28`} />
+            </label>
+            <label className={labelCls}>
+              {L("العرض اللي إفادته انتهت", "Listing with an expired statement")}
+              <select name="expiredListing" defaultValue={validity.expiredListing} className={`${field} w-56`}>
+                <option value="badge">{L("يفضل ظاهر بشارة «محتاج تحديث»", "Stays visible with a “needs update” badge")}</option>
+                <option value="hide">{L("يختفي من السجل العام", "Hidden from the public register")}</option>
               </select>
             </label>
             <button className={btn.primary}>{L("حفظ", "Save")}</button>

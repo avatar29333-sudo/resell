@@ -75,6 +75,7 @@ export default async function ListingPage({ params }: Props) {
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
             <Badge tone={toneOf(listing.status)}>{label(LISTING_STATUS, listing.status, locale)}</Badge>
+            {listing.statementExpiredAt && <Badge tone="amber">{L("⚠ محتاج تحديث — إفادة الجهاز انتهت", "⚠ Needs update — authority statement expired")}</Badge>}
             {num(area, locale)} {L("م²", "m²")} · {label(PAYMENT_STATUS, listing.plot.paymentStatus, locale)}
           </span>
         }
