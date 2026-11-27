@@ -25,6 +25,7 @@ import { referralReward } from "@/lib/referral-rules";
 import { isDemoMode } from "@/lib/demo";
 import { requireActionCode } from "@/lib/action-otp";
 import { contractActionKey } from "@/lib/action-otp-core";
+import { cleanTitle } from "@/lib/upload-rules";
 
 const loc = (l: string): Locale => (isLocale(l) ? l : "ar");
 
@@ -735,4 +736,83 @@ export async function addNote(locale: string, dealId: string, form: FormData) {
   const note = String(form.get("note") ?? "").trim().slice(0, 1000);
   if (note) await event(deal, user, "NOTE", { note, ...(internal ? { internal: true } : {}) });
   done(l, dealId);
+}
+
+// ─── DOC-01: «مستندات أخرى» — رفع متعدد بعنوان، استبدال بنسخة أحدث (ممنوع الحذف)، وطلب مستند ───
+
+/** مسودات رفعها المستخدم بنفسه ولسه مش مربوطة بحاجة */
+async function myDrafts(userId: string, ids: string[]) {
+  return db.document.findMany({ where: { id: { in: ids }, ownerId: userId, uploadedById: userId, type: "OTHER", dealId: null, listingId: null, plotId: null, serviceRequestId: null } });
+}
+
+export async function attachDealDocuments(locale: string, dealId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  await guard(user, deal, "deal.upload_doc", back, form);
+  const ids = form.getAll("docIds").map(String).slice(0, 20);
+  const drafts = await myDrafts(user.id, ids);
+  if (!drafts.length) done(l, dealId, "?err=file#other-docs");
+  const titles = drafts.map((d) => cleanTitle(form.get(`title_${d.id}`)));
+  if (titles.some((t) => !t)) done(l, dealId, "?err=title#other-docs");
+  const requestId = String(form.get("requestId") ?? "");
+  const side = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
+  const req = requestId ? await db.documentRequest.findFirst({ where: { id: requestId, dealId, status: "OPEN", side: side ?? "-" } }) : null;
+  for (const [i, d] of drafts.entries()) {
+    await db.document.update({ where: { id: d.id }, data: { dealId, title: titles[i] } });
+    await event(deal, user, "DOCUMENT_ADDED", { documentId: d.id, type: "OTHER", title: titles[i] });
+  }
+  if (req) {
+    await db.documentRequest.update({ where: { id: req.id }, data: { status: "FULFILLED", documentId: drafts[0].id, fulfilledAt: new Date() } });
+    await notify([req.requestedById], {
+      kind: "document.request_fulfilled",
+      ar: [`المستند المطلوب اترفع: ${req.title}`],
+      en: [`The requested document was uploaded: ${req.title}`],
+      link: `/deals/${dealId}#other-docs`,
+    });
+  }
+  await notify([deal.brokerId, deal.lawyerId].filter((x): x is string => !!x && x !== user.id), {
+    kind: "document.added",
+    ar: [`${drafts.length} مستند جديد في الصفقة`, titles.join("، ")],
+    en: [`${drafts.length} new document(s) in the deal`, titles.join(", ")],
+    link: `/deals/${dealId}#other-docs`,
+  });
+  done(l, dealId, "#other-docs");
+}
+
+/** استبدال بنسخة أحدث — القديم بيفضل في السجل (SUPERSEDED)، مفيش حذف */
+export async function replaceDealDocument(locale: string, dealId: string, documentId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  await guard(user, deal, "deal.upload_doc", back, form);
+  const old = deal.documents.find((d) => d.id === documentId && d.status !== "SUPERSEDED");
+  const staff = !!user && [deal.brokerId, deal.lawyerId, deal.agentId].includes(user.id);
+  if (!old || (old.uploadedById !== user.id && !staff && user.role !== "ADMIN")) done(l, dealId, "?err=forbidden#other-docs");
+  const [draft] = await myDrafts(user.id, form.getAll("docIds").map(String).slice(0, 1));
+  if (!draft) done(l, dealId, "?err=file#other-docs");
+  const title = cleanTitle(form.get(`title_${draft.id}`)) ?? old!.title;
+  const last = await db.document.findFirst({ where: { groupId: old!.groupId }, orderBy: { version: "desc" }, select: { version: true } });
+  await db.$transaction([
+    db.document.update({ where: { id: old!.id }, data: { status: "SUPERSEDED" } }),
+    db.document.update({ where: { id: draft.id }, data: { dealId, type: old!.type, title, groupId: old!.groupId, version: (last?.version ?? old!.version) + 1, ownerId: old!.ownerId } }),
+  ]);
+  await event(deal, user, "DOCUMENT_ADDED", { documentId: draft.id, type: old!.type, title, replaces: old!.id, version: (last?.version ?? old!.version) + 1 });
+  done(l, dealId, "#other-docs");
+}
+
+/** المحامي (أو الوسيط) يطلب مستند محدد من طرف → بيظهر له «مطلوب منك رفع: …» */
+export async function requestDocument(locale: string, dealId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  if (![deal.lawyerId, deal.brokerId].includes(user.id) && user.role !== "ADMIN") done(l, dealId, "?err=forbidden");
+  if (user.role === "ADMIN") await guard(user, deal, "deal.upload_doc", back, form);
+  const side = form.get("side") === "SELLER" ? "SELLER" : "BUYER";
+  const title = cleanTitle(form.get("title"));
+  if (!title) done(l, dealId, "?err=title#other-docs");
+  const note = String(form.get("note") ?? "").trim().slice(0, 500) || null;
+  const r = await db.documentRequest.create({ data: { dealId, requestedById: user.id, side, title: title!, note } });
+  await event(deal, user, "NOTE", { documentRequested: title, side, requestId: r.id });
+  await notify([side === "BUYER" ? deal.buyerId : deal.listing.sellerId], {
+    kind: "document.requested",
+    ar: [`مطلوب منك رفع: ${title}`, note ?? undefined],
+    en: [`Please upload: ${title}`, note ?? undefined],
+    link: `/deals/${dealId}#other-docs`,
+  });
+  done(l, dealId, "#other-docs");
 }

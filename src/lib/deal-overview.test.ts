@@ -77,3 +77,11 @@ describe("TXN-01 deal overview", () => {
     expect(bidiRuns("بتاريخ 2026.").map((r) => r.text)).toEqual(["بتاريخ ", "2026", "."]);
   });
 });
+
+describe("DOC-01 document requests become a task", () => {
+  it("a lawyer's request shows as 'please upload' for that side only", () => {
+    const f = { ...base, contracts: [], docRequests: [{ side: "SELLER", title: "خطاب من الجهاز" }] };
+    expect(nextActionFor(f, "SELLER", true)).toMatchObject({ mine: true, text: "مطلوب منك رفع: خطاب من الجهاز", anchor: "#other-docs" });
+    expect(nextActionFor(f, "BUYER", true)?.text).not.toContain("خطاب من الجهاز");
+  });
+});

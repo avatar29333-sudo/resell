@@ -7,13 +7,14 @@ import { sniffMime } from "./file-sniff";
 
 // خزنة الملفات:
 // - لو إعدادات S3 موجودة (S3_ENDPOINT + S3_BUCKET + المفاتيح): الملفات الجديدة بتروح S3،
-//   والقراءة برابط مؤقت بيخلص بعد 5 دقايق — بعد فحص الصلاحية والتسجيل في سجل التدقيق.
+//   والقراءة برابط مؤقت بيخلص بعد 10 دقايق — بعد فحص الصلاحية والتسجيل في سجل التدقيق.
 // - من غيرها: الملفات بتتخزن في جدول FileBlob (التجربة).
 // الملفات القديمة اللي في FileBlob بتفضل تتقري حتى بعد التحويل لـ S3.
 
 export const MAX_FILE_BYTES = 4 * 1024 * 1024; // حد Vercel للطلب الواحد 4.5MB
 export const ALLOWED_MIME = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
-const LINK_SECONDS = 300;
+// DOC-02: الروابط الموقّعة صالحة 10 دقايق
+const LINK_SECONDS = 600;
 
 let client: S3Client | null = null;
 function s3() {
@@ -74,7 +75,7 @@ export async function readFile(key: string, fileName: string, mimeType: string):
 
 /**
  * نقل الملفات القديمة من قاعدة البيانات لـ S3 — دفعة واحدة كل مرة (عشان حد وقت Vercel).
- * كل ملف بيترفع بنفس المفتاح، وبنتأكد إن حجمه في S3 مطابق قبل ما نمسحه من القاعدة.
+ * كل ملف بيترفع بنفس المفتاح، وبنتأكد إن حجمه وبصمته (SHA-256) في S3 مطابقين قبل وبعد النقل قبل ما نشيله من القاعدة.
  */
 export async function moveBlobsToS3(batch = 60) {
   const store = s3();
@@ -84,6 +85,10 @@ export async function moveBlobsToS3(batch = 60) {
   let failed = 0;
   for (const b of rows) {
     try {
+      // DOC-02: البصمة قبل النقل لازم تطابق المسجّلة على المستند (لو موجود)
+      const before = createHash("sha256").update(b.data).digest("hex");
+      const doc = await db.document.findUnique({ where: { storageKey: b.key }, select: { sha256: true } });
+      if (doc && doc.sha256 !== before) throw new Error("hash mismatch before move");
       await store.client.send(
         new PutObjectCommand({
           Bucket: store.bucket,
@@ -95,6 +100,10 @@ export async function moveBlobsToS3(batch = 60) {
       );
       const head = await store.client.send(new HeadObjectCommand({ Bucket: store.bucket, Key: b.key }));
       if (head.ContentLength !== b.data.length) throw new Error("size mismatch");
+      // DOC-02: نقرا الملف من S3 تاني ونحسب بصمته — ما بنشيلش النسخة من القاعدة غير لو البصمتين متطابقتين
+      const back = await store.client.send(new GetObjectCommand({ Bucket: store.bucket, Key: b.key }));
+      const after = createHash("sha256").update(Buffer.from(await back.Body!.transformToByteArray())).digest("hex");
+      if (after !== before) throw new Error("hash mismatch after move");
       await db.fileBlob.delete({ where: { key: b.key } });
       moved++;
     } catch (e) {

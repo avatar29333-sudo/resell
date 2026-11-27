@@ -1,5 +1,6 @@
 "use server";
 
+import { cleanTitle } from "@/lib/upload-rules";
 import { allCities } from "@/lib/cities";
 import { redirect } from "next/navigation";
 import type { DocumentType } from "@prisma/client";
@@ -166,6 +167,14 @@ export async function createListing(locale: string, _prev: ListState, form: Form
 
   // الملفات اللي اترفعت مؤقتاً بتتربط بالعرض
   if (drafts.length) await db.document.updateMany({ where: { id: { in: drafts } }, data: { listingId: listing.id, plotId: plot.id } });
+  // DOC-01: «مستندات أخرى» بعنوان — مسودات رفعها نفس المستخدم
+  const otherIds = form.getAll("docIds").map(String).slice(0, 20);
+  if (otherIds.length) {
+    const others = await db.document.findMany({ where: { id: { in: otherIds }, ownerId: user.id, uploadedById: user.id, type: "OTHER", dealId: null, listingId: null, plotId: null } });
+    for (const d of others) {
+      await db.document.update({ where: { id: d.id }, data: { listingId: listing.id, plotId: plot.id, title: cleanTitle(form.get(`title_${d.id}`)) ?? d.fileName } });
+    }
+  }
   for (const u of uploads) {
     const s = await saveFile(u.data, u.type);
     await db.document.create({

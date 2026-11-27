@@ -33,6 +33,7 @@ import { StageStepper } from "@/components/StageStepper";
 import { AdminReason } from "@/components/AdminReason";
 import { TrackEvent } from "@/components/Analytics";
 import { OtpConfirm } from "@/components/OtpConfirm";
+import { MultiUpload } from "@/components/MultiUpload";
 import { OTP_ERRORS } from "@/lib/action-otp";
 import { contractActionKey } from "@/lib/action-otp-core";
 import { storyConsent } from "../actions";
@@ -56,6 +57,9 @@ import {
   settleDeposit,
   signContract,
   respondPrice,
+  attachDealDocuments,
+  replaceDealDocument,
+  requestDocument,
   verifyContract,
   partyDepositConfirm,
   requestCancellation,
@@ -85,6 +89,7 @@ const CANCEL_REASONS: [string, string, string][] = [
 
 const ERRORS: Record<string, [string, string]> = {
   ...OTP_ERRORS,
+  title: ["لازم عنوان لكل مستند (3 حروف على الأقل).", "Each document needs a title (at least 3 characters)."],
   verify_checklist: ["لازم تأكد كل بنود المطابقة.", "Confirm every checklist item."],
   forbidden: ["الفعل ده مش متاح لحسابك على الصفقة دي.", "This action isn't available to you on this deal."],
   reason_required: ["لازم تكتب سبب التدخّل (5 حروف على الأقل).", "Please write an override reason (at least 5 characters)."],
@@ -175,7 +180,11 @@ export default async function DealRoom({ params, searchParams }: Props) {
     ...d,
     canOpen: can(subject(me), "document.view", { ...lc, document: { type: d.type, ownerId: d.ownerId, uploadedById: d.uploadedById, status: d.status } }).allowed,
   }));
-  const ovw = overviewOf(deal);
+  // DOC-01: مستندات أخرى + طلبات المستندات المفتوحة
+  const docRequests = await db.documentRequest.findMany({ where: { dealId: id, status: "OPEN" }, orderBy: { createdAt: "asc" } });
+  const otherDocs = docs.filter((d) => d.scope === "deal" && d.type === "OTHER" && d.status !== "SUPERSEDED");
+  const canRequestDoc = [deal.lawyerId, deal.brokerId].includes(me.id) || me.role === "ADMIN";
+  const ovw = { ...overviewOf(deal), docRequests: docRequests.map((r) => ({ side: r.side, title: r.title })) };
   const dealFees = await getSetting("deal.fees");
   const logFilter = (["money", "docs", "comms", "stage"] as const).find((x) => x === sp.log) as EventCategory | undefined;
   const events = deal.events.filter((e) => !(e.data as { internal?: boolean } | null)?.internal || p["deal.internal_note"].allowed);
@@ -414,7 +423,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                 <Empty>{L("مفيش مستندات.", "No documents.")}</Empty>
               ) : (
                 <ul className="flex flex-col divide-y divide-line">
-                  {docs.map((d) => (
+                  {docs.filter((d) => d.type !== "OTHER").map((d) => (
                     <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                       <span className="flex flex-col">
                         {d.canOpen ? <FileLink id={d.id}>{label(DOC_TYPE, d.type, locale)}</FileLink> : <span>{label(DOC_TYPE, d.type, locale)}</span>}
@@ -448,6 +457,100 @@ export default async function DealRoom({ params, searchParams }: Props) {
                   <AdminReason show={ov("deal.upload_doc")} ar={ar} />
                   <button className={btn.secondary}>{L("ارفع", "Upload")}</button>
                 </form>
+              )}
+            </Card>
+
+            {/* DOC-01: مستندات أخرى — لكل طرف، مع مين رفع وإمتى. ممنوع الحذف: استبدال بنسخة أحدث */}
+            <Card title={<span id="other-docs" className="scroll-mt-24">{L("مستندات أخرى", "Other documents")}</span>}>
+              {docRequests.length > 0 && (
+                <ul className="flex flex-col gap-2">
+                  {docRequests.map((r) => (
+                    <li key={r.id} className={`flex flex-col gap-2 border p-3 ${r.side === side ? "border-brand bg-[#EEF3FC]" : "border-line"}`}>
+                      <span className="font-semibold">
+                        {r.side === side ? L(`مطلوب منك رفع: ${r.title}`, `Please upload: ${r.title}`) : L(`مطلوب من ${r.side === "BUYER" ? "المشتري" : "البائع"}: ${r.title}`, `Requested from the ${r.side === "BUYER" ? "buyer" : "seller"}: ${r.title}`)}
+                      </span>
+                      {r.note && <span className="text-sm">{r.note}</span>}
+                      <span className="text-[13px] text-muted">{dateTime(r.createdAt, locale)}</span>
+                      {r.side === side && open && (
+                        <form action={attachDealDocuments.bind(null, locale, id)} className="flex flex-col gap-2">
+                          <input type="hidden" name="requestId" value={r.id} />
+                          <MultiUpload locale={locale} defaultTitle={r.title} />
+                          <button className={`${btn.primary} self-start`}>{L("ابعت المستند", "Submit document")}</button>
+                        </form>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {otherDocs.length === 0 ? (
+                <Empty>{L("مفيش مستندات إضافية لسه.", "No additional documents yet.")}</Empty>
+              ) : (
+                ([
+                  ["BUYER", L("من المشتري", "From the buyer")],
+                  ["SELLER", L("من البائع", "From the seller")],
+                  ["TEAM", L("من فريق Resell", "From the Resell team")],
+                ] as const).map(([k, title]) => {
+                  const list = otherDocs.filter((d) => (d.uploadedById === deal.buyerId ? "BUYER" : d.uploadedById === deal.listing.sellerId ? "SELLER" : "TEAM") === k);
+                  if (!list.length) return null;
+                  return (
+                    <div key={k} className="flex flex-col gap-1">
+                      <h3 className="font-bold">{title}</h3>
+                      <ul className="flex flex-col divide-y divide-line">
+                        {list.map((d) => (
+                          <li key={d.id} className="flex flex-col gap-1 py-2">
+                            <span className="flex flex-wrap items-center gap-2">
+                              {d.canOpen ? <FileLink id={d.id}>{d.title ?? d.fileName}</FileLink> : <span>{d.title ?? d.fileName}</span>}
+                              {d.version > 1 && <Badge tone="blue">{L(`نسخة ${num(d.version, locale)}`, `v${d.version}`)}</Badge>}
+                            </span>
+                            <span className="text-[13px] text-muted">
+                              {d.uploadedBy && (k === "TEAM" || namesVisible || d.uploadedById === me.id) ? d.uploadedBy.name : k === "BUYER" ? L("المشتري", "Buyer") : L("البائع", "Seller")} · {dateTime(d.createdAt, locale)}
+                            </span>
+                            {open && p["deal.upload_doc"].allowed && (d.uploadedById === me.id || [deal.brokerId, deal.lawyerId, deal.agentId].includes(me.id) || me.role === "ADMIN") && (
+                              <details>
+                                <summary className="min-h-11 cursor-pointer py-2 text-sm text-brand">{L("استبدال بنسخة أحدث", "Replace with a newer version")}</summary>
+                                <form action={replaceDealDocument.bind(null, locale, id, d.id)} className="flex flex-col gap-2">
+                                  <MultiUpload locale={locale} single defaultTitle={d.title ?? undefined} />
+                                  <button className={`${btn.secondary} self-start`}>{L("احفظ النسخة الجديدة", "Save new version")}</button>
+                                </form>
+                              </details>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })
+              )}
+              {open && p["deal.upload_doc"].allowed && (
+                <form action={attachDealDocuments.bind(null, locale, id)} className="flex flex-col gap-2 border-t border-line pt-3">
+                  <span className="font-semibold">{L("ارفع مستندات أخرى", "Upload other documents")}</span>
+                  <MultiUpload locale={locale} />
+                  <AdminReason show={ov("deal.upload_doc")} ar={ar} />
+                  <button className={`${btn.secondary} self-start`}>{L("ضيف للصفقة", "Add to the deal")}</button>
+                </form>
+              )}
+              {open && canRequestDoc && (
+                <details className="border-t border-line pt-3">
+                  <summary className="min-h-11 cursor-pointer py-2 font-semibold text-brand">{L("اطلب مستند من طرف", "Request a document from a party")}</summary>
+                  <form action={requestDocument.bind(null, locale, id)} className="flex flex-col gap-2">
+                    <label className={labelCls}>
+                      {L("من مين؟", "From whom?")}
+                      <select name="side" className={field}>
+                        <option value="SELLER">{L("البائع", "Seller")}</option>
+                        <option value="BUYER">{L("المشتري", "Buyer")}</option>
+                      </select>
+                    </label>
+                    <label className={labelCls}>
+                      {L("المستند المطلوب", "Document needed")}
+                      <input name="title" required minLength={3} maxLength={120} placeholder={L("مثلاً: خطاب من الجهاز", "e.g. Letter from the authority")} className={field} />
+                    </label>
+                    <label className={labelCls}>
+                      {L("ملاحظة (اختياري)", "Note (optional)")}
+                      <input name="note" maxLength={500} className={field} />
+                    </label>
+                    <button className={`${btn.secondary} self-start`}>{L("ابعت الطلب", "Send request")}</button>
+                  </form>
+                </details>
               )}
             </Card>
 

@@ -6,6 +6,7 @@ import { tr } from "@/lib/format";
 import { btn, field, labelCls } from "@/components/ui";
 import { useKeptAction } from "@/components/useKeptAction";
 import { codeHint } from "@/lib/plot-code";
+import { MultiUpload } from "@/components/MultiUpload";
 import type { CityOption } from "@/lib/cities";
 import { DRAFT_KEY, stepErrors, type Draft } from "./wizard-rules";
 import { createListing, uploadDraftFile, type ListState } from "./actions";
@@ -334,6 +335,11 @@ export function Wizard({
               </div>
             );
           })}
+          {/* DOC-01: أي مستند إضافي بعنوان (إيصال قسط أخير، خطاب من الجهاز…) — لحد 20 ميجا، HEIC بيتحول JPG */}
+          <div className={labelCls}>
+            <span>{L("مستندات أخرى (اختياري)", "Other documents (optional)")}</span>
+            <MultiUpload locale={locale} />
+          </div>
           {partner && (
             <label className="flex min-h-11 items-center gap-2 text-sm">
               <input type="checkbox" name="clientConsent" className="size-4" />

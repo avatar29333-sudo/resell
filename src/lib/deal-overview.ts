@@ -16,6 +16,8 @@ export type OverviewInput = Omit<DealFacts, "contracts" | "deposits"> & {
   deposits: { id: string; amount: number; escrowStatus: string; buyerSentAt: Date | null; sellerReceivedAt: Date | null; bankReference: string | null; heldAt: Date | null; settledAt: Date | null }[];
   /** تاريخ دخول المرحلة الحالية */
   stageEnteredAt: Date;
+  /** DOC-01: مستندات طلبها المحامي/الوسيط ولسه ما اترفعتش */
+  docRequests?: { side: string; title: string }[];
 };
 
 /** مين مسؤول عن كل شرط ناقص */
@@ -76,6 +78,8 @@ export function nextActionFor(f: OverviewInput, side: Side | null, ar: boolean):
       (c) => (c.status === "SENT_FOR_SIGNATURE" || c.status === "PARTIALLY_SIGNED") && requiredSigners(c.type).includes(side) && !c.signatures.some((s) => s.role === side),
     );
     if (toSign) return { mine: true, text: ar ? `وقّع ${ct(toSign.type, true)}` : `Sign ${ct(toSign.type, false)}`, anchor: "#contracts", dueAt: due };
+    const docReq = f.docRequests?.find((r) => r.side === side);
+    if (docReq) return { mine: true, text: ar ? `مطلوب منك رفع: ${docReq.title}` : `Please upload: ${docReq.title}`, anchor: "#other-docs", dueAt: due };
     const myOk = side === "BUYER" ? f.buyerPriceOkAt : f.sellerPriceOkAt;
     if (f.proposedPrice && !f.agreedPrice && !myOk)
       return { mine: true, text: ar ? `وافق على السعر المقترح ${f.proposedPrice.toLocaleString("en-US")} ج.م أو ارفضه` : `Confirm or reject the proposed price EGP ${f.proposedPrice.toLocaleString("en-US")}`, anchor: "#price", dueAt: due };
@@ -234,8 +238,11 @@ export function eventSentence(e: { type: string; toStage: string | null; data: R
       if (d.status === "REFUNDED_TO_BUYER") return ar ? "العربون اترد للمشتري" : "The deposit was refunded to the buyer";
       if (d.amount) return ar ? `${actor} سجّل عربون ${egp(d.amount, true)}` : `${actor} recorded a deposit of ${egp(d.amount, false)}`;
       return ar ? "تحديث في العربون" : "Deposit updated";
-    case "DOCUMENT_ADDED":
-      return ar ? `${actor} رفع مستند${t ? `: ${t}` : ""}` : `${actor} uploaded a document${t ? `: ${t}` : ""}`;
+    case "DOCUMENT_ADDED": {
+      const name = typeof d.title === "string" ? d.title : d.type === "OTHER" ? "" : t;
+      if (d.replaces) return ar ? `${actor} رفع نسخة أحدث من: ${name}` : `${actor} uploaded a newer version of: ${name}`;
+      return ar ? `${actor} رفع مستند${name ? `: ${name}` : ""}` : `${actor} uploaded a document${name ? `: ${name}` : ""}`;
+    }
     case "ASSIGNMENT_CHANGED":
       return ar ? `${actor} غيّر فريق الصفقة` : `${actor} changed the deal team`;
     case "CANCELLED":
@@ -245,6 +252,7 @@ export function eventSentence(e: { type: string; toStage: string | null; data: R
   if ("priceConfirmed" in d) return ar ? `${by || actor} وافق على السعر ${egp(d.priceConfirmed, true)}` : `${by || actor} confirmed the price ${egp(d.priceConfirmed, false)}`;
   if ("counterPrice" in d) return ar ? `${by || actor} قدّم عرض مقابل ${egp(d.counterPrice, true)}` : `${by || actor} counter-offered ${egp(d.counterPrice, false)}`;
   if ("priceRejected" in d) return ar ? `${by || actor} رفض السعر ${egp(d.priceRejected, true)}` : `${by || actor} rejected the price ${egp(d.priceRejected, false)}`;
+  if (typeof d.documentRequested === "string") return ar ? `${actor} طلب من ${d.side === "SELLER" ? "البائع" : "المشتري"} رفع: ${d.documentRequested}` : `${actor} asked the ${d.side === "SELLER" ? "seller" : "buyer"} to upload: ${d.documentRequested}`;
   if (d.cancelRequested) return ar ? `${by || actor} طلب إلغاء الصفقة` : `${by || actor} requested cancellation`;
   if (typeof d.status === "string") return ar ? `${actor} غيّر حالة الصفقة` : `${actor} changed the deal status`;
   return ar ? `${actor} كتب ملاحظة` : `${actor} added a note`;
