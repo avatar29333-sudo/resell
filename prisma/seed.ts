@@ -596,6 +596,11 @@ async function backfillAssignments() {
 }
 
 async function main() {
+  // SEC-20: ممنوع أي بيانات تجريبية في النسخة الرسمية
+  if (process.env.OFFICIAL_DEPLOYMENT === "1") {
+    console.log("النسخة الرسمية — مفيش بيانات تجريبية.");
+    return;
+  }
   if (await prisma.appSetting.findUnique({ where: { key: "demo.seeded" } })) {
     console.log("البيانات التجريبية موجودة بالفعل — بنكمّل الإضافات بس.");
     await backfillBoundaries();
