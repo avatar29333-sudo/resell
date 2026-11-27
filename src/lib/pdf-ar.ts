@@ -1,7 +1,43 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { PDFDocument, rgb, type PDFFont, type PDFPage, degrees } from "pdf-lib";
+import { PDFArray, PDFDocument, PDFHexString, PDFNumber, PDFOperator, PDFOperatorNames, beginText, endText, rgb, setFillingColor, setFontAndSize, setTextMatrix, type Color, type PDFFont, type PDFPage, degrees } from "pdf-lib";
+
+/** التشكيل (فتحة/شدة/…) بيتشال من نص الـ PDF — العقود مش محتاجاه، وبيبوّظ الرسم في بعض الحروف */
+/** البدائل السياقية (calt) محتاجة إزاحة رأسية pdf-lib ما بيدعمهاش — بنقفلها */
+const NO_CALT = { calt: false };
+const stripMarks = (s: string) => s.replace(/[ً-ْٰـ]/g, "");
+
+type FkGlyph = { id: number; advanceWidth: number };
+type FkRun = { glyphs: FkGlyph[]; positions: { xAdvance: number; xOffset: number }[] };
+const fk = (font: PDFFont) => (font as unknown as { embedder: { font: { unitsPerEm: number; layout: (t: string, features?: Record<string, boolean>) => FkRun } } }).embedder.font;
+
+/** عرض المقطع بمسافات الخط الحقيقية (GPOS) — pdf-lib لوحده بيتجاهلها فيبان «ر ح» مفصولين */
+export function runWidth(font: PDFFont, text: string, size: number) {
+  const f = fk(font);
+  const run = f.layout(stripMarks(text), NO_CALT);
+  return (run.positions.reduce((a, p) => a + p.xAdvance, 0) * size) / f.unitsPerEm;
+}
+
+/** رسم المقطع حرف بحرف بمواضع الخط (TJ مع تعديل المسافات) */
+function drawRun(page: PDFPage, font: PDFFont, text: string, x: number, y: number, size: number, color: Color) {
+  const clean = stripMarks(text);
+  const f = fk(font);
+  const run = f.layout(clean, NO_CALT);
+  font.encodeText(clean); // تسجيل الحروف المستخدمة في جدول العروض
+  page.setFont(font);
+  const key = (page as unknown as { fontKey: string }).fontKey;
+  const arr = PDFArray.withContext(page.doc.context);
+  const k = 1000 / f.unitsPerEm;
+  run.glyphs.forEach((g, i) => {
+    const p = run.positions[i];
+    if (p.xOffset) arr.push(PDFNumber.of(-p.xOffset * k));
+    arr.push(PDFHexString.of(g.id.toString(16).padStart(4, "0")));
+    const adj = (g.advanceWidth - p.xAdvance) * k + (p.xOffset ? p.xOffset * k : 0);
+    if (adj) arr.push(PDFNumber.of(adj));
+  });
+  page.pushOperators(beginText(), setFillingColor(color), setFontAndSize(key, size), setTextMatrix(1, 0, 0, 1, x, y), PDFOperator.of(PDFOperatorNames.ShowTextAdjusted, [arr]), endText());
+}
 import fontkit from "@pdf-lib/fontkit";
 import QRCode from "qrcode";
 
@@ -98,7 +134,7 @@ class Writer {
     if (this.y - h < M + 70) this.newPage();
   }
   measure(text: string, size: number, bold = false) {
-    return (bold ? this.b : this.f).widthOfTextAtSize(text, size);
+    return runWidth(bold ? this.b : this.f, text, size);
   }
   /** يرسم سطر واحد (من غير لف) بمحاذاة اتجاه المستند، أو عند x محدد */
   line(text: string, size: number, opts: { bold?: boolean; color?: ReturnType<typeof rgb>; x?: number; w?: number; align?: "start" | "end" | "center"; page?: PDFPage; y?: number } = {}) {
@@ -108,7 +144,7 @@ class Writer {
     const color = opts.color ?? rgb(0.05, 0.05, 0.07);
     const runs = bidiRuns(text);
     const rtlLine = this.rtl && runs.some((r) => r.rtl && ARABIC.test(r.text));
-    const widths = runs.map((r) => font.widthOfTextAtSize(r.rtl ? rtlGlyphText(r.text) : r.text, size));
+    const widths = runs.map((r) => runWidth(font, r.rtl ? rtlGlyphText(r.text) : r.text, size));
     const total = widths.reduce((a, c) => a + c, 0);
     const boxX = opts.x ?? M;
     const boxW = opts.w ?? this.width;
@@ -122,12 +158,12 @@ class Writer {
       let x = start + total;
       runs.forEach((r, i) => {
         x -= widths[i];
-        page.drawText(r.rtl ? rtlGlyphText(r.text) : r.text, { x, y, size, font, color });
+        drawRun(page, font, r.rtl ? rtlGlyphText(r.text) : r.text, x, y, size, color);
       });
     } else {
       let x = start;
       runs.forEach((r, i) => {
-        page.drawText(r.text, { x, y, size, font, color });
+        drawRun(page, font, r.text, x, y, size, color);
         x += widths[i];
       });
     }
@@ -165,8 +201,8 @@ export async function renderPdf(meta: PdfMeta, blocks: Block[]) {
   const doc = await PDFDocument.create();
   doc.registerFontkit(fontkit);
   const fb = fontBytes();
-  const f = await doc.embedFont(fb.regular, { subset: false });
-  const b = await doc.embedFont(fb.bold, { subset: false });
+  const f = await doc.embedFont(fb.regular, { subset: false, features: { calt: false } });
+  const b = await doc.embedFont(fb.bold, { subset: false, features: { calt: false } });
   const rtl = meta.rtl ?? true;
   doc.setTitle(`${meta.title} — ${meta.code}`);
   doc.setProducer("Resell");
@@ -280,7 +316,7 @@ export async function renderPdf(meta: PdfMeta, blocks: Block[]) {
     }
     if (qr) page.drawImage(qr, { x: rtl ? M : A4[0] - M - 40, y: M + 2, width: 36, height: 36 });
     if (meta.watermark) {
-      page.drawText(meta.watermark, { x: 120, y: 260, size: 46, font: b, color: rgb(0.85, 0.2, 0.2), opacity: 0.12, rotate: degrees(35) });
+      page.drawText(stripMarks(meta.watermark), { x: 120, y: 260, size: 46, font: b, color: rgb(0.85, 0.2, 0.2), opacity: 0.12, rotate: degrees(35) });
     }
   });
 
@@ -296,4 +332,27 @@ export async function pdfPageCount(buf: Buffer) {
   } catch {
     return null;
   }
+}
+
+/** حد أدنى لوضوح الصفحة المصوّرة (أقصر ضلع بالبكسل) */
+export const MIN_PAGE_PX = 900;
+
+/**
+ * CON-06: صور متعددة (JPG/PNG) → PDF واحد بالترتيب، صفحة لكل صورة على A4.
+ * بيرجع رقم أول صفحة مش واضحة (دقة أقل من الحد) عشان الرسالة تقول «الصفحة 3 مش واضحة — صوّرها تاني».
+ */
+export async function imagesToPdf(images: { data: Uint8Array; mime: string }[]) {
+  const doc = await PDFDocument.create();
+  let lowQualityPage: number | null = null;
+  for (const [i, img] of images.entries()) {
+    const e = img.mime === "image/png" ? await doc.embedPng(img.data) : await doc.embedJpg(img.data);
+    if (Math.min(e.width, e.height) < MIN_PAGE_PX && lowQualityPage === null) lowQualityPage = i + 1;
+    const page = doc.addPage(A4);
+    const scale = Math.min((A4[0] - 20) / e.width, (A4[1] - 20) / e.height);
+    const w = e.width * scale;
+    const h = e.height * scale;
+    page.drawImage(e, { x: (A4[0] - w) / 2, y: (A4[1] - h) / 2, width: w, height: h });
+  }
+  const bytes = Buffer.from(await doc.save());
+  return { bytes, pages: images.length, lowQualityPage, sha256: createHash("sha256").update(bytes).digest("hex") };
 }

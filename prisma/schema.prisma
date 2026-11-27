@@ -220,6 +220,7 @@ enum ServiceRequestStatus {
 // ───────────────────────── الجداول ─────────────────────────
 
 model User {
+  approvedTemplates  TemplateVersion[]   @relation("TemplateLawyer")
   bankAccounts       BankAccount[]
   verifiedBanks      BankAccount[]       @relation("BankVerifier")
   disclosures        DisclosureConsent[]
@@ -439,41 +440,43 @@ model PaymentApproval {
 /// المستندات: كل إصدار بيتحفظ، ومفيش حذف.
 /// الملف نفسه في خزنة S3 المشفرة، وهنا المفتاح بس.
 model Document {
-  id               String          @id @default(cuid())
-  type             DocumentType
+  id                String          @id @default(cuid())
+  type              DocumentType
   //كل إصدارات نفس المستند ليها نفس groupId
-  groupId          String          @default(cuid())
-  version          Int             @default(1)
-  status           DocumentStatus  @default(UPLOADED)
-  ownerId          String
-  owner            User            @relation("DocumentOwner", fields: [ownerId], references: [id])
-  uploadedById     String
-  uploadedBy       User            @relation("DocumentUploader", fields: [uploadedById], references: [id])
-  plotId           String?
-  plot             Plot?           @relation(fields: [plotId], references: [id])
-  listingId        String?
-  listing          Listing?        @relation(fields: [listingId], references: [id])
-  dealId           String?
-  deal             Deal?           @relation(fields: [dealId], references: [id])
-  serviceRequestId String?
-  serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
-  storageKey       String          @unique
-  fileName         String
+  groupId           String          @default(cuid())
+  version           Int             @default(1)
+  status            DocumentStatus  @default(UPLOADED)
+  ownerId           String
+  owner             User            @relation("DocumentOwner", fields: [ownerId], references: [id])
+  uploadedById      String
+  uploadedBy        User            @relation("DocumentUploader", fields: [uploadedById], references: [id])
+  plotId            String?
+  plot              Plot?           @relation(fields: [plotId], references: [id])
+  listingId         String?
+  listing           Listing?        @relation(fields: [listingId], references: [id])
+  dealId            String?
+  deal              Deal?           @relation(fields: [dealId], references: [id])
+  serviceRequestId  String?
+  serviceRequest    ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+  storageKey        String          @unique
+  fileName          String
   /// DOC-01: عنوان «مستند آخر» (إجباري للنوع OTHER)
-  title            String?
+  title             String?
   /// PRIV-01: PRIVATE | STAFF | SHARED_WITH_COUNTERPARTY
-  visibility       String          @default("PRIVATE")
-  bankProofFor     BankAccount[]
-  mimeType         String
-  sizeBytes        Int
-  sha256           String          @db.Char(64)
-  expiresAt        DateTime?       @db.Date //تاريخ انتهاء المستند (لو له)
+  visibility        String          @default("PRIVATE")
+  bankProofFor      BankAccount[]
+  signedContractFor Contract[]      @relation("ContractSignedUpload")
+  draftContractFor  Contract[]      @relation("ContractDraft")
+  mimeType          String
+  sizeBytes         Int
+  sha256            String          @db.Char(64)
+  expiresAt         DateTime?       @db.Date //تاريخ انتهاء المستند (لو له)
   /// OPS-02: مكان ووقت تصوير صورة الموقع
-  geoLat           Float?
-  geoLng           Float?
-  geoAccuracyM     Float?
-  takenAt          DateTime?
-  createdAt        DateTime        @default(now())
+  geoLat            Float?
+  geoLng            Float?
+  geoAccuracyM      Float?
+  takenAt           DateTime?
+  createdAt         DateTime        @default(now())
 
   reviews           Review[]
   kycIdFor          KycProfile?       @relation("KycIdDocument")
@@ -592,34 +595,52 @@ model DealEvent {
 }
 
 model Contract {
-  id                    String         @id @default(cuid())
-  dealId                String
-  deal                  Deal           @relation(fields: [dealId], references: [id])
-  type                  ContractType
-  templateVersion       String //نسخة النموذج، مثلاً v3
-  status                ContractStatus @default(DRAFT)
+  /// CON-02: النسخة بالظبط (مش رقم نصي)
+  templateVersionId      String?
+  templateVersionRef     TemplateVersion? @relation(fields: [templateVersionId], references: [id])
+  /// CON-06: آخر نسخة للتوقيع اتولدت (كود + بصمة + صفحات)
+  draftCode              String?
+  draftSha256            String?
+  draftPages             Int?
+  draftDocumentId        String?
+  draftDocument          Document?        @relation("ContractDraft", fields: [draftDocumentId], references: [id])
+  /// CON-04: النسخة الموقّعة المرفوعة (توقيع ورقي) أو مزود التوقيع
+  signedUploadDocumentId String?
+  signedUploadDocument   Document?        @relation("ContractSignedUpload", fields: [signedUploadDocumentId], references: [id])
+  signedVia              String? // ESIGN | PAPER
+  rejectReason           String?
+  /// CON-05: التوكيل الموثق
+  poaNumber              String?
+  poaNotary              String?
+  id                     String           @id @default(cuid())
+  dealId                 String
+  deal                   Deal             @relation(fields: [dealId], references: [id])
+  type                   ContractType
+  templateVersion        String //نسخة النموذج، مثلاً v3
+  status                 ContractStatus   @default(DRAFT)
   //التوقيعات من مزود التوقيع المرخّص: [{ userId, role, signedAt, providerRef }]
-  signatures            Json           @default("[]")
-  providerEnvelopeId    String?        @unique
-  pdfDocumentId         String?        @unique
-  pdfDocument           Document?      @relation(fields: [pdfDocumentId], references: [id])
-  approvedById          String?
-  approvedBy            User?          @relation("ContractApprover", fields: [approvedById], references: [id])
-  approvedAt            DateTime?
-  signedAt              DateTime?
+  signatures             Json             @default("[]")
+  providerEnvelopeId     String?          @unique
+  pdfDocumentId          String?          @unique
+  pdfDocument            Document?        @relation(fields: [pdfDocumentId], references: [id])
+  approvedById           String?
+  approvedBy             User?            @relation("ContractApprover", fields: [approvedById], references: [id])
+  approvedAt             DateTime?
+  signedAt               DateTime?
   // CON-04: التحقق من النسخة الموقّعة (المحامي أو شهادة مزوّد التوقيع) + مكان الأصل الورقي
-  verifiedAt            DateTime?
-  verifiedById          String?
-  verifiedBy            User?          @relation("ContractVerifier", fields: [verifiedById], references: [id])
-  verificationMethod    String?
-  verificationChecklist Json?
-  paperOriginalLocation String?
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
+  verifiedAt             DateTime?
+  verifiedById           String?
+  verifiedBy             User?            @relation("ContractVerifier", fields: [verifiedById], references: [id])
+  verificationMethod     String?
+  verificationChecklist  Json?
+  paperOriginalLocation  String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
 
   reviews Review[]
 
   @@index([dealId, type])
+  @@index([templateVersionId])
 }
 
 /// النسب بتتنسخ في الصفقة وقت إنشائها — تغيير النسبة في الإعدادات بيسري على الجديد بس
@@ -980,20 +1001,22 @@ model ConsentRecord {
 
 /// TXN-01 / CON-06: سجل مرقّم لكل PDF بيطلع من المنصة — صفحة التحقق (QR) بتقرا منه. إضافة بس (append-only).
 model IssuedDocument {
-  id              String   @id @default(cuid())
-  seq             Int      @unique @default(autoincrement())
-  code            String   @unique
+  id              String    @id @default(cuid())
+  seq             Int       @unique @default(autoincrement())
+  code            String    @unique
   kind            String // STATEMENT | CONTRACT_DRAFT | EXPORT
   dealId          String?
-  deal            Deal?    @relation(fields: [dealId], references: [id])
+  deal            Deal?     @relation(fields: [dealId], references: [id])
   contractId      String?
   templateVersion String?
   issuedToId      String?
-  issuedTo        User?    @relation(fields: [issuedToId], references: [id])
+  issuedTo        User?     @relation(fields: [issuedToId], references: [id])
   copyFor         String? // BUYER | SELLER | STAFF
+  /// CON-06: نسخة أحدث اتولدت → دي ملغاة
+  supersededAt    DateTime?
   sha256          String
   pages           Int
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
 
   @@index([dealId])
   @@index([contractId])
@@ -1152,4 +1175,40 @@ model OfficialRequest {
   createdById String
   createdBy   User      @relation("OfficialRequestBy", fields: [createdById], references: [id])
   createdAt   DateTime  @default(now())
+}
+
+/// CON-01: النماذج العشرة (مفتاح ثابت + رقم النموذج + طريقة التوقيع)
+model ContractTemplate {
+  id           String            @id @default(cuid())
+  key          String            @unique
+  formNo       Int
+  titleAr      String
+  titleEn      String
+  contractType String?
+  signing      String // CLICKWRAP | SIGNED | NOTARIAL
+  createdAt    DateTime          @default(now())
+  versions     TemplateVersion[]
+}
+
+/// CON-01: نسخة نص — DRAFT → LAWYER_APPROVED → PUBLISHED → RETIRED. المعتمدة/المنشورة ما بتتعدّلش (DB trigger)
+model TemplateVersion {
+  id                 String           @id @default(cuid())
+  templateId         String
+  template           ContractTemplate @relation(fields: [templateId], references: [id])
+  version            Int
+  bodyMarkdown       String
+  variables          String[]
+  status             String           @default("DRAFT")
+  changeNote         String?
+  sha256             String
+  createdById        String?
+  approvedByLawyerId String?
+  approvedByLawyer   User?            @relation("TemplateLawyer", fields: [approvedByLawyerId], references: [id])
+  approvedAt         DateTime?
+  publishedById      String?
+  publishedAt        DateTime?
+  createdAt          DateTime         @default(now())
+  contracts          Contract[]
+
+  @@unique([templateId, version])
 }

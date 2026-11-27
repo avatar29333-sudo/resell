@@ -29,6 +29,7 @@ export const ACTION_KEYS = [
   "listing.reprice", // 11 تعديل السعر المعلن بعد بدء صفقة
   "otp.channel_change", // تغيير قناة التحقق (بتحقق من القناة القديمة)
   "bank.add", // BANK-01 إضافة/تعديل حساب بنكي
+  "consent.accept", // CON-03 موافقة إلكترونية على نموذج (Clickwrap + كود)
 ] as const;
 export type ActionKey = (typeof ACTION_KEYS)[number];
 

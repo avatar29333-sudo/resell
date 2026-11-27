@@ -35,6 +35,11 @@ export async function requestCode(locale: string, action: string, subjectId: str
       action === "listing.withdraw"
         ? ar ? `سحب عرضك ${ref} رغم وجود صفقة شغالة` : `Withdraw your listing ${ref} despite an active deal`
         : ar ? `تعديل سعر عرضك ${ref} إلى ${egp(Number(fields.price), true)}` : `Change your listing ${ref} price to ${egp(Number(fields.price), false)}`;
+  } else if (action === "consent.accept") {
+    // CON-03: الملخص من النموذج والنسخة نفسها
+    const v = fields.versionId ? await db.templateVersion.findUnique({ where: { id: fields.versionId }, include: { template: true } }) : null;
+    if (!v || v.status !== "PUBLISHED") return { error: "action" };
+    summary = ar ? `كود موافقتك على ${v.template.titleAr} (نسخة v${v.version})` : `Your consent to the ${v.template.titleEn} (version v${v.version})`;
   } else if (action === "otp.channel_change" || action === "bank.add") {
     summary =
       action === "otp.channel_change"

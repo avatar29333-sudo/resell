@@ -23,7 +23,7 @@ describe("TXN-01 deal overview", () => {
   it("tells the seller to sign what's waiting on them", () => {
     const a = nextActionFor(base, "SELLER", true)!;
     expect(a.mine).toBe(true);
-    expect(a.text).toBe("وقّع العقد الابتدائي");
+    expect(a.text).toBe("نزّل العقد الابتدائي ووقّعه وارفعه");
   });
   it("tells the buyer to transfer the deposit once their signature is done", () => {
     const a = nextActionFor(base, "BUYER", true)!;

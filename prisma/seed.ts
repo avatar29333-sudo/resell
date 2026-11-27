@@ -4,6 +4,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { seedTemplates } from "./seed-templates";
 import { Prisma, PrismaClient } from "@prisma/client";
 /** GEO-01: المدينة = مفتاح نصي من جدول المدن (الخمس مدن الأولى بتتضاف في الـ migration) */
 type City = string;
@@ -629,6 +630,7 @@ async function main() {
     await seedNotifications();
     await backfillAssignments();
     await renameDemoTeam();
+    await seedTemplates(prisma);
     return;
   }
   if ((await prisma.user.count()) > 0) {
@@ -677,6 +679,7 @@ async function main() {
   await seedNotifications();
   await backfillAssignments();
   await renameDemoTeam();
+  await seedTemplates(prisma);
   const c = (k: keyof typeof rows) => rows[k].length;
   console.log(
     `تمام في ${((Date.now() - t0) / 1000).toFixed(1)} ث: ${c("users")} مستخدم، ${c("listings")} عرض، ${c("deals")} صفقة، ${c("contracts")} عقد، ${c("docs")} مستند بمرفقاته، ${c("services")} طلب خدمة، ${c("buy")} طلب شراء، ${c("rates")} سعر صرف.`,

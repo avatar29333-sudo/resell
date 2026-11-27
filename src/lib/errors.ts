@@ -1,5 +1,6 @@
 /** نصوص أخطاء الصلاحيات المشتركة (عربي/إنجليزي) — بتظهر لما server action يرجّع ?err=… */
 export const AUTHZ_ERRORS: Record<string, [string, string]> = {
+  authorization: ["المالك لسه ما وافقش على تفويض العرض (نموذج 1) — النشر بعد موافقته.", "The owner hasn't consented to the listing authorization (form 1) yet — publish after they do."],
   forbidden: ["الفعل ده مش متاح لحسابك.", "This action isn't available to your account."],
   reason_required: ["لازم تكتب سبب التدخّل (5 حروف على الأقل).", "Please write an override reason (at least 5 characters)."],
   note_required: ["لازم ملاحظة واضحة (10 حروف على الأقل).", "A clear note is required (at least 10 characters)."],

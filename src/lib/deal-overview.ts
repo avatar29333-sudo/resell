@@ -77,7 +77,14 @@ export function nextActionFor(f: OverviewInput, side: Side | null, ar: boolean):
     const toSign = f.contracts.find(
       (c) => (c.status === "SENT_FOR_SIGNATURE" || c.status === "PARTIALLY_SIGNED") && requiredSigners(c.type).includes(side) && !c.signatures.some((s) => s.role === side),
     );
-    if (toSign) return { mine: true, text: ar ? `وقّع ${ct(toSign.type, true)}` : `Sign ${ct(toSign.type, false)}`, anchor: "#contracts", dueAt: due };
+    if (toSign) {
+      // CON-06: العقود الكبيرة بتتنزّل وتتوقّع وتترفع (أو مزوّد التوقيع)
+      const paper = ["PRELIMINARY_CONTRACT", "DEPOSIT_RECEIPT", "BUYER_UNDERTAKING", "CLOSING", "CANCELLATION"].includes(toSign.type);
+      const text = paper
+        ? ar ? `نزّل ${ct(toSign.type, true)} ووقّعه وارفعه` : `Download, sign and upload ${ct(toSign.type, false)}`
+        : ar ? `وقّع ${ct(toSign.type, true)}` : `Sign ${ct(toSign.type, false)}`;
+      return { mine: true, text, anchor: `#contract-${toSign.id}`, dueAt: due };
+    }
     const docReq = f.docRequests?.find((r) => r.side === side);
     if (docReq) return { mine: true, text: ar ? `مطلوب منك رفع: ${docReq.title}` : `Please upload: ${docReq.title}`, anchor: "#other-docs", dueAt: due };
     const myOk = side === "BUYER" ? f.buyerPriceOkAt : f.sellerPriceOkAt;

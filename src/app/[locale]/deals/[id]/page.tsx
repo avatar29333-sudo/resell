@@ -34,6 +34,9 @@ import { AdminReason } from "@/components/AdminReason";
 import { TrackEvent } from "@/components/Analytics";
 import { OtpConfirm } from "@/components/OtpConfirm";
 import { MultiUpload } from "@/components/MultiUpload";
+import { ContractSlots } from "./ContractSlots";
+import { renderTemplate } from "@/lib/templates";
+import { dealVars } from "@/lib/contract-vars";
 import { PAYOUT_ERRORS } from "@/lib/bank";
 import { FEE_NOTICE } from "@/lib/bank-rules";
 import { OTP_ERRORS } from "@/lib/action-otp";
@@ -72,7 +75,7 @@ import {
   uploadDealDocument,
 } from "../actions";
 
-type Props = { params: Promise<{ locale: string; id: string }>; searchParams: Promise<{ err?: string; ok?: string; new?: string; ev?: string; log?: string }> };
+type Props = { params: Promise<{ locale: string; id: string }>; searchParams: Promise<{ err?: string; ok?: string; new?: string; ev?: string; log?: string; page?: string; got?: string; want?: string }> };
 
 // العقد اللي بيتعمل في كل مرحلة (DATA-05)
 const CONTRACT_FOR_STAGE: Partial<Record<string, ContractType[]>> = {
@@ -97,6 +100,13 @@ const ERRORS: Record<string, [string, string]> = {
   ...OTP_ERRORS,
   ...Object.fromEntries(Object.entries(PAYOUT_ERRORS).map(([k, v]) => [`payout_${k}`, v])),
   title: ["لازم عنوان لكل مستند (3 حروف على الأقل).", "Each document needs a title (at least 3 characters)."],
+  poa_fields: ["اكتب رقم التوكيل ومكتب التوثيق أو القنصلية.", "Enter the POA number and the notary office or consulate."],
+  no_draft: ["نزّل نسخة للتوقيع الأول — الرفع بيتقارن بيها.", "Download a signing copy first — the upload is checked against it."],
+  code_old: ["الكود ده لنسخة ملغاة — نزّل آخر نسخة ووقّع عليها.", "That code belongs to a void copy — download the latest copy and sign it."],
+  code_wrong: ["كود المستند مش مطابق للنسخة الحالية — اكتبه زي ما هو مطبوع تحت الصفحة.", "The document code doesn't match the current copy — type it exactly as printed at the bottom."],
+  mix: ["ارفع PDF واحد بس، أو صور JPG/PNG بس.", "Upload one PDF only, or JPG/PNG photos only."],
+  poa_sale: ["التوكيل لازم يكون للتقديم والمتابعة بس — توكيل فيه صلاحية بيع مرفوض.", "The POA must be for filing and follow-up only — a POA with sale powers is rejected."],
+  agree: ["لازم تعلّم على مربع الموافقة الأول.", "Tick the consent box first."],
   bank_locked: ["الحساب مثبّت على الصفقة — كلّم المالية للتغيير.", "The account is locked to the deal — contact finance to change it."],
   verify_checklist: ["لازم تأكد كل بنود المطابقة.", "Confirm every checklist item."],
   forbidden: ["الفعل ده مش متاح لحسابك على الصفقة دي.", "This action isn't available to you on this deal."],
@@ -200,6 +210,12 @@ export default async function DealRoom({ params, searchParams }: Props) {
   // BANK-01: حسابات الطرف اللي ينفع يختار منها
   const myAccounts = side ? await db.bankAccount.findMany({ where: { userId: me.id, status: { in: ["PENDING", "VERIFIED"] } }, orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }] }) : [];
   const myDealAccount = side === "BUYER" ? deal.buyerBankAccount : side === "SELLER" ? deal.sellerBankAccount : null;
+  // CON-03: نموذج 2 (اتفاق العمولة) بالموافقة الإلكترونية — النص معبّى ببيانات الصفقة الحقيقية
+  const clickwraps: Record<string, { title: string; version: number; text: string }> = {};
+  for (const c of deal.contracts.filter((x) => x.type === "COMMISSION_AGREEMENT" && x.templateVersionId && x.status !== "VOID")) {
+    const tv = await db.templateVersion.findUnique({ where: { id: c.templateVersionId! }, include: { template: true } });
+    if (tv) clickwraps[c.id] = { title: tv.template.titleAr, version: tv.version, text: renderTemplate(tv.bodyMarkdown, await dealVars(deal, tv.version)).text };
+  }
   const ovw = { ...overviewOf(deal), docRequests: docRequests.map((r) => ({ side: r.side, title: r.title })) };
   const dealFees = await getSetting("deal.fees");
   const logFilter = (["money", "docs", "comms", "stage"] as const).find((x) => x === sp.log) as EventCategory | undefined;
@@ -248,10 +264,13 @@ export default async function DealRoom({ params, searchParams }: Props) {
         )}
         {sp.new && <Notice tone="green">{L("اهتمامك اتسجل، والوسيط هيكلمك لاتفاق العمولة.", "Your interest is registered. The broker will contact you about the commission agreement.")}</Notice>}
         {sp.ok === "approval_requested" && <Notice tone="amber">{L(`المبلغ فوق حد الأربع عيون (${num(fourEyes, locale)} ج.م) — اتبعت طلب موافقة للأدمن.`, `The amount is above the four-eyes limit (EGP ${fourEyes}) — an approval request was sent to the admin.`)}</Notice>}
+        {sp.ok === "signed_uploaded" && <Notice tone="green">{L("النسخة الموقّعة اترفعت ووصلت للمحامي للمقارنة.", "The signed copy was uploaded and sent to the lawyer for comparison.")}</Notice>}
+        {sp.err === "page_quality" && <Notice tone="red">{L(`الصفحة ${sp.page ?? ""} مش واضحة — صوّرها تاني في إضاءة كويسة.`, `Page ${sp.page ?? ""} isn't clear — photograph it again in good light.`)}</Notice>}
+        {sp.err === "pages" && <Notice tone="red">{L(`عدد الصفحات المرفوعة ${sp.got ?? "?"} والنسخة المتولّدة ${sp.want ?? "?"} — ارفع كل الصفحات.`, `You uploaded ${sp.got ?? "?"} pages but the generated copy has ${sp.want ?? "?"} — upload every page.`)}</Notice>}
         {sp.ok === "price_response" && <Notice tone="green">{L("ردّك على السعر اتبعت للوسيط.", "Your price response was sent to the broker.")}</Notice>}
         {sp.ok === "cancel_requested" && <Notice tone="amber">{L("طلب الإلغاء اتبعت للوسيط والإدارة — هيتواصلوا معاك.", "Your cancellation request was sent to the broker and admin.")}</Notice>}
         {sp.ok === "agent_requested" && <Notice tone="green">{L("اتبعت طلب مندوب للأدمن.", "A field agent request was sent to the admin.")}</Notice>}
-        {sp.err && (
+        {sp.err && sp.err !== "page_quality" && sp.err !== "pages" && (
           <Notice tone="red">
             {sp.err in BLOCKER_TEXT ? BLOCKER_TEXT[sp.err as Blocker][ar ? 0 : 1] : (ERRORS[sp.err] ?? ERRORS.forbidden)[ar ? 0 : 1]}
           </Notice>
@@ -346,7 +365,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                                 ? L("مستني مراجعة المحامي", "Awaiting lawyer review")
                                 : L("مسودة — المحامي طلب تعديل", "Draft — lawyer requested changes");
                     return (
-                      <li key={c.id} className="flex flex-col gap-2 py-3">
+                      <li key={c.id} id={`contract-${c.id}`} className="flex scroll-mt-24 flex-col gap-2 py-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="font-semibold">
                             {label(CONTRACT_TYPE, c.type, locale)} <span className="text-xs text-muted">{c.templateVersion}</span>
@@ -391,40 +410,19 @@ export default async function DealRoom({ params, searchParams }: Props) {
                                 <button className={`${btn.small} bg-brand text-white`}>{L("ابعت للتوقيع الإلكتروني", "Send for e-signature")}</button>
                               </form>
                             )}
-                            {p["contract.approve"].allowed && c.status === "SIGNED" && (
-                              <form action={verifyContract.bind(null, locale, id, c.id)} className="flex w-full flex-col gap-2 border border-line p-3 text-sm">
-                                <strong>{L("تحقق من النسخة الموقّعة", "Verify the signed copy")}</strong>
-                                {[
-                                  ["pages", L("عدد الصفحات مطابق للمسودة", "Page count matches the draft")],
-                                  ["code", L("كود المستند ونسخة النموذج مطابقين", "Document code and template version match")],
-                                  ["signatures", L("توقيعات وأحرف الطرفين موجودة في كل صفحة", "Both parties' signatures and initials on every page")],
-                                  ["quality", L("الصورة/الملف واضح ومقروء", "The file is clear and legible")],
-                                ].map(([k, t]) => (
-                                  <label key={k} className="flex min-h-11 items-center gap-2">
-                                    <input type="checkbox" name={`chk_${k}`} required className="size-5" /> {t}
-                                  </label>
-                                ))}
-                                <input aria-label={L("مكان الأصل الورقي", "Paper original location")} name="paperOriginalLocation" placeholder={L("مكان الأصل الورقي (مثلاً: خزنة المكتب — ملف 12)", "Paper original location (e.g. office safe — file 12)")} className={field} />
-                                <button className={`${btn.small} self-start bg-ok text-white`}>{L("تم التحقق", "Verified")}</button>
-                              </form>
-                            )}
-                            {(c.status === "SENT_FOR_SIGNATURE" || c.status === "PARTIALLY_SIGNED") && mySig && (
-                              p["contract.sign"].allowed ? (
-                                <OtpConfirm
-                                  locale={locale}
-                                  action={contractActionKey(c.type)}
-                                  subjectId={id}
-                                  fields={["contractId"]}
-                                  preview={L(`توقيعك على ${label(CONTRACT_TYPE, c.type, locale)} (نسخة ${c.templateVersion})`, `Your signature on the ${label(CONTRACT_TYPE, c.type, locale)} (version ${c.templateVersion})`)}
-                                  submitLabel={L("وقّع إلكترونياً", "Sign electronically")}
-                                  formAction={signContract.bind(null, locale, id, c.id)}
-                                >
-                                  <input type="hidden" name="contractId" value={c.id} />
-                                </OtpConfirm>
-                              ) : (
-                                <span className="text-sm text-[#8A5A00]">{L("وثّق هويتك الأول عشان تقدر توقّع.", "Verify your ID first to be able to sign.")}</span>
-                              )
-                            )}
+                            {/* CON-04/06: المسودة / النسخة الموقّعة / التحقق */}
+                            <ContractSlots
+                              locale={locale}
+                              dealId={id}
+                              c={c}
+                              mySig={!!mySig}
+                              canSign={p["contract.sign"].allowed}
+                              canDownload={(!!side && requiredSigners(c.type).includes(side)) || [deal.brokerId, deal.lawyerId].includes(me.id) || me.role === "ADMIN"}
+                              canUpload={(!!side && requiredSigners(c.type).includes(side)) || me.id === deal.brokerId || me.role === "ADMIN"}
+                              onBehalf={!side && (me.id === deal.brokerId || me.role === "ADMIN")}
+                              canVerify={p["contract.approve"].allowed}
+                              clickwrap={clickwraps[c.id] ?? null}
+                            />
                           </div>
                         )}
                       </li>

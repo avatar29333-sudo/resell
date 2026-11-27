@@ -27,8 +27,13 @@ export default async function VerifyPage({ params }: Props) {
   const ar = locale === "ar";
   const row = /^[A-Z0-9-]{6,60}$/.test(code) ? await db.issuedDocument.findUnique({ where: { code } }) : null;
   // CON-06: هل فيه نسخة أحدث لنفس العقد؟
-  const newer =
-    row?.contractId ? await db.issuedDocument.findFirst({ where: { contractId: row.contractId, kind: row.kind, seq: { gt: row.seq } }, orderBy: { seq: "desc" }, select: { templateVersion: true } }) : null;
+  const newer = row?.supersededAt
+    ? true
+    : row?.contractId
+      ? !!(await db.issuedDocument.findFirst({ where: { contractId: row.contractId, kind: row.kind, seq: { gt: row.seq } }, select: { id: true } }))
+      : false;
+  // حالة العقد بس — من غير أي بيانات
+  const contract = row?.contractId ? await db.contract.findUnique({ where: { id: row.contractId }, select: { status: true } }) : null;
   return (
     <>
       <PageHeader title={L("التحقق من مستند", "Verify a document")} />
@@ -39,7 +44,7 @@ export default async function VerifyPage({ params }: Props) {
           <>
             <Notice tone={newer ? "amber" : "green"}>
               {newer
-                ? L("المستند ده صادر من المنصة، لكن فيه نسخة أحدث منه. اتأكد إنك بتوقّع على آخر نسخة.", "This document was issued by the platform, but a newer copy exists. Make sure you sign the latest one.")
+                ? L("النسخة دي ملغاة — اتولدت نسخة أحدث من العقد. ما توقّعش عليها، ونزّل آخر نسخة.", "This copy is void — a newer copy of the contract was issued. Don't sign it; download the latest copy.")
                 : L("المستند ده صادر من المنصة فعلاً.", "This document was genuinely issued by the platform.")}
             </Notice>
             <Card title={<span dir="ltr">{row.code}</span>} actions={<Badge tone="blue">{(KIND[row.kind] ?? [row.kind, row.kind])[ar ? 0 : 1]}</Badge>}>
@@ -48,6 +53,7 @@ export default async function VerifyPage({ params }: Props) {
                   [L("رقم الإصدار", "Issue no."), <span key="s" className="tabular-nums">#{row.seq}</span>],
                   [L("الصفقة", "Deal"), row.dealId ? <span key="d" dir="ltr">{dealRef(row.dealId)}</span> : "—"],
                   [L("نسخة النموذج", "Template version"), row.templateVersion ?? "—"],
+                  ...(contract ? [[L("حالة العقد", "Contract status"), { DRAFT: L("مسودة", "Draft"), PENDING_LAWYER: L("عند المحامي", "With lawyer"), APPROVED: L("معتمد", "Approved"), SENT_FOR_SIGNATURE: L("مستني التوقيع", "Awaiting signatures"), PARTIALLY_SIGNED: L("موقّع جزئياً", "Partially signed"), SIGNED: L("موقّع — مستني التحقق", "Signed — awaiting verification"), VERIFIED: L("موقّع ومتحقق منه", "Signed and verified"), VOID: L("ملغي", "Void") }[contract.status] ?? contract.status] as [string, string]] : []),
                   [L("عدد الصفحات", "Pages"), <span key="p" className="tabular-nums">{row.pages}</span>],
                   [L("تاريخ الإصدار", "Issued"), dateTime(row.createdAt, locale)],
                   [L("البصمة (SHA-256)", "Fingerprint (SHA-256)"), <code key="h" dir="ltr" className="text-[13px] break-all">{row.sha256}</code>],

@@ -11,7 +11,8 @@ import { factsOf, loadDealFor, type LoadedDeal } from "@/lib/access";
 import { authorize, dealCtx, overrideReason, type Action } from "@/lib/authz";
 import { allowedDealUploads, type UploadSide } from "@/lib/authz/policy";
 import { blockersToAdvance, nextStage, requiredSigners, STAGES, stageIndex, type Stage } from "@/lib/deal-machine";
-import { fileFromForm, saveFile } from "@/lib/storage";
+import { fileFromForm, readFile, saveFile } from "@/lib/storage";
+import { imagesToPdf, pdfPageCount } from "@/lib/pdf-ar";
 import { getSetting, templateVersion } from "@/lib/settings";
 import { makePdf } from "@/lib/pdf";
 import { toNum } from "@/lib/format";
@@ -27,6 +28,9 @@ import { requireActionCode } from "@/lib/action-otp";
 import { contractActionKey } from "@/lib/action-otp-core";
 import { cleanTitle } from "@/lib/upload-rules";
 import { payoutTarget } from "@/lib/bank";
+import { dealVars, publishedFor } from "@/lib/contract-vars";
+import { recordClickwrap } from "@/lib/clickwrap";
+import { renderTemplate } from "@/lib/templates";
 import { netAfterFees } from "@/lib/bank-rules";
 
 const loc = (l: string): Locale => (isLocale(l) ? l : "ar");
@@ -233,7 +237,9 @@ export async function createContract(locale: string, dealId: string, type: Contr
   } else if (!deal.lawyerId) {
     await db.deal.update({ where: { id: dealId }, data: { lawyerId } });
   }
-  const c = await db.contract.create({ data: { dealId, type, templateVersion: await templateVersion(type), status: "PENDING_LAWYER" } });
+  // CON-02: العقد بيترتبط بالنسخة المنشورة بالظبط (templateVersionId)
+  const tv = await publishedFor({ contractType: type });
+  const c = await db.contract.create({ data: { dealId, type, templateVersion: tv ? `v${tv.version}` : await templateVersion(type), templateVersionId: tv?.id, status: "PENDING_LAWYER" } });
   await event(deal, user, "CONTRACT_UPDATED", { contractId: c.id, type, status: "PENDING_LAWYER" });
   await notify([lawyerId], {
     kind: "contract.review_needed",
@@ -311,6 +317,20 @@ export async function sendForSignature(locale: string, dealId: string, contractI
   done(l, dealId);
 }
 
+/** اكتمال توقيع عقد (إلكتروني أو ورقي): DEAL-01 قفل سعر الصرف + BANK-01 تثبيت الحسابات — مع العقد الابتدائي بس */
+async function onFullySigned(user: User, deal: LoadedDeal, type: string) {
+  if (type !== "PRELIMINARY_CONTRACT") return;
+  if (!deal.rateLockedAt) {
+    const locked = await lockRateAt(new Date());
+    const upd = fxLockUpdate({ contractType: type, signingComplete: true, alreadyLockedAt: deal.rateLockedAt, rate: locked ? { id: locked.id, sell: toNum(locked.sell), source: locked.source } : null, now: new Date() });
+    if (upd && locked) {
+      await db.deal.update({ where: { id: deal.id }, data: upd });
+      await audit(user.id, "deal.rate_locked", "Deal", deal.id, { rateId: locked.id, sell: toNum(locked.sell), rateDate: locked.date.toISOString(), source: locked.source });
+    }
+  }
+  if (!deal.bankLockedAt) await db.deal.update({ where: { id: deal.id }, data: { bankLockedAt: new Date() } });
+}
+
 type Signature = { userId: string; role: "BUYER" | "SELLER"; signedAt: string; providerRef: string };
 
 /** التوقيع للطرفين بس + حساب موثّق (5.5) — في التجربة زرار؛ على الإنتاج بيروح لمزوّد التوقيع المرخّص */
@@ -323,8 +343,14 @@ export async function signContract(locale: string, dealId: string, contractId: s
   if (!side || !requiredSigners(contract!.type).includes(side)) done(l, dealId, "?err=forbidden");
   const sigs = (contract!.signatures as Signature[]) ?? [];
   if (sigs.some((s) => s.role === side)) done(l, dealId);
+  // CON-03: اتفاق العمولة بالموافقة الإلكترونية — المربع لازم يتعلّم
+  if (contract!.type === "COMMISSION_AGREEMENT" && form?.get("agree") !== "on") done(l, dealId, `?err=agree#contract-${contractId}`);
   // DEAL-03: كود مربوط بالعقد ده (نوع الإجراء حسب النموذج)
   await requireActionCode(user, contractActionKey(contract!.type), dealId, { contractId }, form, back);
+  if (contract!.type === "COMMISSION_AGREEMENT" && contract!.templateVersionId) {
+    const tv = await db.templateVersion.findUnique({ where: { id: contract!.templateVersionId }, include: { template: true } });
+    if (tv) await recordClickwrap(user, { kind: tv.template.key, versionId: tv.id, title: tv.template.titleAr, version: tv.version, text: renderTemplate(tv.bodyMarkdown, await dealVars(deal, tv.version)).text, dealId });
+  }
   const all = [...sigs, { userId: user.id, role: side!, signedAt: new Date().toISOString(), providerRef: `DEMO-SIG-${Date.now()}` }];
   const complete = requiredSigners(contract!.type).every((r) => all.some((s) => s.role === r));
 
@@ -364,18 +390,7 @@ export async function signContract(locale: string, dealId: string, contractId: s
     where: { id: contractId },
     data: { signatures: all, ...(complete ? { status: "SIGNED", signedAt: new Date(), pdfDocumentId } : { status: "PARTIALLY_SIGNED" }) },
   });
-  // DATA-01: سعر الصرف بيتثبت مرة واحدة لحظة اكتمال توقيع العقد المبدئي
-  // DEAL-01: القفل لحظة اكتمال توقيع الطرفين على العقد الابتدائي بس
-  if (complete && contract!.type === "PRELIMINARY_CONTRACT" && !deal.rateLockedAt) {
-    const locked = await lockRateAt(new Date());
-    const upd = fxLockUpdate({ contractType: contract!.type, signingComplete: complete, alreadyLockedAt: deal.rateLockedAt, rate: locked ? { id: locked.id, sell: toNum(locked.sell), source: locked.source } : null, now: new Date() });
-    if (upd && locked) {
-      await db.deal.update({ where: { id: dealId }, data: upd });
-      await audit(user.id, "deal.rate_locked", "Deal", dealId, { rateId: locked.id, sell: toNum(locked.sell), rateDate: locked.date.toISOString(), source: locked.source });
-    }
-  }
-  // BANK-01: الحسابات البنكية للصفقة بتتثبت لحظة اكتمال توقيع نموذج 3
-  if (complete && contract!.type === "PRELIMINARY_CONTRACT" && !deal.bankLockedAt) await db.deal.update({ where: { id: dealId }, data: { bankLockedAt: new Date() } });
+  if (complete) await onFullySigned(user, deal, contract!.type);
   await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, signedBy: side, complete });
   if (complete) {
     await notify([deal.buyerId, deal.listing.sellerId, deal.brokerId], {
@@ -393,7 +408,8 @@ export async function signContract(locale: string, dealId: string, contractId: s
  * CON-04: المحامي بيتحقق من النسخة الموقّعة قبل ما المرحلة الجاية تتفتح (SIGNED → VERIFIED).
  * قائمة مطابقة إجبارية + مكان الأصل الورقي. شهادة مزوّد التوقيع (لما يتربط) بتعمل نفس الحاجة آلياً.
  */
-const VERIFY_CHECKS = ["pages", "code", "signatures", "quality"] as const;
+// CON-06: التوقيعات موجودة، الأحرف الأولى على كل صفحة، مفيش شطب أو إضافة بخط اليد، التاريخ
+const VERIFY_CHECKS = ["signatures", "initials", "no_handwriting", "date"] as const;
 export async function verifyContract(locale: string, dealId: string, contractId: string, form: FormData) {
   const { l, user, deal, back } = await ctx(locale, dealId);
   await guard(user, deal, "contract.approve", back, form);
@@ -401,7 +417,12 @@ export async function verifyContract(locale: string, dealId: string, contractId:
   if (!contract || contract.status !== "SIGNED") done(l, dealId);
   const checklist = VERIFY_CHECKS.map((k) => ({ key: k, passed: form.get(`chk_${k}`) === "on" }));
   if (checklist.some((c) => !c.passed)) done(l, dealId, "?err=verify_checklist");
-  const paper = String(form.get("paperOriginalLocation") ?? "").trim().slice(0, 200) || null;
+  // CON-05: التوكيل لازم يكون «تقديم ومتابعة» مش «بيع» — لو فيه صلاحية بيع بيترفض
+  if (contract!.type === "POWER_OF_ATTORNEY" && form.get("chk_filing_only") !== "on") done(l, dealId, "?err=poa_sale");
+  // CON-06: مكان الأصل الورقي (مع العميل / في المكتب / اتشحن + رقم البوليصة)
+  const where = String(form.get("paperWhere") ?? "");
+  const extra = String(form.get("paperOriginalLocation") ?? "").trim().slice(0, 160);
+  const paper = where ? `${{ client: "مع العميل", office: "في المكتب", shipped: "اتشحن" }[where] ?? where}${extra ? ` — ${extra}` : ""}` : extra || null;
   await db.contract.update({
     where: { id: contractId },
     data: { status: "VERIFIED", verifiedAt: new Date(), verifiedById: user.id, verificationMethod: "LAWYER", verificationChecklist: checklist, paperOriginalLocation: paper },
@@ -896,4 +917,124 @@ export async function selectDealBank(locale: string, dealId: string, form: FormD
   await db.deal.update({ where: { id: dealId }, data: side === "BUYER" ? { buyerBankAccountId: accountId } : { sellerBankAccountId: accountId } });
   await event(deal, user, "NOTE", { bankSelected: `•••• ${acc!.ibanLast4}`, by: side });
   done(l, dealId, "#bank");
+}
+
+// ─── CON-04/05/06: رفع النسخة الموقّعة (ورقي) + تحقق المحامي ───
+
+/**
+ * «ارفع النسخة الموقّعة»: PDF أو صور (بتتجمع PDF واحد بالترتيب). فحص قبل القبول:
+ * عدد الصفحات = صفحات النسخة المتولّدة، كود المستند = آخر نسخة (مش ملغاة)، وضوح كل صفحة.
+ * الأصل بيتحفظ زي ما هو مع البصمة، وأي رفع جديد نسخة إضافية — مفيش حذف.
+ */
+export async function uploadSignedContract(locale: string, dealId: string, contractId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  const contract = deal.contracts.find((c) => c.id === contractId);
+  const anchor = `#contract-${contractId}`;
+  if (!contract || !["APPROVED", "SENT_FOR_SIGNATURE", "PARTIALLY_SIGNED"].includes(contract.status)) done(l, dealId, `?err=forbidden${anchor}`);
+  const mySide = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
+  const onBehalf = user.id === deal.brokerId || user.role === "ADMIN";
+  if (user.role === "ADMIN") await guard(user, deal, "deal.upload_doc", back, form);
+  const sideRaw = mySide ?? (onBehalf ? String(form.get("side") ?? "") : "");
+  const side = sideRaw === "BUYER" || sideRaw === "SELLER" ? sideRaw : null;
+  if (!side || !requiredSigners(contract!.type).includes(side)) done(l, dealId, `?err=forbidden${anchor}`);
+  // CON-05: التوكيل — رقمه ومكتب التوثيق إجباري
+  const poaNumber = String(form.get("poaNumber") ?? "").trim().slice(0, 60);
+  const poaNotary = String(form.get("poaNotary") ?? "").trim().slice(0, 120);
+  const isPoa = contract!.type === "POWER_OF_ATTORNEY";
+  if (isPoa && (poaNumber.length < 2 || poaNotary.length < 3)) done(l, dealId, `?err=poa_fields${anchor}`);
+  // الكود: النسخة الحالية بس (مش ملغاة) — الكود المطبوع في التذييل أو المقروء من الـ QR
+  const code = String(form.get("code") ?? "").trim().toUpperCase();
+  if (!isPoa) {
+    if (!contract!.draftCode) done(l, dealId, `?err=no_draft${anchor}`);
+    // الكود فيه «v» صغيرة — المقارنة من غير حساسية لحالة الحروف
+    if (code !== contract!.draftCode!.toUpperCase()) {
+      const old = code ? await db.issuedDocument.findFirst({ where: { code: { equals: code, mode: "insensitive" } } }) : null;
+      done(l, dealId, `?err=${old && old.contractId === contractId ? "code_old" : "code_wrong"}${anchor}`);
+    }
+  }
+  const ids = form.getAll("docIds").map(String).slice(0, 40);
+  const files = await db.document.findMany({ where: { id: { in: ids }, ownerId: user.id, uploadedById: user.id, type: "OTHER", dealId: null, listingId: null } });
+  if (!files.length) done(l, dealId, `?err=file${anchor}`);
+  files.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+  const blobs = [];
+  for (const f of files) {
+    const r = await readFile(f.storageKey, f.fileName, f.mimeType);
+    const data = r?.kind === "bytes" ? r.data : r?.kind === "url" ? new Uint8Array(await (await fetch(r.url)).arrayBuffer()) : null;
+    if (!data) done(l, dealId, `?err=file${anchor}`);
+    blobs.push({ doc: f, data: data! });
+  }
+  let pdfBytes: Buffer;
+  let pages: number;
+  if (blobs.length === 1 && blobs[0].doc.mimeType === "application/pdf") {
+    pdfBytes = Buffer.from(blobs[0].data);
+    pages = (await pdfPageCount(pdfBytes)) ?? 0;
+  } else {
+    if (blobs.some((b) => !["image/jpeg", "image/png"].includes(b.doc.mimeType))) done(l, dealId, `?err=mix${anchor}`);
+    const merged = await imagesToPdf(blobs.map((b) => ({ data: b.data, mime: b.doc.mimeType })));
+    if (merged.lowQualityPage) done(l, dealId, `?err=page_quality&page=${merged.lowQualityPage}${anchor}`);
+    pdfBytes = merged.bytes;
+    pages = merged.pages;
+  }
+  if (!isPoa && contract!.draftPages && pages !== contract!.draftPages) done(l, dealId, `?err=pages&got=${pages}&want=${contract!.draftPages}${anchor}`);
+  const saved = await saveFile(pdfBytes, "application/pdf", "contracts");
+  const name = CONTRACT_TYPE[contract!.type]?.[0] ?? contract!.type;
+  const signedDoc = await db.document.create({
+    data: {
+      type: isPoa ? "POWER_OF_ATTORNEY" : "CONTRACT_PDF",
+      title: isPoa ? `التوكيل الموثق رقم ${poaNumber} — ${poaNotary}` : `النسخة الموقّعة — ${name} (${side === "BUYER" ? "المشتري" : "البائع"})`,
+      ownerId: side === "BUYER" ? deal.buyerId : deal.listing.sellerId,
+      uploadedById: user.id,
+      dealId,
+      storageKey: saved.key,
+      sha256: saved.sha256,
+      sizeBytes: saved.sizeBytes,
+      fileName: `${contract!.draftCode ?? contractId}-signed.pdf`,
+      mimeType: "application/pdf",
+      status: "IN_REVIEW",
+      visibility: "SHARED_WITH_COUNTERPARTY",
+    },
+  });
+  // الأصل المرفوع بيتحفظ زي ما هو
+  for (const [i, b] of blobs.entries()) await db.document.update({ where: { id: b.doc.id }, data: { dealId, title: `أصل مرفوع ${i + 1}/${blobs.length} — ${name}`, visibility: "PRIVATE" } });
+  const both = form.get("both") === "on" || isPoa;
+  const roles = both ? requiredSigners(contract!.type) : [side!];
+  const all = [...((contract!.signatures as Signature[]) ?? []).filter((s) => !roles.includes(s.role)), ...roles.map((r) => ({ userId: user.id, role: r, signedAt: new Date().toISOString(), providerRef: `PAPER-${signedDoc.id.slice(-6)}` }))];
+  const complete = requiredSigners(contract!.type).every((r) => all.some((s) => s.role === r));
+  await db.contract.update({
+    where: { id: contractId },
+    data: { signatures: all, status: complete ? "SIGNED" : "PARTIALLY_SIGNED", signedAt: complete ? new Date() : null, signedVia: "PAPER", signedUploadDocumentId: signedDoc.id, rejectReason: null, ...(isPoa ? { poaNumber, poaNotary } : {}) },
+  });
+  if (complete) await onFullySigned(user, deal, contract!.type);
+  await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, signedBy: roles.join("+"), complete, via: "PAPER", onBehalf: !mySide || undefined, sha256: saved.sha256, pages });
+  if (complete && deal.lawyerId) {
+    await notify([deal.lawyerId], {
+      kind: "contract.verify_needed",
+      ar: [`نسخة موقّعة من ${name} محتاجة مراجعتك`, "قارنها بالنسخة المتولّدة صفحة بصفحة."],
+      en: [`A signed ${name} needs your review`, "Compare it page by page with the generated copy."],
+      link: `/deals/${dealId}${anchor}`,
+    });
+  }
+  done(l, dealId, `?ok=signed_uploaded${anchor}`);
+}
+
+/** المحامي: «مرفوض + السبب» → يرجع للطرف بمهمة «أعد الرفع» */
+export async function rejectSignedContract(locale: string, dealId: string, contractId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  await guard(user, deal, "contract.approve", back, form);
+  const contract = deal.contracts.find((c) => c.id === contractId);
+  if (!contract || contract.status !== "SIGNED" || contract.signedVia !== "PAPER") done(l, dealId);
+  const reason = String(form.get("reason") ?? "").trim().slice(0, 300);
+  if (reason.length < 5) done(l, dealId, `?err=note_required#contract-${contractId}`);
+  await db.contract.update({ where: { id: contractId }, data: { status: "SENT_FOR_SIGNATURE", signatures: [], signedAt: null, rejectReason: reason } });
+  for (const side of requiredSigners(contract!.type)) {
+    await db.documentRequest.create({ data: { dealId, requestedById: user.id, side, title: `أعد رفع النسخة الموقّعة من ${CONTRACT_TYPE[contract!.type]?.[0]}`, note: reason } });
+  }
+  await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, decision: "CHANGES_REQUESTED", notes: reason });
+  await notify(requiredSigners(contract!.type).map((s) => (s === "BUYER" ? deal.buyerId : deal.listing.sellerId)), {
+    kind: "contract.reupload",
+    ar: [`أعد رفع النسخة الموقّعة من ${CONTRACT_TYPE[contract!.type]?.[0]}`, reason],
+    en: [`Please re-upload the signed ${CONTRACT_TYPE[contract!.type]?.[1]}`, reason],
+    link: `/deals/${dealId}#contract-${contractId}`,
+  });
+  done(l, dealId, `#contract-${contractId}`);
 }

@@ -1,3 +1,7 @@
+import { pendingConsents } from "@/lib/clickwrap";
+import { ConsentGate } from "@/components/ConsentGate";
+import { acceptClickwrap } from "./consent-actions";
+import { OTP_ERRORS } from "@/lib/action-otp";
 import { allCities } from "@/lib/cities";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -36,7 +40,7 @@ import { applyAsPartner, createBuyRequest, setBuyRequestAlerts, setBuyRequestSta
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string; partner?: string; ev?: string }>;
+  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string; partner?: string; ev?: string; ok?: string; err?: string }>;
 };
 
 // مراحل العرض من ناحية البائع
@@ -51,6 +55,9 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const sp = await searchParams;
   const L = tr(locale);
   const me = await requireUser(locale, `/${locale}/account`);
+  // CON-03: موافقات مطلوبة (أو موافقة جديدة على نسخة اتنشرت) + «مستنداتي»
+  const consents = await pendingConsents(me);
+  const myDocs = await db.document.findMany({ where: { type: { in: ["CONTRACT_PDF", "POWER_OF_ATTORNEY"] }, status: { not: "SUPERSEDED" }, OR: [{ ownerId: me.id }, { deal: { OR: [{ buyerId: me.id }, { listing: { sellerId: me.id } }] }, visibility: "SHARED_WITH_COUNTERPARTY" }] }, orderBy: { createdAt: "desc" }, take: 40, select: { id: true, title: true, fileName: true, createdAt: true } });
   // MKT-06: الإحالة (للعميل والشريك الموثّق)
   const refCode = ["CLIENT", "PARTNER_BROKER"].includes(me.role) ? await ensureReferralCode(me) : null;
   const [referralsCount, rewards, rewardCfg] = refCode
@@ -133,6 +140,25 @@ export default async function AccountPage({ params, searchParams }: Props) {
         }
       />
       <Container className="flex flex-col gap-6">
+        {sp.ok === "consent" && <Notice tone="green">{L("موافقتك اتسجلت، ونسخة PDF منها في «مستنداتي».", "Your consent was recorded; a PDF copy is in “My documents”.")}</Notice>}
+        {sp.err && OTP_ERRORS[sp.err] && <Notice tone="red">{OTP_ERRORS[sp.err][locale === "ar" ? 0 : 1]}</Notice>}
+        {consents.length > 0 && (
+          <Card title={<span id="consents">{L("مطلوب موافقتك", "Your consent is needed")}</span>}>
+            {consents.map((c) => (
+              <div key={`${c.key}-${c.subjectId ?? ""}`} className="flex flex-col gap-2 border-t border-line pt-3 first:border-0 first:pt-0">
+                <strong>
+                  {c.title} {c.subjectLabel && <span dir="ltr">({c.subjectLabel})</span>} — {L(`نسخة v${c.version}`, `version v${c.version}`)}
+                </strong>
+                {c.key === "terms_of_use" && me.termsAcceptedAt && <span className="text-sm text-[#8A5A00]">{L("اتنشرت نسخة جديدة من الشروط — محتاجين موافقتك عليها. موافقتك القديمة بتفضل مرتبطة بنسختها.", "A new version of the terms was published — please consent again. Your earlier consent stays linked to its version.")}</span>}
+                {!c.ok ? (
+                  <Notice tone="amber">{L("النموذج ناقصه بيانات من الإدارة — الموافقة هتتفتح بعد استكمالها.", "The form is missing data from the admin — consent opens once it's completed.")}</Notice>
+                ) : (
+                <ConsentGate locale={locale} title={c.title} version={c.version} text={c.text} action="consent.accept" subjectId={c.subjectId} fields={["versionId"]} hidden={{ versionId: c.versionId }} formAction={acceptClickwrap.bind(null, locale, c.key, c.versionId, c.subjectId)} />
+                )}
+              </div>
+            ))}
+          </Card>
+        )}
         {sp.welcome && <Notice tone="green">{L("حسابك اتعمل. وثّق هويتك عشان تقدر تبيع أو تشتري.", "Your account is ready. Verify your ID to buy or sell.")}</Notice>}
         {sp.listed && <ClearDraft />}
         <TrackEvent name={sp.ev} />
@@ -390,6 +416,22 @@ export default async function AccountPage({ params, searchParams }: Props) {
               </Link>
             </div>
           </Card>
+
+          {/* CON-03/04: «مستنداتي» — نسخ الموافقات والعقود الموقّعة */}
+          {myDocs.length > 0 && (
+            <Card title={<span id="my-docs">{L("مستنداتي", "My documents")}</span>}>
+              <ul className="flex flex-col divide-y divide-line text-sm">
+                {myDocs.map((d) => (
+                  <li key={d.id} className="flex flex-wrap justify-between gap-2 py-2">
+                    <a href={`/api/files/${d.id}`} className="font-semibold text-brand underline">
+                      {d.title ?? d.fileName}
+                    </a>
+                    <span className="text-[13px] text-muted">{date(d.createdAt, locale)}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           {/* UX-11: حسابات الفريق الموثّقة (أو أي حساب موثّق من غير ملف) ما يتطلبش منها توثيق */}
           {me.accountLevel === "VERIFIED" && (!kyc || kyc.status === "APPROVED") ? (

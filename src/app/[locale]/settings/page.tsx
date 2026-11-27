@@ -403,34 +403,25 @@ export default async function SettingsPage({ params, searchParams }: Props) {
     );
   }
 
+  /** CON-01: النماذج بقت جداول بنسخ — الشاشة الكاملة في /templates */
   async function Templates({ locale }: { locale: "ar" | "en" }) {
-    const list = await getSetting("contract.templates");
+    const list = await db.contractTemplate.findMany({ orderBy: { formNo: "asc" }, include: { versions: { where: { status: "PUBLISHED" }, include: { _count: { select: { contracts: true } } } } } });
     return (
-      <Card title={L("نماذج العقود", "Contract templates")}>
-        <p className="text-muted">{L("نص النماذج بيراجعه المحامي. كل عقد بيتعمل بيحتفظ برقم النسخة اللي اتعمل بيها.", "Template text is reviewed by the lawyer. Each contract keeps the version it was created with.")}</p>
-        <Table head={[L("النموذج", "Template"), L("النسخة", "Version"), L("آخر تحديث", "Updated"), L("نسخة جديدة", "New version")]}>
+      <Card title={L("نماذج العقود", "Contract templates")} actions={<Link href={`/${locale}/templates`} className={`${btn.small} bg-brand text-white`}>{L("افتح محرر النماذج", "Open the template editor")}</Link>}>
+        <p className="text-muted">{L("كل عقد مربوط بالنسخة اللي اتعمل بيها بالظبط. التعديل بيعمل نسخة جديدة، المحامي يعتمدها والأدمن ينشرها.", "Each contract is linked to the exact version it was made with. Edits create a new version that the lawyer approves and the admin publishes.")}</p>
+        <Table head={[L("النموذج", "Template"), L("النسخة المنشورة", "Published version"), L("مستخدمة في", "Used in")]}>
           {list.map((t) => (
-            <tr key={t.type}>
-              <td className="font-semibold">{label(CONTRACT_TYPE, t.type, locale)}</td>
-              <td>
-                <Badge tone="blue">{t.version}</Badge>
-              </td>
-              <td>
-                {date(t.updatedAt, locale)}
-                {t.note && <div className="text-xs text-muted">{t.note}</div>}
-              </td>
-              <td>
-                <form action={bumpTemplate.bind(null, locale, t.type)} className="flex gap-1.5">
-                  <input aria-label={L("إيه اللي اتغير؟", "What changed?")} name="note" required placeholder={L("إيه اللي اتغير؟", "What changed?")} className={`${field} min-h-9`} />
-                  <button className={`${btn.small} border border-brand text-brand`}>{L("انشر", "Publish")}</button>
-                </form>
-              </td>
+            <tr key={t.id}>
+              <td>{num(t.formNo, locale)}. {locale === "ar" ? t.titleAr : t.titleEn}</td>
+              <td className="tabular-nums">{t.versions[0] ? `v${t.versions[0].version}` : "—"}</td>
+              <td className="tabular-nums">{t.versions[0] ? num(t.versions[0]._count.contracts, locale) : "—"}</td>
             </tr>
           ))}
         </Table>
       </Card>
     );
   }
+
 
   async function Districts({ locale }: { locale: "ar" | "en" }) {
     const city = (CITY_KEYS as string[]).includes(sp.city ?? "") ? sp.city! : CITY_KEYS[0];

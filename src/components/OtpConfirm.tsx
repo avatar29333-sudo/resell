@@ -18,6 +18,7 @@ export function OtpConfirm({
   children,
   className = "",
   submitClass = "inline-flex min-h-11 items-center bg-brand px-4 font-semibold text-white",
+  disabled = false,
 }: {
   locale: string;
   action: string;
@@ -31,6 +32,8 @@ export function OtpConfirm({
   children?: ReactNode;
   className?: string;
   submitClass?: string;
+  /** CON-03: زرار الكود مقفول لحد ما المربع يتعلّم */
+  disabled?: boolean;
 }) {
   const ar = locale !== "en";
   const L = (a: string, e: string) => (ar ? a : e);
@@ -66,7 +69,7 @@ export function OtpConfirm({
         {step === "summary" ? (
           <>
             {info.error && <span role="alert" className="font-semibold text-[#A32020]">{info.error}</span>}
-            <button type="button" onClick={send} disabled={busy} className="inline-flex min-h-11 items-center self-start border border-brand bg-white px-4 font-semibold text-brand disabled:opacity-50">
+            <button type="button" onClick={send} disabled={busy || disabled} className="inline-flex min-h-11 items-center self-start border border-brand bg-white px-4 font-semibold text-brand disabled:opacity-50">
               {busy ? L("بنبعت…", "Sending…") : L("أرسل كود التأكيد", "Send confirmation code")}
             </button>
           </>

@@ -35,6 +35,10 @@ export async function moveListing(locale: string, listingId: string, to: "VERIFI
   await authorize(user, action, { listing: listingCtx(l) }, { back: back(locale), reason: overrideReason(form) });
   const from = { VERIFIED: ["IN_REVIEW"], PUBLISHED: ["VERIFIED"], DRAFT: ["IN_REVIEW", "VERIFIED", "PUBLISHED"] }[to];
   if (!from.includes(l.status)) return;
+  // CON-03: النشر بعد موافقة المالك على تفويض العرض (نموذج 1) بس
+  if (to === "PUBLISHED" && !(await db.consentRecord.findFirst({ where: { kind: "listing_authorization", listingId, userId: l.sellerId }, select: { id: true } }))) {
+    redirect(`${back(locale)}${back(locale).includes("?") ? "&" : "?"}err=authorization`);
+  }
   await db.listing.update({ where: { id: listingId }, data: { status: to, ...(to === "PUBLISHED" ? { publishedAt: new Date() } : {}) } });
   await audit(user.id, `listing.${to.toLowerCase()}`, "Listing", listingId, { from: l.status, to });
 
