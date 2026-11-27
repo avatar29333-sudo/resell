@@ -249,6 +249,10 @@ model User {
   referrals        User[]    @relation("Referral")
   rewardsEarned    ReferralReward[] @relation("RewardReferrer")
   rewardsAsReferred ReferralReward[] @relation("RewardReferred")
+  /// DEAL-03: قناة كود التحقق الافتراضية (whatsapp | sms | email | totp)
+  otpChannel       String    @default("whatsapp")
+  actionCodes      ActionCode[]
+  consentRecords   ConsentRecord[]
   /// MKT-07: نصيب السمسار الشريك من العمولة (%)
   partnerSharePct  Decimal?  @db.Decimal(5, 2)
   // التحقق الثنائي (تطبيق Authenticator) — السر متشفّر بـ AES-GCM
@@ -287,6 +291,7 @@ model User {
   dealsAsAgent        Deal[]           @relation("DealAgent")
   dealEvents          DealEvent[]
   approvedContracts   Contract[]       @relation("ContractApprover")
+  verifiedContracts   Contract[]       @relation("ContractVerifier")
   enteredRates        ExchangeRate[]
   buyRequests         BuyRequest[]
   serviceRequests     ServiceRequest[] @relation("ServiceRequester")
@@ -574,6 +579,13 @@ model Contract {
   approvedBy        User?          @relation("ContractApprover", fields: [approvedById], references: [id])
   approvedAt        DateTime?
   signedAt          DateTime?
+  // CON-04: التحقق من النسخة الموقّعة (المحامي أو شهادة مزوّد التوقيع) + مكان الأصل الورقي
+  verifiedAt            DateTime?
+  verifiedById          String?
+  verifiedBy            User?          @relation("ContractVerifier", fields: [verifiedById], references: [id])
+  verificationMethod    String?
+  verificationChecklist Json?
+  paperOriginalLocation String?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
@@ -612,6 +624,9 @@ model Deposit {
   approvals         PaymentApproval[]
   escrowStatus      EscrowStatus @default(AWAITING_TRANSFER)
   bankReference     String?
+  /// DEAL-03 بند 7: المشتري أكد «حوّلت العربون» والبائع أكد «استلمت المبلغ» (بكود تحقق)
+  buyerSentAt       DateTime?
+  sellerReceivedAt  DateTime?
   heldAt            DateTime?
   settledAt         DateTime?
   createdAt         DateTime     @default(now())
@@ -870,4 +885,59 @@ model AppSetting {
   value       Json
   updatedById String?
   updatedAt   DateTime @updatedAt
+}
+
+/// DEAL-03: كود تحقق مربوط بإجراء واحد (المستخدم + الإجراء + الصفقة + القيم) — 6 أرقام، 5 دقايق، مرة واحدة
+model ActionCode {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  action     String
+  dealId     String?
+  paramsHash String
+  summary    String
+  codeHash   String
+  channel    String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  attempts   Int       @default(0)
+  ip         String?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, action, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// DEAL-03: بعد 5 محاولات غلط الإجراء بيتقفل 15 دقيقة
+model ActionLock {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String
+  lockedUntil DateTime
+
+  @@unique([userId, action])
+}
+
+/// CON-03 + DEAL-03: سجل الموافقات — إضافة بس (trigger في قاعدة البيانات بيمنع التعديل والحذف)
+model ConsentRecord {
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  kind              String
+  action            String?
+  templateVersionId String?
+  dealId            String?
+  listingId         String?
+  summary           String
+  renderedText      String?
+  sha256            String
+  channel           String
+  phoneLast4        String?
+  acceptedAt        DateTime  @default(now())
+  otpVerifiedAt     DateTime?
+  ip                String?
+  userAgent         String?
+
+  @@index([userId, acceptedAt])
+  @@index([dealId])
 }

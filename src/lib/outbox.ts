@@ -8,8 +8,9 @@ import { siteUrl } from "./meta";
  * لما مزوّد واتساب (قالب معتمد من Meta) أو الإيميل يتظبط، الإرسال الفعلي بيتعمل هنا.
  * لحد كده الحالة بتفضل QUEUED وتتعرض للأدمن في لوحة التسويق.
  */
-export async function queueMessage(channel: "whatsapp" | "email", to: string, kind: string, body: string) {
-  const status = (channel === "whatsapp" && process.env.WHATSAPP_TOKEN) || (channel === "email" && process.env.EMAIL_API_KEY) ? "READY" : "QUEUED";
+export async function queueMessage(channel: "whatsapp" | "email" | "sms", to: string, kind: string, body: string) {
+  const status =
+    (channel === "whatsapp" && process.env.WHATSAPP_TOKEN) || (channel === "email" && process.env.EMAIL_API_KEY) || (channel === "sms" && process.env.SMS_API_KEY) ? "READY" : "QUEUED";
   return db.outboundMessage.create({ data: { channel, to, kind, body, status } });
 }
 

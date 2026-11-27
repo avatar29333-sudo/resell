@@ -30,6 +30,9 @@ import { Badge, Card, Container, DL, Empty, FileLink, Notice, PageHeader, btn, f
 import { StageStepper } from "@/components/StageStepper";
 import { AdminReason } from "@/components/AdminReason";
 import { TrackEvent } from "@/components/Analytics";
+import { OtpConfirm } from "@/components/OtpConfirm";
+import { OTP_ERRORS } from "@/lib/action-otp";
+import { contractActionKey } from "@/lib/action-otp-core";
 import { storyConsent } from "../actions";
 import {
   addNote,
@@ -50,6 +53,10 @@ import {
   setDealStatus,
   settleDeposit,
   signContract,
+  respondPrice,
+  verifyContract,
+  partyDepositConfirm,
+  requestCancellation,
   uploadDealDocument,
 } from "../actions";
 
@@ -75,6 +82,8 @@ const CANCEL_REASONS: [string, string, string][] = [
 ];
 
 const ERRORS: Record<string, [string, string]> = {
+  ...OTP_ERRORS,
+  verify_checklist: ["لازم تأكد كل بنود المطابقة.", "Confirm every checklist item."],
   forbidden: ["الفعل ده مش متاح لحسابك على الصفقة دي.", "This action isn't available to you on this deal."],
   reason_required: ["لازم تكتب سبب التدخّل (5 حروف على الأقل).", "Please write an override reason (at least 5 characters)."],
   note_required: ["لازم ملاحظة واضحة (10 حروف على الأقل).", "A clear note is required (at least 10 characters)."],
@@ -209,6 +218,8 @@ export default async function DealRoom({ params, searchParams }: Props) {
         )}
         {sp.new && <Notice tone="green">{L("اهتمامك اتسجل، والوسيط هيكلمك لاتفاق العمولة.", "Your interest is registered. The broker will contact you about the commission agreement.")}</Notice>}
         {sp.ok === "approval_requested" && <Notice tone="amber">{L(`المبلغ فوق حد الأربع عيون (${num(fourEyes, locale)} ج.م) — اتبعت طلب موافقة للأدمن.`, `The amount is above the four-eyes limit (EGP ${fourEyes}) — an approval request was sent to the admin.`)}</Notice>}
+        {sp.ok === "price_response" && <Notice tone="green">{L("ردّك على السعر اتبعت للوسيط.", "Your price response was sent to the broker.")}</Notice>}
+        {sp.ok === "cancel_requested" && <Notice tone="amber">{L("طلب الإلغاء اتبعت للوسيط والإدارة — هيتواصلوا معاك.", "Your cancellation request was sent to the broker and admin.")}</Notice>}
         {sp.ok === "agent_requested" && <Notice tone="green">{L("اتبعت طلب مندوب للأدمن.", "A field agent request was sent to the admin.")}</Notice>}
         {sp.err && (
           <Notice tone="red">
@@ -330,11 +341,36 @@ export default async function DealRoom({ params, searchParams }: Props) {
                                 <button className={`${btn.small} bg-brand text-white`}>{L("ابعت للتوقيع الإلكتروني", "Send for e-signature")}</button>
                               </form>
                             )}
-                            {c.status === "SENT_FOR_SIGNATURE" && mySig && (
+                            {p["contract.approve"].allowed && c.status === "SIGNED" && (
+                              <form action={verifyContract.bind(null, locale, id, c.id)} className="flex w-full flex-col gap-2 border border-line p-3 text-sm">
+                                <strong>{L("تحقق من النسخة الموقّعة", "Verify the signed copy")}</strong>
+                                {[
+                                  ["pages", L("عدد الصفحات مطابق للمسودة", "Page count matches the draft")],
+                                  ["code", L("كود المستند ونسخة النموذج مطابقين", "Document code and template version match")],
+                                  ["signatures", L("توقيعات وأحرف الطرفين موجودة في كل صفحة", "Both parties' signatures and initials on every page")],
+                                  ["quality", L("الصورة/الملف واضح ومقروء", "The file is clear and legible")],
+                                ].map(([k, t]) => (
+                                  <label key={k} className="flex min-h-11 items-center gap-2">
+                                    <input type="checkbox" name={`chk_${k}`} required className="size-5" /> {t}
+                                  </label>
+                                ))}
+                                <input aria-label={L("مكان الأصل الورقي", "Paper original location")} name="paperOriginalLocation" placeholder={L("مكان الأصل الورقي (مثلاً: خزنة المكتب — ملف 12)", "Paper original location (e.g. office safe — file 12)")} className={field} />
+                                <button className={`${btn.small} self-start bg-ok text-white`}>{L("تم التحقق", "Verified")}</button>
+                              </form>
+                            )}
+                            {(c.status === "SENT_FOR_SIGNATURE" || c.status === "PARTIALLY_SIGNED") && mySig && (
                               p["contract.sign"].allowed ? (
-                                <form action={signContract.bind(null, locale, id, c.id)}>
-                                  <button className={`${btn.small} bg-brand text-white`}>{L("وقّع إلكترونياً", "Sign electronically")}</button>
-                                </form>
+                                <OtpConfirm
+                                  locale={locale}
+                                  action={contractActionKey(c.type)}
+                                  subjectId={id}
+                                  fields={["contractId"]}
+                                  preview={L(`توقيعك على ${label(CONTRACT_TYPE, c.type, locale)} (نسخة ${c.templateVersion})`, `Your signature on the ${label(CONTRACT_TYPE, c.type, locale)} (version ${c.templateVersion})`)}
+                                  submitLabel={L("وقّع إلكترونياً", "Sign electronically")}
+                                  formAction={signContract.bind(null, locale, id, c.id)}
+                                >
+                                  <input type="hidden" name="contractId" value={c.id} />
+                                </OtpConfirm>
                               ) : (
                                 <span className="text-sm text-[#8A5A00]">{L("وثّق هويتك الأول عشان تقدر توقّع.", "Verify your ID first to be able to sign.")}</span>
                               )
@@ -496,9 +532,47 @@ export default async function DealRoom({ params, searchParams }: Props) {
                   </p>
                 )}
                 {p["deal.confirm_price"].allowed && deal.proposedPrice && !deal.agreedPrice && !(side === "BUYER" ? deal.buyerPriceOkAt : deal.sellerPriceOkAt) && (
-                  <form action={confirmPrice.bind(null, locale, id)}>
-                    <button className={btn.primary}>{L(`أوافق على ${money(deal.proposedPrice, "EGP", locale)}`, `I confirm ${money(deal.proposedPrice, "EGP", locale)}`)}</button>
-                  </form>
+                  <div className="flex flex-col gap-3">
+                    <OtpConfirm
+                      locale={locale}
+                      action="price.accept"
+                      subjectId={id}
+                      fields={["price"]}
+                      preview={L(`موافقتك على سعر ${money(deal.proposedPrice, "EGP", locale)}`, `Your approval of ${money(deal.proposedPrice, "EGP", locale)}`)}
+                      submitLabel={L(`أوافق على ${money(deal.proposedPrice, "EGP", locale)}`, `I confirm ${money(deal.proposedPrice, "EGP", locale)}`)}
+                      formAction={confirmPrice.bind(null, locale, id)}
+                    >
+                      <input type="hidden" name="price" value={String(toNum(deal.proposedPrice))} />
+                    </OtpConfirm>
+                    <details className="text-sm">
+                      <summary className="min-h-11 cursor-pointer py-2 text-brand">{L("مش موافق؟ ارفض أو قدّم عرض مقابل", "Not OK? Reject or counter-offer")}</summary>
+                      <div className="mt-2 flex flex-col gap-3">
+                        <OtpConfirm
+                          locale={locale}
+                          action="price.counter"
+                          subjectId={id}
+                          fields={["price"]}
+                          preview={L("عرضك المقابل بالسعر اللي هتكتبه", "Your counter-offer at the price you enter")}
+                          submitLabel={L("ابعت العرض المقابل", "Send counter-offer")}
+                          formAction={respondPrice.bind(null, locale, id, "counter")}
+                        >
+                          <label className={labelCls}>
+                            {L("سعرك (ج.م)", "Your price (EGP)")}
+                            <input name="price" type="number" min={1} required className={field} />
+                          </label>
+                        </OtpConfirm>
+                        <OtpConfirm
+                          locale={locale}
+                          action="price.reject"
+                          subjectId={id}
+                          preview={L(`رفضك لسعر ${money(deal.proposedPrice, "EGP", locale)}`, `Your rejection of ${money(deal.proposedPrice, "EGP", locale)}`)}
+                          submitLabel={L("ارفض السعر", "Reject price")}
+                          submitClass={btn.danger}
+                          formAction={respondPrice.bind(null, locale, id, "reject")}
+                        />
+                      </div>
+                    </details>
+                  </div>
                 )}
                 {p["deal.propose_price"].allowed && !deal.agreedPrice && deal.stage === "COMMISSION_AGREEMENT" && (
                   <form action={proposePrice.bind(null, locale, id)} className="flex flex-wrap items-end gap-2">
@@ -539,6 +613,19 @@ export default async function DealRoom({ params, searchParams }: Props) {
                         {d.bankReference && <span dir="ltr">{d.bankReference} · </span>}
                         {d.receiptDocument ? <FileLink id={d.receiptDocument.id}>{L("إيصال التحويل", "Transfer receipt")}</FileLink> : L("مفيش إيصال لسه", "No receipt yet")}
                       </div>
+                      {/* DEAL-03: تأكيدات الطرفين على العربون (بكود) */}
+                      {d.buyerSentAt && <span className="text-sm text-ok">✓ {L("المشتري أكّد التحويل", "Buyer confirmed the transfer")} — {date(d.buyerSentAt, locale)}</span>}
+                      {d.sellerReceivedAt && <span className="text-sm text-ok">✓ {L("البائع أكّد الاستلام", "Seller confirmed receipt")} — {date(d.sellerReceivedAt, locale)}</span>}
+                      {side === "BUYER" && d.escrowStatus === "AWAITING_TRANSFER" && !d.buyerSentAt && (
+                        <OtpConfirm locale={locale} action="deposit.sent" subjectId={id} fields={["depositId"]} preview={L(`إنك حوّلت العربون ${money(d.amount, d.currency, locale)} لحساب الضمان`, `That you transferred the deposit ${money(d.amount, d.currency, locale)} to escrow`)} submitLabel={L("حوّلت العربون", "I transferred the deposit")} formAction={partyDepositConfirm.bind(null, locale, id, d.id, "sent")}>
+                          <input type="hidden" name="depositId" value={d.id} />
+                        </OtpConfirm>
+                      )}
+                      {side === "SELLER" && d.escrowStatus === "RELEASED_TO_SELLER" && !d.sellerReceivedAt && (
+                        <OtpConfirm locale={locale} action="deposit.received" subjectId={id} fields={["depositId"]} preview={L(`إنك استلمت ${money(d.amount, d.currency, locale)}`, `That you received ${money(d.amount, d.currency, locale)}`)} submitLabel={L("استلمت المبلغ", "I received the amount")} formAction={partyDepositConfirm.bind(null, locale, id, d.id, "received")}>
+                          <input type="hidden" name="depositId" value={d.id} />
+                        </OtpConfirm>
+                      )}
                       {pending && (
                         <Notice tone="amber">
                           {L(`طلب ${pending.action === "RELEASED_TO_SELLER" ? "صرف للبائع" : "رد للمشتري"} مستني موافقة الأدمن`, `${pending.action === "RELEASED_TO_SELLER" ? "Release" : "Refund"} request awaiting admin approval`)}
@@ -651,6 +738,20 @@ export default async function DealRoom({ params, searchParams }: Props) {
                     </form>
                   )}
                 </div>
+              </Card>
+            )}
+
+            {open && side && (
+              <Card title={L("عايز تلغي الصفقة؟", "Want to cancel the deal?")}>
+                <details>
+                  <summary className="min-h-11 cursor-pointer py-2 text-sm text-brand">{L("اطلب إلغاء (بيروح للوسيط والإدارة)", "Request cancellation (goes to the broker and admin)")}</summary>
+                  <OtpConfirm locale={locale} action="deal.cancel_request" subjectId={id} preview={L("طلبك إلغاء الصفقة دي", "Your request to cancel this deal")} submitLabel={L("ابعت طلب الإلغاء", "Send cancellation request")} submitClass={btn.danger} formAction={requestCancellation.bind(null, locale, id)} className="mt-2">
+                    <label className={labelCls}>
+                      {L("السبب (10 حروف على الأقل)", "Reason (at least 10 characters)")}
+                      <textarea name="note" required minLength={10} rows={2} className={field} />
+                    </label>
+                  </OtpConfirm>
+                </details>
               </Card>
             )}
 

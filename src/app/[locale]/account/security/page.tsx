@@ -7,7 +7,9 @@ import { decryptSecret, otpauthUri } from "@/lib/totp";
 import { date, tr } from "@/lib/format";
 import { Badge, Card, Container, Notice, PageHeader, btn, field, labelCls } from "@/components/ui";
 import { pageMeta } from "@/lib/meta";
-import { confirmTotp, deleteMyAccount, disableTotp, startTotp } from "./actions";
+import { confirmTotp, deleteMyAccount, disableTotp, setOtpChannel, startTotp } from "./actions";
+import { CHANNELS, CHANNEL_LABEL, OTP_ERRORS, effectiveChannel } from "@/lib/action-otp";
+import { OtpConfirm } from "@/components/OtpConfirm";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ ok?: string; err?: string; required?: string }> };
 
@@ -20,6 +22,8 @@ export default async function SecurityPage({ params, searchParams }: Props) {
   const L = tr(locale);
   const me = await requireUser(locale, `/${locale}/account/security`);
   const staff = STAFF_ROLES.includes(me.role);
+  const ar = locale === "ar";
+  const channel = effectiveChannel(me);
 
   // سر لسه في التفعيل: نعرض QR والمفتاح عشان يتضاف للتطبيق
   let qr: string | null = null;
@@ -34,6 +38,8 @@ export default async function SecurityPage({ params, searchParams }: Props) {
     required: L("التحقق الثنائي إجباري لحسابات الفريق.", "Two-factor authentication is required for team accounts."),
     confirm: L("اكتب كلمة «احذف» عشان نتأكد.", "Type DELETE to confirm."),
     open_deals: L("عندك صفقات شغالة. لازم تخلص أو تتلغي الأول قبل حذف الحساب.", "You have open deals. They must finish or be cancelled before deleting your account."),
+    channel: L("القناة دي مش متاحة لحسابك (التطبيق لازم يكون متفعّل، والإيميل لازم يكون متسجّل).", "That channel isn't available (the app must be on, and email must be set)."),
+    ...Object.fromEntries(Object.entries(OTP_ERRORS).map(([k, v]) => [k, ar ? v[0] : v[1]])),
     staff: L("حسابات الفريق بتتقفل من الأدمن، مش من هنا.", "Team accounts are closed by an admin, not here."),
   };
 
@@ -100,6 +106,25 @@ export default async function SecurityPage({ params, searchParams }: Props) {
               <button className={btn.primary}>{L("فعّل التحقق الثنائي", "Turn on two-factor")}</button>
             </form>
           )}
+        </Card>
+
+        {sp.ok === "channel" && <Notice tone="green">{L("قناة كود التحقق اتغيرت.", "Your verification channel was changed.")}</Notice>}
+        <Card title={L("قناة كود التأكيد للموافقات", "Confirmation-code channel for approvals")} actions={<Badge tone="blue">{CHANNEL_LABEL[channel][ar ? 0 : 1]}</Badge>}>
+          <p className="leading-7 text-muted">
+            {L("كل موافقة جوه الصفقة (سعر، توقيع، عربون، إلغاء) بتتأكد بكود من 6 أرقام صالح 5 دقايق ومربوط بالإجراء ده بس. تغيير القناة بيتأكد بكود على القناة الحالية.", "Every approval in a deal (price, signature, deposit, cancellation) is confirmed with a 6-digit code valid for 5 minutes and bound to that action only. Changing the channel is confirmed by a code on the current channel.")}
+          </p>
+          <OtpConfirm locale={locale} action="otp.channel_change" subjectId={null} fields={["channel"]} preview={L("تغيير قناة كود التحقق للقناة اللي هتختارها", "Change your verification channel to the one you pick")} submitLabel={L("غيّر القناة", "Change channel")} formAction={setOtpChannel.bind(null, locale)}>
+            <label className={labelCls}>
+              {L("القناة الجديدة", "New channel")}
+              <select name="channel" defaultValue={channel} className={field}>
+                {CHANNELS.filter((c) => (c !== "totp" || me.totpEnabledAt) && (c !== "email" || me.email)).map((c) => (
+                  <option key={c} value={c}>
+                    {CHANNEL_LABEL[c][ar ? 0 : 1]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </OtpConfirm>
         </Card>
 
         <Card title={L("بياناتك وخصوصيتك", "Your data and privacy")}>

@@ -73,3 +73,15 @@ export async function deleteMyAccount(locale: string, form: FormData) {
   await destroySession();
   redirect(`/${l}?deleted=1`);
 }
+
+/** DEAL-03: تغيير قناة كود التحقق — بكود على القناة القديمة */
+export async function setOtpChannel(locale: string, form: FormData) {
+  const { CHANNELS, requireActionCode } = await import("@/lib/action-otp");
+  const user = await requireUser(loc(locale), page(locale));
+  const ch = String(form.get("channel") ?? "");
+  if (!(CHANNELS as string[]).includes(ch) || (ch === "totp" && !user.totpEnabledAt) || (ch === "email" && !user.email)) redirect(`${page(locale)}?err=channel`);
+  await requireActionCode(user, "otp.channel_change", null, { channel: ch }, form, page(locale));
+  await db.user.update({ where: { id: user.id }, data: { otpChannel: ch } });
+  await audit(user.id, "user.otp_channel", "User", user.id, { before: user.otpChannel, after: ch });
+  redirect(`${page(locale)}?ok=channel`);
+}

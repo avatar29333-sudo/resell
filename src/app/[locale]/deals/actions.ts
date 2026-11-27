@@ -23,6 +23,8 @@ import { lockRateAt } from "@/lib/fx-lock";
 import { fxLockUpdate } from "@/lib/fx-lock-rule";
 import { referralReward } from "@/lib/referral-rules";
 import { isDemoMode } from "@/lib/demo";
+import { requireActionCode } from "@/lib/action-otp";
+import { contractActionKey } from "@/lib/action-otp-core";
 
 const loc = (l: string): Locale => (isLocale(l) ? l : "ar");
 
@@ -177,10 +179,12 @@ export async function proposePrice(locale: string, dealId: string, form: FormDat
   done(l, dealId);
 }
 
-export async function confirmPrice(locale: string, dealId: string) {
+export async function confirmPrice(locale: string, dealId: string, form?: FormData) {
   const { l, user, deal, back } = await ctx(locale, dealId);
   await guard(user, deal, "deal.confirm_price", back);
   if (!deal.proposedPrice) done(l, dealId);
+  // DEAL-03: كود مربوط بالسعر ده بالذات
+  await requireActionCode(user, "price.accept", dealId, { price: String(toNum(deal.proposedPrice)) }, form, back);
   const side = user.id === deal.buyerId ? "buyerPriceOkAt" : "sellerPriceOkAt";
   const updated = await db.deal.update({ where: { id: dealId }, data: { [side]: new Date() } });
   await event(deal, user, "NOTE", { priceConfirmed: toNum(deal.proposedPrice), by: side === "buyerPriceOkAt" ? "BUYER" : "SELLER" });
@@ -307,15 +311,17 @@ export async function sendForSignature(locale: string, dealId: string, contractI
 type Signature = { userId: string; role: "BUYER" | "SELLER"; signedAt: string; providerRef: string };
 
 /** التوقيع للطرفين بس + حساب موثّق (5.5) — في التجربة زرار؛ على الإنتاج بيروح لمزوّد التوقيع المرخّص */
-export async function signContract(locale: string, dealId: string, contractId: string) {
+export async function signContract(locale: string, dealId: string, contractId: string, form?: FormData) {
   const { l, user, deal, back } = await ctx(locale, dealId);
   await guard(user, deal, "contract.sign", back);
   const contract = deal.contracts.find((c) => c.id === contractId);
-  if (!contract || contract.status !== "SENT_FOR_SIGNATURE") done(l, dealId);
+  if (!contract || (contract.status !== "SENT_FOR_SIGNATURE" && contract.status !== "PARTIALLY_SIGNED")) done(l, dealId);
   const side = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
   if (!side || !requiredSigners(contract!.type).includes(side)) done(l, dealId, "?err=forbidden");
   const sigs = (contract!.signatures as Signature[]) ?? [];
   if (sigs.some((s) => s.role === side)) done(l, dealId);
+  // DEAL-03: كود مربوط بالعقد ده (نوع الإجراء حسب النموذج)
+  await requireActionCode(user, contractActionKey(contract!.type), dealId, { contractId }, form, back);
   const all = [...sigs, { userId: user.id, role: side!, signedAt: new Date().toISOString(), providerRef: `DEMO-SIG-${Date.now()}` }];
   const complete = requiredSigners(contract!.type).every((r) => all.some((s) => s.role === r));
 
@@ -353,7 +359,7 @@ export async function signContract(locale: string, dealId: string, contractId: s
   }
   await db.contract.update({
     where: { id: contractId },
-    data: { signatures: all, ...(complete ? { status: "SIGNED", signedAt: new Date(), pdfDocumentId } : {}) },
+    data: { signatures: all, ...(complete ? { status: "SIGNED", signedAt: new Date(), pdfDocumentId } : { status: "PARTIALLY_SIGNED" }) },
   });
   // DATA-01: سعر الصرف بيتثبت مرة واحدة لحظة اكتمال توقيع العقد المبدئي
   // DEAL-01: القفل لحظة اكتمال توقيع الطرفين على العقد الابتدائي بس
@@ -376,6 +382,97 @@ export async function signContract(locale: string, dealId: string, contractId: s
   }
   // MKT-11: حدث «commission_signed» لما اتفاق العمولة يكمل
   done(l, dealId, complete && contract!.type === "COMMISSION_AGREEMENT" ? "?ev=commission_signed" : "");
+}
+
+/**
+ * CON-04: المحامي بيتحقق من النسخة الموقّعة قبل ما المرحلة الجاية تتفتح (SIGNED → VERIFIED).
+ * قائمة مطابقة إجبارية + مكان الأصل الورقي. شهادة مزوّد التوقيع (لما يتربط) بتعمل نفس الحاجة آلياً.
+ */
+const VERIFY_CHECKS = ["pages", "code", "signatures", "quality"] as const;
+export async function verifyContract(locale: string, dealId: string, contractId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  await guard(user, deal, "contract.approve", back, form);
+  const contract = deal.contracts.find((c) => c.id === contractId);
+  if (!contract || contract.status !== "SIGNED") done(l, dealId);
+  const checklist = VERIFY_CHECKS.map((k) => ({ key: k, passed: form.get(`chk_${k}`) === "on" }));
+  if (checklist.some((c) => !c.passed)) done(l, dealId, "?err=verify_checklist");
+  const paper = String(form.get("paperOriginalLocation") ?? "").trim().slice(0, 200) || null;
+  await db.contract.update({
+    where: { id: contractId },
+    data: { status: "VERIFIED", verifiedAt: new Date(), verifiedById: user.id, verificationMethod: "LAWYER", verificationChecklist: checklist, paperOriginalLocation: paper },
+  });
+  await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, status: "VERIFIED", paperOriginalLocation: paper });
+  await notify([deal.brokerId, ...partiesOf(deal)], {
+    kind: "contract.verified",
+    ar: [`${CONTRACT_TYPE[contract!.type][0]} اتحقق منه`],
+    en: [`The ${CONTRACT_TYPE[contract!.type][1]} was verified`],
+    link: `/deals/${dealId}`,
+  });
+  done(l, dealId);
+}
+
+/** DEAL-03: رد الطرف على السعر المقترح — رفض أو عرض مقابل (بكود) */
+export async function respondPrice(locale: string, dealId: string, kind: "reject" | "counter", form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  await guard(user, deal, "deal.confirm_price", back);
+  if (!deal.proposedPrice || deal.agreedPrice) done(l, dealId);
+  const side = user.id === deal.buyerId ? "BUYER" : "SELLER";
+  if (kind === "reject") {
+    await requireActionCode(user, "price.reject", dealId, {}, form, back);
+    await db.deal.update({ where: { id: dealId }, data: { buyerPriceOkAt: null, sellerPriceOkAt: null } });
+    await event(deal, user, "NOTE", { priceRejected: toNum(deal.proposedPrice), by: side });
+  } else {
+    const price = Number(form.get("price"));
+    if (!(price > 0)) done(l, dealId, "?err=price");
+    await requireActionCode(user, "price.counter", dealId, { price: String(form.get("price")) }, form, back);
+    await event(deal, user, "NOTE", { counterPrice: price, by: side });
+  }
+  await notify([deal.brokerId], {
+    kind: "deal.price_response",
+    ar: [kind === "reject" ? "طرف رفض السعر المقترح" : `طرف قدّم عرض مقابل: ${Number(form.get("price")).toLocaleString("en-US")} ج.م`],
+    en: [kind === "reject" ? "A party rejected the proposed price" : `A party made a counter-offer: EGP ${Number(form.get("price")).toLocaleString("en-US")}`],
+    link: `/deals/${dealId}`,
+  });
+  done(l, dealId, "?ok=price_response");
+}
+
+/** DEAL-03: المشتري «حوّلت العربون» / البائع «استلمت المبلغ» — تأكيدات الطرف (بكود) */
+export async function partyDepositConfirm(locale: string, dealId: string, depositId: string, kind: "sent" | "received", form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  const dep = deal.deposits.find((x) => x.id === depositId);
+  if (!dep) done(l, dealId);
+  if (kind === "sent" && (user.id !== deal.buyerId || dep!.escrowStatus !== "AWAITING_TRANSFER" || dep!.buyerSentAt)) done(l, dealId, "?err=forbidden");
+  if (kind === "received" && (user.id !== deal.listing.sellerId || dep!.escrowStatus !== "RELEASED_TO_SELLER" || dep!.sellerReceivedAt)) done(l, dealId, "?err=forbidden");
+  await requireActionCode(user, kind === "sent" ? "deposit.sent" : "deposit.received", dealId, { depositId }, form, back);
+  await db.deposit.update({ where: { id: depositId }, data: kind === "sent" ? { buyerSentAt: new Date() } : { sellerReceivedAt: new Date() } });
+  await event(deal, user, "DEPOSIT_UPDATED", { depositId, [kind === "sent" ? "buyerSent" : "sellerReceived"]: true });
+  if (kind === "sent") {
+    await notify(await idsByRole("FINANCE"), {
+      kind: "deposit.buyer_sent",
+      ar: ["المشتري أكّد إنه حوّل العربون", "راجع البنك وأكّد الاستلام برقم المرجع."],
+      en: ["The buyer confirmed they transferred the deposit", "Check the bank and confirm with the reference."],
+      link: `/deals/${dealId}`,
+    });
+  }
+  done(l, dealId);
+}
+
+/** DEAL-03: طلب إلغاء من طرف — بيروح للوسيط والأدمن (والإلغاء الفعلي بمحضر) */
+export async function requestCancellation(locale: string, dealId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  if (user.id !== deal.buyerId && user.id !== deal.listing.sellerId) done(l, dealId, "?err=forbidden");
+  if (deal.status !== "ACTIVE" && deal.status !== "ON_HOLD") done(l, dealId);
+  const note = String(form.get("note") ?? "").trim().slice(0, 500);
+  if (note.length < 10) done(l, dealId, "?err=note_required");
+  await requireActionCode(user, "deal.cancel_request", dealId, {}, form, back);
+  await event(deal, user, "NOTE", { cancelRequested: true, by: user.id === deal.buyerId ? "BUYER" : "SELLER", note });
+  await notify([deal.brokerId, ...(await idsByRole("ADMIN"))], {
+    kind: "deal.cancel_requested",
+    ar: ["طرف طلب إلغاء الصفقة", note],
+    en: ["A party requested to cancel the deal", note],
+    link: `/deals/${dealId}`,
+  });
+  done(l, dealId, "?ok=cancel_requested");
 }
 
 // ─── العربون: المالي بس (الوسيط ما يلمسش الفلوس — 7.4) ───

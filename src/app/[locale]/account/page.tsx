@@ -172,7 +172,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                   hasAuthorityApprovalDoc: d.documents.some((x) => x.type === "AUTHORITY_STATEMENT" && x.status !== "REJECTED"),
                 });
                 const toSign = d.contracts.filter(
-                  (c) => c.status === "SENT_FOR_SIGNATURE" && requiredSigners(c.type).includes("BUYER") && !((c.signatures as { role: string }[]) ?? []).some((x) => x.role === "BUYER"),
+                  (c) => (c.status === "SENT_FOR_SIGNATURE" || c.status === "PARTIALLY_SIGNED") && requiredSigners(c.type).includes("BUYER") && !((c.signatures as { role: string }[]) ?? []).some((x) => x.role === "BUYER"),
                 ).length;
                 return (
                   <li key={d.id}>

@@ -228,6 +228,7 @@ export function toneOf(status: string): Tone {
     case "PENDING_LAWYER":
     case "AWAITING_TRANSFER":
     case "SENT_FOR_SIGNATURE":
+    case "PARTIALLY_SIGNED":
     case "CHANGES_REQUESTED":
     case "ON_HOLD":
     case "NEW":
