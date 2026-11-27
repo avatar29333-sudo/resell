@@ -7,7 +7,12 @@ import { getSetting } from "@/lib/settings";
 import { validityState } from "@/lib/validity";
 import { districtName } from "@/lib/district";
 import { dueStage, reminderText } from "@/lib/reminders";
-import { queueMessage, unsubscribeUrl } from "@/lib/outbox";
+import { queueMessage, sentToday, unsubscribeUrl } from "@/lib/outbox";
+import { digestText, groupDigest } from "@/lib/digest";
+import { matches } from "@/lib/matching";
+import { latestRate, totalEgp } from "@/lib/listing";
+import { toNum } from "@/lib/format";
+import { siteUrl } from "@/lib/meta";
 
 // مهمة يومية (Vercel Cron الساعة 8 الصبح بتوقيت القاهرة — vercel.json):
 // 1) سعر صرف النهارده  2) المستندات اللي انتهت  3) المستندات اللي هتنتهي خلال 30 يوم
@@ -118,6 +123,42 @@ export async function GET(req: Request) {
     remindersSent++;
   }
   report.remindersSent = remindersSent;
+
+  // 3د) MKT-13: عروض آخر 24 ساعة المطابقة لطلبات الشراء (بموافقة صريحة) — رسالة واحدة مجمّعة لكل مستخدم في اليوم
+  const since = new Date(now.getTime() - DAY);
+  const fresh = await db.listing.findMany({ where: { status: "PUBLISHED", publishedAt: { gte: since }, seller: { status: "ACTIVE" } }, include: { plot: true } });
+  let digests = 0;
+  if (fresh.length) {
+    const rate = await latestRate();
+    const usd = toNum(rate?.sell ?? 50);
+    const reqs = await db.buyRequest.findMany({ where: { status: "ACTIVE", alertConsentAt: { not: null }, unsubToken: { not: null } }, include: { buyer: { select: { id: true, phone: true, email: true, locale: true, status: true } } } });
+    const matchesList = reqs.flatMap((r) =>
+      r.buyer.status !== "ACTIVE" || (r.lastAlertAt && r.lastAlertAt > since)
+        ? []
+        : fresh
+            .filter((l) => l.sellerId !== r.buyerId)
+            .filter((l) =>
+              matches(
+                { cities: r.cities, minAreaSqm: r.minAreaSqm ? toNum(r.minAreaSqm) : null, maxAreaSqm: r.maxAreaSqm ? toNum(r.maxAreaSqm) : null, budgetMax: r.budgetMax ? toNum(r.budgetMax) : null },
+                { city: l.plot.city, areaSqm: toNum(l.plot.areaSqm), totalEgp: totalEgp(l, usd) },
+              ),
+            )
+            .map((l) => ({ buyerId: r.buyerId, listingId: l.id, title: `${CITY[l.plot.city][r.buyer.locale === "en" ? 1 : 0]} — ${toNum(l.plot.areaSqm)} m²`, reqId: r.id, token: r.unsubToken! })),
+    );
+    for (const d of groupDigest(matchesList)) {
+      const req = reqs.find((r) => r.buyerId === d.buyerId)!;
+      const loc = req.buyer.locale === "en" ? "en" : "ar";
+      if (await sentToday(req.buyer.phone, "buy_request.digest", now)) continue;
+      const token = matchesList.find((m) => m.buyerId === d.buyerId)!.token;
+      const text = digestText(loc, d.shown.map((m) => ({ title: m.title, url: `${siteUrl()}/${loc}/listings/${m.listingId}?utm_source=whatsapp&utm_medium=alert` })), d.more, unsubscribeUrl(loc, token));
+      // واتساب أساساً، والإيميل احتياطي لو واتساب مش متاح والإيميل متاح
+      const useEmail = !process.env.WHATSAPP_TOKEN && !!process.env.EMAIL_API_KEY && !!req.buyer.email;
+      await queueMessage(useEmail ? "email" : "whatsapp", useEmail ? req.buyer.email! : req.buyer.phone, "buy_request.digest", text);
+      await db.buyRequest.updateMany({ where: { buyerId: d.buyerId, alertConsentAt: { not: null } }, data: { lastAlertAt: now } });
+      digests++;
+    }
+  }
+  report.buyRequestDigests = digests;
 
   // 4) مهلة البناء خلال 60 يوم (للعروض الشغالة)
   const plots = await db.plot.findMany({

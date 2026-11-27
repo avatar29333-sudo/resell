@@ -31,7 +31,7 @@ import { ensureReferralCode } from "@/lib/referral";
 import { getSetting } from "@/lib/settings";
 import { ShareButtons } from "@/components/ShareButtons";
 import { TrackEvent } from "@/components/Analytics";
-import { applyAsPartner, createBuyRequest, setBuyRequestStatus, setMyListingStatus, submitKyc, uploadNewVersion } from "./actions";
+import { applyAsPartner, createBuyRequest, setBuyRequestAlerts, setBuyRequestStatus, setMyListingStatus, submitKyc, uploadNewVersion } from "./actions";
 
 type Props = {
   params: Promise<{ locale: string }>;
@@ -487,6 +487,11 @@ export default async function AccountPage({ params, searchParams }: Props) {
                 </div>
                 <div className="flex items-center gap-1">
                   <Badge tone={toneOf(b.status)}>{label(BUY_REQUEST_STATUS, b.status, locale)}</Badge>
+                  <form action={setBuyRequestAlerts.bind(null, locale, b.id, !b.alertConsentAt)}>
+                    <button className={`${btn.small} ${b.alertConsentAt ? "text-ok" : "text-muted"}`} title={L("تنبيهات واتساب", "WhatsApp alerts")}>
+                      {b.alertConsentAt ? L("🔔 التنبيهات شغالة", "🔔 Alerts on") : L("🔕 شغّل التنبيهات", "🔕 Turn on alerts")}
+                    </button>
+                  </form>
                   {b.status === "ACTIVE" && (
                     <form action={setBuyRequestStatus.bind(null, locale, b.id, "PAUSED")}>
                       <button className={`${btn.small} text-brand`}>{L("وقّف", "Pause")}</button>
@@ -524,6 +529,11 @@ export default async function AccountPage({ params, searchParams }: Props) {
                   <input name="budget" type="number" min={0} className={field} />
                 </label>
               </div>
+              {/* MKT-13: موافقة صريحة — الخانة مش متعلّمة */}
+              <label className="flex items-start gap-2 text-sm">
+                <input type="checkbox" name="alerts" className="mt-1 size-4 shrink-0" />
+                <span>{L("ابعتلي العروض الجديدة المطابقة على واتساب (رسالة واحدة في اليوم بالكتير، وفيها رابط إيقاف).", "Send me new matching listings on WhatsApp (at most one message a day, with a stop link).")}</span>
+              </label>
               <button className={btn.secondary}>{L("أضف طلب شراء", "Add buy request")}</button>
             </form>
           </Card>

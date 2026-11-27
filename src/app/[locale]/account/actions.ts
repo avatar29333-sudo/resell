@@ -11,6 +11,7 @@ import { fileFromForm, saveFile } from "@/lib/storage";
 import { CITY_KEYS } from "@/lib/labels";
 import { isLocale } from "@/i18n/config";
 import { idsByRole, notify } from "@/lib/notifications";
+import { newToken } from "@/lib/outbox";
 
 const loc = (l: string) => (isLocale(l) ? l : "ar");
 
@@ -53,10 +54,12 @@ export async function createBuyRequest(locale: string, form: FormData) {
   await authorize(user, "buy_request.manage", { target: { id: user.id } }, { back: `/${l}/account` });
   const cities = form.getAll("cities").map(String).filter((c) => CITY_KEYS.includes(c as never)) as City[];
   const n = (k: string) => (Number(form.get(k)) > 0 ? Number(form.get(k)) : null);
+  // MKT-13: تنبيهات واتساب بموافقة صريحة بس (الخانة مش متعلّمة من الأول) + رابط إيقاف
+  const alerts = form.get("alerts") === "on";
   const br = await db.buyRequest.create({
-    data: { buyerId: user.id, cities, minAreaSqm: n("minArea"), maxAreaSqm: n("maxArea"), budgetMax: n("budget") },
+    data: { buyerId: user.id, cities, minAreaSqm: n("minArea"), maxAreaSqm: n("maxArea"), budgetMax: n("budget"), ...(alerts ? { alertConsentAt: new Date(), unsubToken: newToken() } : {}) },
   });
-  await audit(user.id, "buy_request.create", "BuyRequest", br.id);
+  await audit(user.id, "buy_request.create", "BuyRequest", br.id, { alerts });
   revalidatePath(`/${l}/account`);
 }
 
@@ -68,6 +71,18 @@ export async function setBuyRequestStatus(locale: string, id: string, status: "A
   await authorize(user, "buy_request.manage", { target: { id: br.buyerId } }, { back: `/${l}/account` });
   await db.buyRequest.update({ where: { id }, data: { status } });
   await audit(user.id, "buy_request.status", "BuyRequest", id, { before: br.status, after: status });
+  revalidatePath(`/${l}/account`);
+}
+
+/** MKT-13: تشغيل/إيقاف تنبيهات واتساب لطلب شراء */
+export async function setBuyRequestAlerts(locale: string, id: string, on: boolean) {
+  const l = loc(locale);
+  const user = await requireUser(l, `/${l}/account`);
+  const br = await db.buyRequest.findUnique({ where: { id } });
+  if (!br) return;
+  await authorize(user, "buy_request.manage", { target: { id: br.buyerId } }, { back: `/${l}/account` });
+  await db.buyRequest.update({ where: { id }, data: on ? { alertConsentAt: new Date(), unsubToken: br.unsubToken ?? newToken() } : { alertConsentAt: null } });
+  await audit(user.id, on ? "buy_request.alerts_on" : "buy_request.alerts_off", "BuyRequest", id);
   revalidatePath(`/${l}/account`);
 }
 
