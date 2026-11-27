@@ -1,17 +1,31 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { Prisma } from "@prisma/client";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { can, subject } from "@/lib/authz";
+import { scopeAuditFor, scopeUsersFor } from "@/lib/authz/scope";
+import { errorText } from "@/lib/errors";
 import { getSetting } from "@/lib/settings";
-import { date, dateTime, num, tr } from "@/lib/format";
-import { ACCOUNT_LEVEL, CONTRACT_TYPE, RATE_SOURCE, ROLE, label } from "@/lib/labels";
+import { date, dateTime, money, num, tr } from "@/lib/format";
+import { ACCOUNT_LEVEL, ACCOUNT_STATUS, CONTRACT_TYPE, RATE_SOURCE, ROLE, label } from "@/lib/labels";
 import { Badge, Card, Container, DL, Notice, PageHeader, Table, Tabs, btn, field, labelCls } from "@/components/ui";
-import { addManualRate, bumpTemplate, fetchRateNow, moveFilesToS3, saveCommission, saveFees, setUserRole } from "./actions";
+import { addManualRate, bumpTemplate, fetchRateNow, moveFilesToS3, saveCommission, saveFees, saveOps, setUserRole, suspendUser, unsuspendUser } from "./actions";
+import { RoleForm } from "./RoleForm";
 import { storageMode } from "@/lib/storage";
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ tab?: string; q?: string; entity?: string; fx?: string; moved?: string; failed?: string; err?: string }>;
+  searchParams: Promise<{ tab?: string; q?: string; page?: string; role?: string; entity?: string; fx?: string; moved?: string; failed?: string; err?: string; ok?: string; buy?: string; sell?: string }>;
+};
+
+const PAGE = 50;
+const SETTINGS_ERRORS: Record<string, [string, string]> = {
+  reg_no: ["السمسار الشريك لازم يكون ليه رقم قيد في سجل الوسطاء.", "A partner broker needs a broker registry number."],
+  confirm: ["لازم تأكد تغيير الدور من رسالة التأكيد.", "Please confirm the role change in the dialog."],
+  rate_invalid: ["سعر البيع لازم يكون أكبر من أو يساوي سعر الشراء.", "The sell rate must be greater than or equal to the buy rate."],
+  rate_deviation: ["السعر بعيد عن آخر سعر آلي أكتر من الحد المسموح — علّم على «متأكد» لو ده مقصود.", "The rate is further from the last automatic rate than allowed — tick “I'm sure” if intended."],
 };
 
 export default async function SettingsPage({ params, searchParams }: Props) {
@@ -19,12 +33,26 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   if (!isLocale(locale)) notFound();
   const sp = await searchParams;
   const L = tr(locale);
+  const ar = locale === "ar";
   const me = await requireUser(locale, `/${locale}/settings`, ["ADMIN", "FINANCE"]);
-  const isAdmin = me.role === "ADMIN";
-  const tabs = isAdmin ? ["users", "fx", "commission", "templates", "storage", "audit"] : ["fx"];
-  const tab = tabs.includes(sp.tab ?? "") ? sp.tab! : tabs[0];
+  const s = subject(me);
+  const allowed = {
+    users: can(s, "user.list").allowed,
+    fx: can(s, "fx.manual").allowed,
+    commission: can(s, "commission.rates").allowed,
+    templates: can(s, "template.edit").allowed,
+    storage: can(s, "storage.manage").allowed,
+    audit: can(s, "audit.view").allowed || can(s, "audit.view_money").allowed,
+  };
+  const tabs = (Object.keys(allowed) as (keyof typeof allowed)[]).filter((k) => allowed[k]);
+  const tab = tabs.includes(sp.tab as never) ? sp.tab! : tabs[0];
   const base = `/${locale}/settings`;
   const fxStatus = sp.fx;
+  const OK: Record<string, [string, string]> = {
+    role: ["الدور اتغيّر، وجلسات المستخدم القديمة اتقفلت.", "Role changed; the user's old sessions were signed out."],
+    suspended: ["الحساب اتوقف، وصفقاته الشغالة اتعلّقت.", "Account suspended; its active deals were put on hold."],
+    unsuspended: ["الحساب اتفعّل تاني.", "Account reactivated."],
+  };
 
   return (
     <>
@@ -33,6 +61,8 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         subtitle={L("الأدوار، سعر الصرف، نسب العمولة، نماذج العقود، وسجل التدقيق. كل تغيير هنا بيتسجل.", "Roles, exchange rates, commission rates, contract templates and the audit log. Every change here is logged.")}
       />
       <Container className="flex flex-col gap-6">
+        {sp.err && sp.err !== "s3_not_configured" && <Notice tone="red">{errorText(sp.err, ar, SETTINGS_ERRORS)}</Notice>}
+        {sp.ok && OK[sp.ok] && <Notice tone="green">{OK[sp.ok][ar ? 0 : 1]}</Notice>}
         <Tabs
           current={tab}
           tabs={[
@@ -42,7 +72,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             { key: "templates", label: L("نماذج العقود", "Contract templates"), href: `${base}?tab=templates` },
             { key: "storage", label: L("خزنة الملفات", "File vault"), href: `${base}?tab=storage` },
             { key: "audit", label: L("سجل التدقيق", "Audit log"), href: `${base}?tab=audit` },
-          ].filter((t) => tabs.includes(t.key))}
+          ].filter((t) => tabs.includes(t.key as never))}
         />
         {tab === "users" && <Users locale={locale} q={sp.q} meId={me.id} />}
         {tab === "fx" && <Fx locale={locale} />}
@@ -55,22 +85,50 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   );
 
   async function Users({ locale, q, meId }: { locale: "ar" | "en"; q?: string; meId: string }) {
-    const users = await db.user.findMany({
-      where: q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { phone: { contains: q } }, { email: { contains: q, mode: "insensitive" } }] } : {},
-      orderBy: [{ role: "desc" }, { name: "asc" }],
-      take: 60,
-    });
+    // SEC-07: بحث + تقسيم صفحات (50)
+    const page = Math.max(1, Number(sp.page) || 1);
+    const roleFilter = Object.keys(ROLE).includes(sp.role ?? "") ? sp.role : undefined;
+    const where: Prisma.UserWhereInput = {
+      AND: [
+        scopeUsersFor(me),
+        { anonymizedAt: null },
+        roleFilter ? { role: roleFilter as never } : {},
+        q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { phone: { contains: q } }, { email: { contains: q, mode: "insensitive" } }] } : {},
+      ],
+    };
+    const [users, total] = await Promise.all([
+      db.user.findMany({ where, orderBy: [{ role: "desc" }, { name: "asc" }], skip: (page - 1) * PAGE, take: PAGE }),
+      db.user.count({ where }),
+    ]);
+    const pages = Math.max(1, Math.ceil(total / PAGE));
+    const roleOptions = Object.keys(ROLE).map((k) => ({ key: k, label: label(ROLE, k, locale) }));
+    const qs = (p: number) => `${base}?tab=users${q ? `&q=${encodeURIComponent(q)}` : ""}${roleFilter ? `&role=${roleFilter}` : ""}&page=${p}`;
     return (
-      <Card title={L("المستخدمين", "Users")}>
-        <form className="flex gap-2">
+      <Card title={L(`المستخدمين (${num(total, locale)})`, `Users (${total})`)}>
+        <form className="flex flex-wrap gap-2">
           <input type="hidden" name="tab" value="users" />
-          <input name="q" defaultValue={q} placeholder={L("ابحث بالاسم أو الرقم أو الإيميل", "Search by name, number or email")} className={field} />
+          <input name="q" defaultValue={q} placeholder={L("ابحث بالاسم أو الرقم أو الإيميل", "Search by name, number or email")} className={`${field} max-w-sm`} />
+          <select name="role" defaultValue={roleFilter ?? ""} className={`${field} w-44`} aria-label={L("الدور", "Role")}>
+            <option value="">{L("كل الأدوار", "All roles")}</option>
+            {roleOptions.map((r) => (
+              <option key={r.key} value={r.key}>
+                {r.label}
+              </option>
+            ))}
+          </select>
           <button className={btn.secondary}>{L("بحث", "Search")}</button>
         </form>
-        <Table head={[L("الاسم", "Name"), L("الموبايل", "Mobile"), L("المستوى", "Level"), L("الدور", "Role")]}>
+        <Table head={[L("الاسم", "Name"), L("الموبايل", "Mobile"), L("المستوى", "Level"), L("الحالة", "Status"), L("الدور", "Role")]}>
           {users.map((u) => (
             <tr key={u.id}>
-              <td className="font-semibold">{u.name}</td>
+              <td className="font-semibold">
+                {u.name}
+                {u.brokerRegNo && (
+                  <div className="text-xs font-normal text-muted" dir="ltr">
+                    #{u.brokerRegNo}
+                  </div>
+                )}
+              </td>
               <td dir="ltr" className="text-start">
                 {u.phone}
               </td>
@@ -78,24 +136,42 @@ export default async function SettingsPage({ params, searchParams }: Props) {
                 <Badge tone={u.accountLevel === "VERIFIED" ? "green" : "gray"}>{label(ACCOUNT_LEVEL, u.accountLevel, locale)}</Badge>
               </td>
               <td>
-                {u.id === meId ? (
-                  label(ROLE, u.role, locale)
-                ) : (
-                  <form action={setUserRole.bind(null, locale, u.id)} className="flex gap-1.5">
-                    <select name="role" defaultValue={u.role} className={`${field} min-h-9 w-32`} aria-label={L("الدور", "Role")}>
-                      {Object.keys(ROLE).map((r) => (
-                        <option key={r} value={r}>
-                          {label(ROLE, r, locale)}
-                        </option>
-                      ))}
-                    </select>
-                    <button className={`${btn.small} border border-brand text-brand`}>{L("حفظ", "Save")}</button>
-                  </form>
-                )}
+                <Badge tone={u.status === "SUSPENDED" ? "red" : "green"}>{label(ACCOUNT_STATUS, u.status, locale)}</Badge>
+                {u.id !== meId &&
+                  (u.status === "SUSPENDED" ? (
+                    <form action={unsuspendUser.bind(null, locale, u.id)} className="mt-1">
+                      {u.suspendReason && <div className="text-xs text-muted">{u.suspendReason}</div>}
+                      <button className={`${btn.small} border border-line`}>{L("فعّل الحساب", "Reactivate")}</button>
+                    </form>
+                  ) : (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs text-[#A32020]">{L("إيقاف…", "Suspend…")}</summary>
+                      <form action={suspendUser.bind(null, locale, u.id)} className="mt-1 flex flex-col gap-1">
+                        <input name="reason" required minLength={10} placeholder={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} className={`${field} min-h-9 w-56`} />
+                        <button className={`${btn.small} self-start border border-[#A32020] text-[#A32020]`}>{L("أوقف الحساب", "Suspend account")}</button>
+                      </form>
+                    </details>
+                  ))}
               </td>
+              <td>{u.id === meId ? label(ROLE, u.role, locale) : <RoleForm action={setUserRole.bind(null, locale, u.id)} current={u.role} roles={roleOptions} ar={ar} brokerRegNo={u.brokerRegNo} />}</td>
             </tr>
           ))}
         </Table>
+        {pages > 1 && (
+          <nav className="flex flex-wrap items-center gap-2 text-sm" aria-label={L("الصفحات", "Pages")}>
+            {page > 1 && (
+              <Link href={qs(page - 1)} className={`${btn.small} border border-line`}>
+                {L("السابق", "Previous")}
+              </Link>
+            )}
+            <span className="text-muted">{L(`صفحة ${num(page, locale)} من ${num(pages, locale)}`, `Page ${page} of ${pages}`)}</span>
+            {page < pages && (
+              <Link href={qs(page + 1)} className={`${btn.small} border border-line`}>
+                {L("التالي", "Next")}
+              </Link>
+            )}
+          </nav>
+        )}
       </Card>
     );
   }
@@ -119,13 +195,20 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         <form action={addManualRate.bind(null, locale)} className="flex flex-wrap items-end gap-2">
           <label className={labelCls}>
             {L("شراء", "Buy")}
-            <input name="buy" type="number" step="0.0001" min={1} required className={`${field} w-36`} />
+            <input name="buy" type="number" step="0.0001" min={1} required defaultValue={sp.buy} className={`${field} w-36`} />
           </label>
           <label className={labelCls}>
             {L("بيع", "Sell")}
-            <input name="sell" type="number" step="0.0001" min={1} required className={`${field} w-36`} />
+            <input name="sell" type="number" step="0.0001" min={1} required defaultValue={sp.sell} className={`${field} w-36`} />
           </label>
+          {sp.err === "rate_deviation" && (
+            <label className="flex min-h-11 items-center gap-2 text-sm">
+              <input type="checkbox" name="confirmDeviation" className="size-4" />
+              {L("متأكد — السعر ده صح رغم الفرق", "I'm sure — this rate is correct despite the gap")}
+            </label>
+          )}
           <button className={btn.primary}>{L("سجّل سعر يدوي", "Add manual rate")}</button>
+          <p className="w-full text-xs text-muted">{L("هيطلب منك تأكيد هويتك قبل الحفظ.", "You'll be asked to confirm your identity before saving.")}</p>
         </form>
         <Table head={[L("التاريخ", "Date"), L("شراء", "Buy"), L("بيع", "Sell"), L("المصدر", "Source"), L("بواسطة", "By")]}>
           {rates.map((r) => (
@@ -145,7 +228,13 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   }
 
   async function Commission({ locale }: { locale: "ar" | "en" }) {
-    const [rates, fees] = await Promise.all([getSetting("commission.rates"), getSetting("service.fees")]);
+    const [rates, fees, fourEyes, fxCfg, brokersCfg] = await Promise.all([
+      getSetting("commission.rates"),
+      getSetting("service.fees"),
+      getSetting("payments.fourEyes"),
+      getSetting("fx.manual"),
+      getSetting("deals.unassignedBrokers"),
+    ]);
     return (
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title={L("نسب العمولة", "Commission rates")}>
@@ -181,6 +270,27 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               <input name="buyerLawyerFeeEgp" type="number" min={0} defaultValue={fees.buyerLawyerFeeEgp ?? 0} className={`${field} w-40`} />
             </label>
             <p className="w-full text-sm text-muted">{L("الأرقام دي بتظهر في حاسبة التكلفة في صفحة كل قطعة.", "These figures feed the cost calculator on each plot page.")}</p>
+            <button className={btn.primary}>{L("حفظ", "Save")}</button>
+          </form>
+        </Card>
+        <Card title={L("قواعد التشغيل", "Operating rules")}>
+          <form action={saveOps.bind(null, locale)} className="flex flex-wrap items-end gap-2">
+            <label className={labelCls}>
+              {L("حد الأربع عيون للصرف (ج.م)", "Four-eyes payout limit (EGP)")}
+              <input name="fourEyesLimit" type="number" min={0} step={1000} defaultValue={fourEyes.limitEgp} className={`${field} w-44`} />
+              <span className="text-xs text-muted">{money(fourEyes.limitEgp, "EGP", locale)}</span>
+            </label>
+            <label className={labelCls}>
+              {L("أقصى فرق للسعر اليدوي عن الآلي (%)", "Max manual rate gap from automatic (%)")}
+              <input name="maxDeviationPct" type="number" min={0.5} max={50} step={0.5} defaultValue={fxCfg.maxDeviationPct} className={`${field} w-32`} />
+            </label>
+            <label className={labelCls}>
+              {L("الوسطاء غير المسندين للصفقة", "Brokers not assigned to a deal")}
+              <select name="unassignedBrokers" defaultValue={brokersCfg.access} className={`${field} w-56`}>
+                <option value="none">{L("ما يشوفوهاش", "Can't see it")}</option>
+                <option value="read">{L("قراءة بس", "Read only")}</option>
+              </select>
+            </label>
             <button className={btn.primary}>{L("حفظ", "Save")}</button>
           </form>
         </Card>
@@ -267,7 +377,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
 
   async function Audit({ locale, entity }: { locale: "ar" | "en"; entity?: string }) {
     const logs = await db.auditLog.findMany({
-      where: entity ? { entityType: entity } : {},
+      where: { AND: [scopeAuditFor(me), entity ? { entityType: entity } : {}] },
       include: { actor: true },
       orderBy: { createdAt: "desc" },
       take: 100,

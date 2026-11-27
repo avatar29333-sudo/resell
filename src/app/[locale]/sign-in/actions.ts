@@ -40,6 +40,7 @@ const M = {
   locked: ["محاولات كتير غلط. استنى 15 دقيقة واطلب رمز جديد", "Too many wrong attempts. Wait 15 minutes and request a new code"],
   wrong: ["الرمز غلط", "Wrong code"],
   terms: ["لازم توافق على الشروط وسياسة الخصوصية", "You must accept the terms and privacy policy"],
+  suspended: ["الحساب ده موقوف. كلّم الدعم لو محتاج مساعدة", "This account is suspended. Contact support if you need help"],
   totpWrong: ["رمز تطبيق التحقق غلط أو خلص — جرّب الرمز اللي ظاهر دلوقتي", "Wrong or expired authenticator code — try the current one"],
 } as const;
 
@@ -62,6 +63,11 @@ export async function identify(locale: Locale, _prev: SignInState, form: FormDat
   const user = id.kind === "email" ? await db.user.findUnique({ where: { email: id.value } }) : await db.user.findUnique({ where: { phone: id.value } });
 
   if (!user || user.anonymizedAt) return { step: "register", prefill };
+  // PERM-07: الحساب الموقوف ما يدخلش
+  if (user.status === "SUSPENDED") {
+    await audit(user.id, "auth.suspended_attempt", "User", user.id);
+    return { step: "identify", error: msg(locale, "suspended") };
+  }
 
   // دخل بالإيميل؟ يبقى الرمز يروح الإيميل. غير كده واتساب، ويقدر يغيّر بعدين.
   const channel: Channel = id.kind === "email" && user.email ? "email" : "whatsapp";
@@ -176,7 +182,7 @@ export async function demoSignIn(locale: string, userId: string) {
     throw new Error("Demo sign-in is disabled");
   }
   const user = await db.user.findUnique({ where: { id: userId } });
-  if (!user) return;
+  if (!user || user.status === "SUSPENDED") return;
   await audit(user.id, "auth.demo_sign_in", "User", user.id);
   await createSession(user.id);
   const loc = isLocale(locale) ? locale : "ar";

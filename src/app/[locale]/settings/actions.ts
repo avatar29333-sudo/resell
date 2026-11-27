@@ -4,19 +4,22 @@ import { revalidatePath } from "next/cache";
 import type { Prisma, Role } from "@prisma/client";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
-import { requireUser } from "@/lib/auth";
+import { requireRecentAuth, requireUser } from "@/lib/auth";
+import { authorize } from "@/lib/authz";
 import { getSetting } from "@/lib/settings";
 import { updateDailyRate } from "@/lib/fx";
+import { checkManualRate } from "@/lib/fx-rules";
 import { moveBlobsToS3 } from "@/lib/storage";
+import { idsByRole, notify } from "@/lib/notifications";
+import { ROLE } from "@/lib/labels";
 import { redirect } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 
-const ROLES: Role[] = ["CLIENT", "BROKER", "LAWYER", "AGENT", "FINANCE", "ADMIN"];
-const admin = (locale: string, roles: Role[] = ["ADMIN"]) => {
-  const l = isLocale(locale) ? locale : "ar";
-  return requireUser(l, `/${l}/settings`, roles);
-};
-const refresh = (locale: string) => revalidatePath(`/${isLocale(locale) ? locale : "ar"}/settings`);
+const ROLES: Role[] = ["CLIENT", "PARTNER_BROKER", "BROKER", "BROKER_LEAD", "LAWYER", "AGENT", "FINANCE", "ADMIN"];
+const loc = (l: string) => (isLocale(l) ? l : "ar");
+const back = (l: string, tab: string) => `/${loc(l)}/settings?tab=${tab}`;
+const signedIn = (locale: string, roles: Role[] = ["ADMIN"]) => requireUser(loc(locale), `/${loc(locale)}/settings`, roles);
+const refresh = (locale: string) => revalidatePath(`/${loc(locale)}/settings`);
 
 async function saveSetting(userId: string, key: string, value: Prisma.InputJsonValue) {
   const before = await db.appSetting.findUnique({ where: { key } });
@@ -24,57 +27,160 @@ async function saveSetting(userId: string, key: string, value: Prisma.InputJsonV
   await audit(userId, "setting.update", "AppSetting", key, { before: (before?.value ?? null) as Prisma.InputJsonValue, after: value });
 }
 
+const isLastAdmin = async (userId: string) => {
+  const u = await db.user.findUnique({ where: { id: userId }, select: { role: true } });
+  if (u?.role !== "ADMIN") return false;
+  return (await db.user.count({ where: { role: "ADMIN", status: "ACTIVE", anonymizedAt: null } })) <= 1;
+};
+
+/**
+ * SEC-07 + PERM-05: تغيير الدور — بتأكيد فيه القديم والجديد، وآخر أدمن محمي،
+ * والترقية لأدمن محتاجة إعادة تحقق وبتبعت إشعار لباقي الأدمنز. الجلسات القديمة بتقع.
+ */
 export async function setUserRole(locale: string, userId: string, form: FormData) {
-  const me = await admin(locale);
+  const l = loc(locale);
+  const b = back(l, "users");
+  const me = await signedIn(l);
   const role = String(form.get("role")) as Role;
   if (!ROLES.includes(role) || userId === me.id) return; // الأدمن ما يغيرش دوره بنفسه
-  await db.user.update({ where: { id: userId }, data: { role, twoFactorEnabled: role !== "CLIENT" } });
-  await audit(me.id, "user.role", "User", userId, { role });
-  refresh(locale);
+  const target = await db.user.findUnique({ where: { id: userId } });
+  if (!target || target.role === role) return;
+  if (form.get("confirmed") !== `${target.role}>${role}`) redirect(`${b}&err=confirm`);
+  await authorize(me, "user.set_role", { target: { id: userId, role: target.role }, newRole: role, lastAdmin: await isLastAdmin(userId) }, { back: b });
+  if (role === "ADMIN") await requireRecentAuth(me, l, b);
+  const regNo = String(form.get("brokerRegNo") ?? "").trim();
+  if (role === "PARTNER_BROKER" && !regNo && !target.brokerRegNo) redirect(`${b}&err=reg_no`);
+
+  await db.user.update({
+    where: { id: userId },
+    data: {
+      role,
+      twoFactorEnabled: role !== "CLIENT" && role !== "PARTNER_BROKER",
+      sessionVersion: { increment: 1 },
+      ...(role === "PARTNER_BROKER" ? { brokerRegNo: regNo || target.brokerRegNo, partnerApprovedAt: new Date() } : {}),
+    },
+  });
+  await audit(me.id, "user.role", "User", userId, { before: target.role, after: role, ...(regNo ? { brokerRegNo: regNo } : {}) });
+  await notify([userId], {
+    kind: "user.role_changed",
+    ar: [`دورك على المنصة اتغيّر إلى: ${ROLE[role]?.[0] ?? role}`, "ادخل تاني عشان تشوف شاشاتك الجديدة."],
+    en: [`Your role was changed to: ${ROLE[role]?.[1] ?? role}`, "Sign in again to see your new screens."],
+  });
+  if (role === "ADMIN") {
+    await notify((await idsByRole("ADMIN")).filter((id) => id !== me.id && id !== userId), {
+      kind: "user.admin_promoted",
+      ar: [`${me.name} رقّى ${target.name} لأدمن`],
+      en: [`${me.name} promoted ${target.name} to admin`],
+      link: `/settings?tab=users`,
+    });
+  }
+  refresh(l);
+  redirect(`${b}&ok=role`);
 }
 
+/** PERM-07: إيقاف حساب — الجلسات بتقع، الصفقات الشغالة بتتعلّق، وعروضه بتختفي من السجل العام */
+export async function suspendUser(locale: string, userId: string, form: FormData) {
+  const l = loc(locale);
+  const b = back(l, "users");
+  const me = await signedIn(l);
+  if (userId === me.id) return;
+  const target = await db.user.findUnique({ where: { id: userId } });
+  if (!target || target.status === "SUSPENDED") return;
+  await authorize(me, "user.suspend", { target: { id: userId, role: target.role }, lastAdmin: await isLastAdmin(userId) }, { back: b });
+  const reason = String(form.get("reason") ?? "").trim();
+  if (reason.length < 10) redirect(`${b}&err=note_required`);
+
+  await db.user.update({ where: { id: userId }, data: { status: "SUSPENDED", suspendedAt: new Date(), suspendReason: reason, sessionVersion: { increment: 1 } } });
+  const deals = await db.deal.findMany({ where: { status: "ACTIVE", OR: [{ buyerId: userId }, { listing: { sellerId: userId } }] }, select: { id: true, stage: true, brokerId: true } });
+  for (const d of deals) {
+    await db.deal.update({ where: { id: d.id }, data: { status: "ON_HOLD", events: { create: { type: "NOTE", actorId: me.id, data: { status: "ON_HOLD", reason: "party_suspended" } } } } });
+  }
+  await audit(me.id, "user.suspend", "User", userId, { reason, dealsOnHold: deals.map((d) => d.id) });
+  await notify(
+    deals.map((d) => d.brokerId),
+    {
+      kind: "deal.on_hold",
+      ar: ["صفقة مسندة ليك اتعلّقت", "حساب أحد الأطراف اتوقف مؤقتاً."],
+      en: ["A deal assigned to you was put on hold", "One of the parties' accounts was suspended."],
+      link: `/broker?tab=deals&status=ON_HOLD`,
+    },
+  );
+  refresh(l);
+  redirect(`${b}&ok=suspended`);
+}
+
+export async function unsuspendUser(locale: string, userId: string) {
+  const l = loc(locale);
+  const b = back(l, "users");
+  const me = await signedIn(l);
+  const target = await db.user.findUnique({ where: { id: userId } });
+  if (!target || target.status !== "SUSPENDED") return;
+  await authorize(me, "user.suspend", { target: { id: userId, role: target.role } }, { back: b });
+  await db.user.update({ where: { id: userId }, data: { status: "ACTIVE", suspendedAt: null, suspendReason: null } });
+  await audit(me.id, "user.unsuspend", "User", userId, { before: "SUSPENDED", after: "ACTIVE" });
+  await notify([userId], { kind: "user.unsuspended", ar: ["حسابك اتفعّل تاني"], en: ["Your account is active again"] });
+  refresh(l);
+  redirect(`${b}&ok=unsuspended`);
+}
+
+/** سعر يدوي (طوارئ): إعادة تحقق + البيع ≥ الشراء + ما يبعدش أكتر من الحد عن آخر سعر آلي إلا بتأكيد (OPS-04) */
 export async function addManualRate(locale: string, form: FormData) {
-  const me = await admin(locale, ["ADMIN", "FINANCE"]);
+  const l = loc(locale);
+  const b = back(l, "fx");
+  const me = await signedIn(l, ["ADMIN", "FINANCE"]);
+  await authorize(me, "fx.manual", {}, { back: b });
+  await requireRecentAuth(me, l, b);
   const buy = Number(form.get("buy"));
   const sell = Number(form.get("sell"));
-  if (!(buy > 0 && sell >= buy)) return;
+  const [lastAuto, cfg] = await Promise.all([db.exchangeRate.findFirst({ where: { source: { not: "MANUAL" } }, orderBy: [{ date: "desc" }, { createdAt: "desc" }] }), getSetting("fx.manual")]);
+  const problem = checkManualRate({ buy, sell, lastAutoSell: lastAuto ? Number(lastAuto.sell) : null, maxDeviationPct: cfg.maxDeviationPct, confirmed: form.get("confirmDeviation") === "on" });
+  if (problem) redirect(`${b}&err=${problem}&buy=${buy}&sell=${sell}`);
   const r = await db.exchangeRate.create({
     // تاريخ النهارده بتوقيت القاهرة
     data: { date: new Date(new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo" }).format(new Date())), buy, sell, source: "MANUAL", enteredById: me.id },
   });
-  await audit(me.id, "fx.manual", "ExchangeRate", r.id, { buy, sell });
-  refresh(locale);
+  await audit(me.id, "fx.manual", "ExchangeRate", r.id, { buy, sell, lastAutoSell: lastAuto ? Number(lastAuto.sell) : null, deviationConfirmed: form.get("confirmDeviation") === "on" });
+  refresh(l);
+  redirect(`${b}&fx=manual`);
 }
 
 /** سحب سعر النهارده دلوقتي (نفس اللي المهمة اليومية بتعمله) */
 export async function fetchRateNow(locale: string) {
-  const me = await admin(locale, ["ADMIN", "FINANCE"]);
+  const l = loc(locale);
+  const me = await signedIn(l, ["ADMIN", "FINANCE"]);
+  await authorize(me, "fx.manual", {}, { back: back(l, "fx") });
   const r = await updateDailyRate();
   await audit(me.id, "fx.fetch_now", "ExchangeRate", r.status === "unavailable" ? "-" : r.rate.id, { status: r.status });
-  refresh(locale);
-  redirect(`/${isLocale(locale) ? locale : "ar"}/settings?tab=fx&fx=${r.status}`);
+  refresh(l);
+  redirect(`${back(l, "fx")}&fx=${r.status}`);
 }
 
 /** نقل دفعة من الملفات القديمة لـ S3 */
 export async function moveFilesToS3(locale: string) {
-  const me = await admin(locale);
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "storage.manage", {}, { back: back(l, "storage") });
   const r = await moveBlobsToS3();
   await audit(me.id, "storage.move_to_s3", "FileBlob", "batch", { moved: r.moved, failed: r.failed, remaining: r.remaining });
-  refresh(locale);
-  redirect(`/${isLocale(locale) ? locale : "ar"}/settings?tab=storage&moved=${r.moved}&failed=${r.failed}${r.error ? `&err=${r.error}` : ""}`);
+  refresh(l);
+  redirect(`${back(l, "storage")}&moved=${r.moved}&failed=${r.failed}${r.error ? `&err=${r.error}` : ""}`);
 }
 
 export async function saveCommission(locale: string, form: FormData) {
-  const me = await admin(locale);
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "commission.rates", {}, { back: back(l, "commission") });
   const sellerPct = Number(form.get("sellerPct"));
   const buyerPct = Number(form.get("buyerPct"));
   if (!(sellerPct >= 0 && sellerPct <= 10 && buyerPct >= 0 && buyerPct <= 10)) return;
   await saveSetting(me.id, "commission.rates", { sellerPct, buyerPct });
-  refresh(locale);
+  refresh(l);
 }
 
 export async function saveFees(locale: string, form: FormData) {
-  const me = await admin(locale);
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "settings.fees", {}, { back: back(l, "commission") });
   const pct = String(form.get("authorityTransferPct") ?? "").trim();
   await saveSetting(me.id, "service.fees", {
     deadlineRescueEgp: Number(form.get("deadlineRescueEgp")) || 0,
@@ -82,17 +188,33 @@ export async function saveFees(locale: string, form: FormData) {
     authorityTransferPct: pct === "" ? null : Math.min(20, Math.max(0, Number(pct) || 0)),
     buyerLawyerFeeEgp: Math.max(0, Number(form.get("buyerLawyerFeeEgp")) || 0),
   });
-  refresh(locale);
+  refresh(l);
+}
+
+/** إعدادات التشغيل: حد الأربع عيون، حد السعر اليدوي، رؤية الوسطاء غير المسندين */
+export async function saveOps(locale: string, form: FormData) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "settings.fees", {}, { back: back(l, "commission") });
+  const limit = Math.max(0, Number(form.get("fourEyesLimit")) || 0);
+  const dev = Math.min(50, Math.max(0.5, Number(form.get("maxDeviationPct")) || 5));
+  const access = form.get("unassignedBrokers") === "read" ? "read" : "none";
+  await saveSetting(me.id, "payments.fourEyes", { limitEgp: limit });
+  await saveSetting(me.id, "fx.manual", { maxDeviationPct: dev });
+  await saveSetting(me.id, "deals.unassignedBrokers", { access });
+  refresh(l);
 }
 
 /** نسخة جديدة من نموذج عقد — العقود القديمة بتفضل على نسختها */
 export async function bumpTemplate(locale: string, type: string, form: FormData) {
-  const me = await admin(locale);
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "template.edit", {}, { back: back(l, "templates") });
   const list = await getSetting("contract.templates");
   const note = String(form.get("note") ?? "").trim();
   const next = list.map((t) =>
     t.type === type ? { ...t, version: `v${Number(t.version.replace("v", "")) + 1}`, updatedAt: new Date().toISOString().slice(0, 10), note } : t,
   );
   await saveSetting(me.id, "contract.templates", next);
-  refresh(locale);
+  refresh(l);
 }

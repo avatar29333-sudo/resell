@@ -14,7 +14,8 @@ const SESSION_COOKIE = "resell_session";
 const PENDING_COOKIE = "resell_pending";
 const SESSION_DAYS = 30;
 
-export const STAFF_ROLES: Role[] = ["ADMIN", "BROKER", "LAWYER", "AGENT", "FINANCE"];
+/** الفريق الداخلي (السمسار الشريك من برّه، مش موظف) */
+export const STAFF_ROLES: Role[] = ["ADMIN", "BROKER", "BROKER_LEAD", "LAWYER", "AGENT", "FINANCE"];
 
 function secret() {
   const s = process.env.SESSION_SECRET;
@@ -35,25 +36,48 @@ export const DEMO_MODE = isDemoMode();
 
 // ─── الجلسة ───
 
+/** PERM-08: مدة الجلسة حسب الدور (بالثواني) */
+export function sessionSecondsFor(role: Role) {
+  switch (role) {
+    case "CLIENT":
+      return SESSION_DAYS * 86400;
+    case "PARTNER_BROKER":
+      return 14 * 86400;
+    case "FINANCE":
+    case "ADMIN":
+      return 8 * 3600;
+    default:
+      return 12 * 3600;
+  }
+}
+
 export async function createSession(userId: string) {
-  const token = await new SignJWT({ sub: userId })
+  const u = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { role: true, sessionVersion: true } });
+  const ttl = sessionSecondsFor(u.role);
+  const token = await new SignJWT({ sub: userId, sv: u.sessionVersion })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(`${SESSION_DAYS}d`)
+    .setExpirationTime(Math.floor(Date.now() / 1000) + ttl)
     .sign(secret());
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
     secure,
     path: "/",
-    maxAge: SESSION_DAYS * 86400,
+    maxAge: ttl,
   });
 }
 
 export async function destroySession() {
-  (await cookies()).delete(SESSION_COOKIE);
+  const c = await cookies();
+  c.delete(SESSION_COOKIE);
+  c.delete(REAUTH_COOKIE);
 }
 
+/**
+ * الجلسة صالحة بس لو: التوقيع سليم + ما خلصتش + رقم نسخة الجلسة = اللي في الحساب
+ * (الإيقاف أو تغيير الدور بيزوّد الرقم فكل الجلسات القديمة بتقع) + الحساب مش موقوف.
+ */
 export async function getCurrentUser(): Promise<User | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -61,10 +85,43 @@ export async function getCurrentUser(): Promise<User | null> {
     const { payload } = await jwtVerify(token, secret());
     if (!payload.sub) return null;
     const user = await db.user.findUnique({ where: { id: payload.sub } });
-    return user && !user.anonymizedAt ? user : null;
+    if (!user || user.anonymizedAt || user.status === "SUSPENDED") return null;
+    if ((payload.sv ?? 0) !== user.sessionVersion) return null;
+    return user;
   } catch {
     return null;
   }
+}
+
+// ─── إعادة التحقق قبل الأفعال الحرجة (PERM-08) ───
+
+const REAUTH_COOKIE = "resell_reauth";
+export const REAUTH_MINUTES = 10;
+
+export async function markReauthenticated(userId: string) {
+  const token = await new SignJWT({ sub: userId, reauth: true })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(`${REAUTH_MINUTES}m`)
+    .sign(secret());
+  (await cookies()).set(REAUTH_COOKIE, token, { httpOnly: true, sameSite: "strict", secure, path: "/", maxAge: REAUTH_MINUTES * 60 });
+}
+
+export async function recentlyReauthenticated(userId: string) {
+  const token = (await cookies()).get(REAUTH_COOKIE)?.value;
+  if (!token) return false;
+  try {
+    const { payload } = await jwtVerify(token, secret());
+    return payload.sub === userId && payload.reauth === true;
+  } catch {
+    return false;
+  }
+}
+
+/** لو المستخدم ما أكّدش هويته في آخر 10 دقايق → يتحول لصفحة التأكيد ويرجع لنفس الصفحة */
+export async function requireRecentAuth(user: User, locale: Locale, back: string) {
+  if (await recentlyReauthenticated(user.id)) return;
+  redirect(`/${locale}/account/reauth?next=${encodeURIComponent(back)}`);
 }
 
 /**
@@ -89,8 +146,10 @@ export function homeFor(role: Role) {
     case "ADMIN":
       return "settings";
     case "BROKER":
-    case "AGENT":
+    case "BROKER_LEAD":
       return "broker";
+    case "AGENT":
+      return "agent";
     case "LAWYER":
       return "lawyer";
     case "FINANCE":
@@ -152,7 +211,7 @@ export async function clientIp() {
  * الرمز مربوط بالرقم دايماً (هو هوية الحساب)، والقناة بس هي اللي بتختلف.
  * الرمز بيظهر على الشاشة في DEMO_MODE بس.
  */
-export async function issueCode(phone: string, purpose: "sign_in" | "sign_up", channel: Channel = "whatsapp", email?: string | null) {
+export async function issueCode(phone: string, purpose: "sign_in" | "sign_up" | "reauth",channel: Channel = "whatsapp", email?: string | null) {
   const since = new Date(Date.now() - RATE_WINDOW_MS);
   const ip = await clientIp();
   const [byPhone, byIp] = await Promise.all([
