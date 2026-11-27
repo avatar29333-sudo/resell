@@ -2,6 +2,7 @@
 
 /** GEO-01: المدينة = مفتاح نصي من جدول المدن */
 type City = string;
+import { cityPair } from "@/lib/labels";
 import { allCities } from "@/lib/cities";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
@@ -49,8 +50,8 @@ export async function subscribeReminder(locale: string, _p: RemindState, form: F
     phone,
     "reminder.welcome",
     ar
-      ? `Resell: هنفكّرك بمهلة قطعتك في ${CITY[city][0]} قبلها بـ 90 و30 و7 أيام، ولو صدر قرار تسهيلات جديد. لإيقاف التنبيهات: ${unsub}`
-      : `Resell: we'll remind you about your ${CITY[city][1]} deadline 90, 30 and 7 days before, and when new relief is announced. Stop reminders: ${unsub}`,
+      ? `Resell: هنفكّرك بمهلة قطعتك في ${cityPair(city)[0]} قبلها بـ 90 و30 و7 أيام، ولو صدر قرار تسهيلات جديد. لإيقاف التنبيهات: ${unsub}`
+      : `Resell: we'll remind you about your ${cityPair(city)[1]} deadline 90, 30 and 7 days before, and when new relief is announced. Stop reminders: ${unsub}`,
   );
   return { ok: true };
 }

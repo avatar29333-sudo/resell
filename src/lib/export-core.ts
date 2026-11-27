@@ -45,7 +45,9 @@ export function verifyManifest(entries: Entry[], manifest: ReturnType<typeof bui
 /** CSV بـ BOM عشان العربي يتفتح سليم في Excel */
 export function toCsv(rows: (string | number | null | undefined)[][]) {
   const cell = (v: string | number | null | undefined) => {
-    const s = v == null ? "" : String(v);
+    let s = v == null ? "" : String(v);
+    // منع تنفيذ معادلات في Excel (CSV injection) — الأرقام السالبة بتفضل زي ما هي
+    if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   return new TextEncoder().encode("﻿" + rows.map((r) => r.map(cell).join(",")).join("\r\n"));

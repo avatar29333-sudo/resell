@@ -26,3 +26,12 @@ describe("ADM-EXP export", () => {
     expect(zipPassword(new Uint8Array(32).map((_, i) => i * 7))).toHaveLength(20);
   });
 });
+
+describe("ADM-EXP CSV safety", () => {
+  it("neutralises spreadsheet formulas but keeps negative numbers", () => {
+    const out = new TextDecoder().decode(toCsv([["=HYPERLINK(1)", "-500", "@x"]]));
+    expect(out).toContain("'=HYPERLINK(1)");
+    expect(out).toContain(",-500,");
+    expect(out).toContain("'@x");
+  });
+});

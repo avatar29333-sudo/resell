@@ -203,7 +203,7 @@ async function Queue({ locale, me, scope: scopeRaw }: { locale: "ar" | "en"; me:
                           <button className={`${btn.small} border border-brand text-brand`}>{L("ابعت للمحامي", "Send to lawyer")}</button>
                         </form>
                       )}
-                      {l.status === "IN_REVIEW" && (
+                      {l.status === "IN_REVIEW" && verify.allowed && (
                         <form action={moveListing.bind(null, locale, l.id, "VERIFIED")} className="flex flex-wrap gap-1">
                           <AdminReason show={verify.override} ar={ar} />
                           <button

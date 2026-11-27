@@ -1,3 +1,5 @@
+import { redactCodes } from "@/lib/outbox";
+import { cityPair } from "@/lib/labels";
 import { allCities } from "@/lib/cities";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
@@ -64,8 +66,8 @@ export default async function MarketingPage({ params, searchParams }: Props) {
                       <Badge tone={s.status === "PUBLISHED" ? "green" : s.status === "REJECTED" ? "red" : "amber"}>{s.status}</Badge>
                     </div>
                     <form action={reviewStory.bind(null, locale, s.id)} className="flex flex-col gap-2">
-                      <textarea name="textAr" defaultValue={s.textAr ?? storyText("ar", CITY[city][0], days, code)} rows={2} aria-label={L("النص بالعربي", "Arabic text")} className={`${field} py-2`} />
-                      <textarea name="textEn" defaultValue={s.textEn ?? storyText("en", CITY[city][1], days, code)} rows={2} dir="ltr" aria-label={L("النص بالإنجليزي", "English text")} className={`${field} py-2`} />
+                      <textarea name="textAr" defaultValue={s.textAr ?? storyText("ar", cityPair(city)[0], days, code)} rows={2} aria-label={L("النص بالعربي", "Arabic text")} className={`${field} py-2`} />
+                      <textarea name="textEn" defaultValue={s.textEn ?? storyText("en", cityPair(city)[1], days, code)} rows={2} dir="ltr" aria-label={L("النص بالإنجليزي", "English text")} className={`${field} py-2`} />
                       <div className="flex gap-2">
                         <button name="decision" value="publish" disabled={!ready} className={`${btn.small} bg-ok text-white disabled:opacity-40`} title={ready ? "" : L("مستني موافقة الطرفين", "Waiting for both parties")}>
                           {L("انشر", "Publish")}
@@ -133,8 +135,9 @@ export default async function MarketingPage({ params, searchParams }: Props) {
                     </td>
                     <td className="text-[13px]">
                       {m.kind}
-                      <div className="max-w-xs truncate text-muted" title={m.body}>
-                        {m.body}
+                      {/* أكواد التحقق وكلمات السر ما بتتعرضش للفريق (ولا حتى الأدمن) */}
+                      <div className="max-w-xs truncate text-muted" title={redactCodes(m.body)}>
+                        {redactCodes(m.body)}
                       </div>
                     </td>
                     <td>

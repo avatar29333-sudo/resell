@@ -109,6 +109,7 @@ const ERRORS: Record<string, [string, string]> = {
   mix: ["ارفع PDF واحد بس، أو صور JPG/PNG بس.", "Upload one PDF only, or JPG/PNG photos only."],
   poa_sale: ["التوكيل لازم يكون للتقديم والمتابعة بس — توكيل فيه صلاحية بيع مرفوض.", "The POA must be for filing and follow-up only — a POA with sale powers is rejected."],
   agree: ["لازم تعلّم على مربع الموافقة الأول.", "Tick the consent box first."],
+  missing_data: ["النموذج ناقصه بيانات — كلّم الوسيط يكمّلها.", "The form is missing data — ask the broker to complete it."],
   bank_locked: ["الحساب مثبّت على الصفقة — كلّم المالية للتغيير.", "The account is locked to the deal — contact finance to change it."],
   verify_checklist: ["لازم تأكد كل بنود المطابقة.", "Confirm every checklist item."],
   forbidden: ["الفعل ده مش متاح لحسابك على الصفقة دي.", "This action isn't available to you on this deal."],
@@ -217,7 +218,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
   const clickwraps: Record<string, { title: string; version: number; text: string }> = {};
   for (const c of deal.contracts.filter((x) => x.type === "COMMISSION_AGREEMENT" && x.templateVersionId && x.status !== "VOID")) {
     const tv = await db.templateVersion.findUnique({ where: { id: c.templateVersionId! }, include: { template: true } });
-    if (tv) clickwraps[c.id] = { title: tv.template.titleAr, version: tv.version, text: renderTemplate(tv.bodyMarkdown, await dealVars(deal, tv.version)).text };
+    if (tv) { const r = renderTemplate(tv.bodyMarkdown, await dealVars(deal, tv.version, me.id)); if (r.ok) clickwraps[c.id] = { title: tv.template.titleAr, version: tv.version, text: r.text }; }
   }
   const exportsLog = p["export.deal"].allowed ? await db.exportJob.findMany({ where: { kind: "DEAL", subjectId: id }, orderBy: { createdAt: "desc" }, take: 10, include: { requestedBy: { select: { name: true } } } }) : [];
   const ovw = { ...overviewOf(deal), docRequests: docRequests.map((r) => ({ side: r.side, title: r.title })) };
@@ -808,11 +809,14 @@ export default async function DealRoom({ params, searchParams }: Props) {
                           locale={locale}
                           action="price.reject"
                           subjectId={id}
+                          fields={["price"]}
                           preview={L(`رفضك لسعر ${money(deal.proposedPrice, "EGP", locale)}`, `Your rejection of ${money(deal.proposedPrice, "EGP", locale)}`)}
                           submitLabel={L("ارفض السعر", "Reject price")}
                           submitClass={btn.danger}
                           formAction={respondPrice.bind(null, locale, id, "reject")}
-                        />
+                        >
+                          <input type="hidden" name="price" value={String(toNum(deal.proposedPrice))} />
+                        </OtpConfirm>
                       </div>
                     </details>
                   </div>

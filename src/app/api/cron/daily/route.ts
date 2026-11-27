@@ -1,3 +1,6 @@
+import { deleteExportFile } from "@/lib/storage";
+import { allCities } from "@/lib/cities";
+import { cityPair } from "@/lib/labels";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { updateDailyRate } from "@/lib/fx";
@@ -23,6 +26,7 @@ export const maxDuration = 60;
 const DAY = 86_400_000;
 
 export async function GET(req: Request) {
+  await allCities(); // GEO-01: أسماء المدن الجديدة
   // Vercel بيبعت CRON_SECRET في الهيدر. من غيره الطلب مرفوض.
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
@@ -31,6 +35,13 @@ export async function GET(req: Request) {
   const now = new Date();
   const brokers = await idsByRole("BROKER");
   const report: Record<string, unknown> = {};
+  // DOC-01: جلسات رفع متسابة (أجزاء مؤقتة بس — المستندات نفسها عمرها ما بتتمسح)
+  report.uploadSessionsPurged = (await db.uploadSession.deleteMany({ where: { documentId: null, createdAt: { lt: new Date(now.getTime() - 24 * 3600_000) } } })).count;
+  // ADM-EXP: ملفات تصدير انتهت مدتها
+  for (const j of await db.exportJob.findMany({ where: { status: "READY", expiresAt: { lt: now } }, select: { id: true, storageKey: true } })) {
+    if (j.storageKey) await deleteExportFile(j.storageKey);
+    await db.exportJob.update({ where: { id: j.id }, data: { status: "EXPIRED" } });
+  }
 
   // 1) سعر الصرف
   const fx = await updateDailyRate();
@@ -83,7 +94,7 @@ export async function GET(req: Request) {
   for (const l of live) {
     const st = l.documents[0];
     const state = st ? validityState(st.expiresAt, now, validity.warnDays) : "ok";
-    const place = (i: 0 | 1) => `${CITY[l.plot.city][i]} — ${districtName(l.plot, i ? "en" : "ar")}`;
+    const place = (i: 0 | 1) => `${cityPair(l.plot.city)[i]} — ${districtName(l.plot, i ? "en" : "ar")}`;
     if ((state === "expired" || st?.status === "EXPIRED") && !l.statementExpiredAt) {
       await db.listing.update({ where: { id: l.id }, data: { statementExpiredAt: now } });
       await audit(null, "listing.statement_expired", "Listing", l.id, { documentId: st?.id ?? null });
@@ -118,7 +129,7 @@ export async function GET(req: Request) {
   for (const r of reminders) {
     const stage = dueStage(r.deadline, now, r);
     if (!stage) continue;
-    await queueMessage("whatsapp", r.phone, `reminder.${stage}`, reminderText(stage, r.locale, CITY[r.city][r.locale === "en" ? 1 : 0], unsubscribeUrl(r.locale, r.unsubToken)));
+    await queueMessage("whatsapp", r.phone, `reminder.${stage}`, reminderText(stage, r.locale, cityPair(r.city)[r.locale === "en" ? 1 : 0], unsubscribeUrl(r.locale, r.unsubToken)));
     await db.deadlineReminder.update({ where: { id: r.id }, data: stage === 90 ? { sent90At: now } : stage === 30 ? { sent30At: now } : { sent7At: now } });
     remindersSent++;
   }
@@ -143,7 +154,7 @@ export async function GET(req: Request) {
                 { city: l.plot.city, areaSqm: toNum(l.plot.areaSqm), totalEgp: totalEgp(l, usd) },
               ),
             )
-            .map((l) => ({ buyerId: r.buyerId, listingId: l.id, title: `${CITY[l.plot.city][r.buyer.locale === "en" ? 1 : 0]} — ${toNum(l.plot.areaSqm)} m²`, reqId: r.id, token: r.unsubToken! })),
+            .map((l) => ({ buyerId: r.buyerId, listingId: l.id, title: `${cityPair(l.plot.city)[r.buyer.locale === "en" ? 1 : 0]} — ${toNum(l.plot.areaSqm)} m²`, reqId: r.id, token: r.unsubToken! })),
     );
     for (const d of groupDigest(matchesList)) {
       const req = reqs.find((r) => r.buyerId === d.buyerId)!;
@@ -172,8 +183,8 @@ export async function GET(req: Request) {
     const days = Math.ceil((p.buildDeadline!.getTime() - now.getTime()) / DAY);
     await notify(p.listings.map((l) => l.sellerId), {
       kind: "plot.deadline",
-      ar: [`مهلة بناء قطعتك في ${CITY[p.city][0]} فاضل عليها ${days} يوم`, "اعرف إزاي تستفيد من قرار مد المهلة."],
-      en: [`The build deadline for your plot in ${CITY[p.city][1]} is in ${days} days`, "See how the deadline extension decision can help."],
+      ar: [`مهلة بناء قطعتك في ${cityPair(p.city)[0]} فاضل عليها ${days} يوم`, "اعرف إزاي تستفيد من قرار مد المهلة."],
+      en: [`The build deadline for your plot in ${cityPair(p.city)[1]} is in ${days} days`, "See how the deadline extension decision can help."],
       link: "/rescue",
     });
   }

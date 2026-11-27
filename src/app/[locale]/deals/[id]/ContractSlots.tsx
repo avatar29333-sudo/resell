@@ -56,7 +56,7 @@ export function ContractSlots({
   const ar = locale === "ar";
   const L = (a: string, e: string) => (ar ? a : e);
   const isPoa = c.type === "POWER_OF_ATTORNEY";
-  const open = ["APPROVED", "SENT_FOR_SIGNATURE", "PARTIALLY_SIGNED"].includes(c.status);
+  const open = ["SENT_FOR_SIGNATURE", "PARTIALLY_SIGNED"].includes(c.status);
   const ready = !["DRAFT", "PENDING_LAWYER", "VOID"].includes(c.status);
   if (!ready) return null;
   const slot = "flex flex-col gap-2 border border-line p-3 text-sm";
@@ -145,9 +145,11 @@ export function ContractSlots({
                     {L("كود المستند (مطبوع تحت كل صفحة جنب الـ QR)", "Document code (printed at the bottom of each page next to the QR)")}
                     <input name="code" required dir="ltr" placeholder={c.draftCode ?? "RS-DL-…"} className={`${field} text-start uppercase`} />
                   </label>
-                  <label className="flex min-h-11 items-center gap-2">
-                    <input type="checkbox" name="both" className="size-5" /> {L("النسخة دي عليها توقيع الطرفين", "This copy carries both parties' signatures")}
-                  </label>
+                  {onBehalf && (
+                    <label className="flex min-h-11 items-center gap-2">
+                      <input type="checkbox" name="both" className="size-5" /> {L("النسخة دي عليها توقيع الطرفين", "This copy carries both parties' signatures")}
+                    </label>
+                  )}
                 </>
               )}
               {onBehalf && (
@@ -190,8 +192,12 @@ export function ContractSlots({
               {(
                 [
                   ["signatures", L("التوقيعات موجودة", "Signatures present")],
-                  ["initials", L("الأحرف الأولى على كل صفحة", "Initials on every page")],
-                  ["no_handwriting", L("مفيش شطب أو إضافة بخط اليد", "No handwritten strikes or additions")],
+                  ...(c.signedVia === "PAPER"
+                    ? [
+                        ["initials", L("الأحرف الأولى على كل صفحة", "Initials on every page")],
+                        ["no_handwriting", L("مفيش شطب أو إضافة بخط اليد", "No handwritten strikes or additions")],
+                      ]
+                    : []),
                   ["date", L("التاريخ مكتوب", "Date written")],
                   ...(isPoa ? [["filing_only", L("توكيل تقديم ومتابعة — مش توكيل بيع", "Filing & follow-up POA — not a sale POA")]] : []),
                 ] as [string, string][]

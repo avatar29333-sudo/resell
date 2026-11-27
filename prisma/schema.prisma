@@ -393,6 +393,7 @@ model Listing {
   ownerConfirmedAt       DateTime?
   ownerConfirmCodeHash   String?
   ownerConfirmExpiresAt  DateTime?
+  ownerConfirmAttempts   Int               @default(0)
   partnerReferrals       PartnerReferral[]
   id                     String            @id @default(cuid())
   plotId                 String

@@ -27,7 +27,7 @@ export default async function OwnerConfirm({ params, searchParams }: Props) {
     code: L("الكود غلط.", "Wrong code."),
     agree: L("علّم على مربع الموافقة.", "Tick the consent box."),
     expired: L("الرابط ده انتهى أو اتأكد قبل كده.", "This link expired or was already confirmed."),
-    locked: L("محاولات كتير غلط — جرّب بعد ساعة.", "Too many wrong attempts — try again in an hour."),
+    locked: L("محاولات كتير غلط — الكود اتقفل. اطلب من اللي عرض القطعة يبعت كود جديد.", "Too many wrong attempts — the code is locked. Ask the lister to send a new one."),
   };
   return (
     <>

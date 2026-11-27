@@ -41,7 +41,20 @@ export async function seedTemplates(prisma: PrismaClient) {
   // ربط العقود القديمة بنسختها
   const loose = await prisma.contract.findMany({ where: { templateVersionId: null }, select: { id: true, type: true, templateVersion: true } });
   for (const c of loose) {
-    const v = await prisma.templateVersion.findFirst({ where: { template: { contractType: c.type }, version: Number(c.templateVersion.replace(/\D/g, "")) || 1 } });
-    if (v) await prisma.contract.update({ where: { id: c.id }, data: { templateVersionId: v.id } });
+    const n = Number(c.templateVersion.replace(/\D/g, "")) || 1;
+    let v = await prisma.templateVersion.findFirst({ where: { template: { contractType: c.type }, version: n } });
+    // قاعدة جديدة: النماذج اتعملت قبل عقود التجربة → النسخة اللي العقد اتعمل بيها بتتضاف (أحدث نسخة تبقى المنشورة)
+    if (!v) {
+      const tpl = await prisma.contractTemplate.findFirst({ where: { contractType: c.type }, include: { versions: { orderBy: { version: "desc" }, take: 1 } } });
+      if (!tpl) continue;
+      const base = tpl.versions[0];
+      const newer = !base || n > base.version;
+      if (newer && base?.status === "PUBLISHED") await prisma.templateVersion.update({ where: { id: base.id }, data: { status: "RETIRED" } });
+      const body = base?.bodyMarkdown ?? SEED_TEMPLATES.find((t) => t.contractType === c.type)?.body ?? "";
+      v = await prisma.templateVersion.create({
+        data: { templateId: tpl.id, version: n, bodyMarkdown: body, variables: vars(body), sha256: hash(body), status: newer ? "PUBLISHED" : "RETIRED", changeNote: "نسخة مستخدمة في صفقات سابقة", publishedAt: new Date() },
+      });
+    }
+    await prisma.contract.update({ where: { id: c.id }, data: { templateVersionId: v.id } });
   }
 }

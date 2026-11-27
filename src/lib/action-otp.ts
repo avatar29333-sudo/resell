@@ -85,7 +85,9 @@ export async function consumeActionCode(user: User, action: ActionKey, dealId: s
     await audit(user.id, "otp.failed", "Action", action, { dealId, attempts: r.attempts });
   }
   if (verdict !== "ok") return verdict;
-  await db.actionCode.update({ where: { id: row!.id }, data: { usedAt: now } });
+  // مرة واحدة فعلاً: لو طلبين في نفس اللحظة، واحد بس بيعدّي
+  const claimed = await db.actionCode.updateMany({ where: { id: row!.id, usedAt: null }, data: { usedAt: now } });
+  if (claimed.count !== 1) return "used";
   const h = await headers().catch(() => null);
   await db.consentRecord.create({
     data: {

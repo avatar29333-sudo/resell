@@ -22,9 +22,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
     return new Response("الرابط ده انتهى أو اتستخدم قبل كده — اطلب تصدير جديد.", { status: 410, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
+  // مرة واحدة فعلاً: طلبين في نفس اللحظة → واحد بس ياخد الملف
+  const claimed = await db.exportJob.updateMany({ where: { id, status: "READY" }, data: { status: "DOWNLOADED", downloadedAt: new Date() } });
+  if (claimed.count !== 1) return new Response("الرابط اتستخدم قبل كده.", { status: 410, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   const data = await readBytes(job.storageKey);
-  // مرة واحدة: بنعلّمه متنزّل ونمسح الملف المؤقت (المستندات الأصلية ما بتتلمسش)
-  await db.exportJob.update({ where: { id }, data: { status: "DOWNLOADED", downloadedAt: new Date() } });
   await deleteExportFile(job.storageKey);
   await audit(user.id, "export.downloaded", "ExportJob", id, { sha256: job.sha256, bytes: job.sizeBytes });
   if (!data) return new Response("File missing", { status: 404 });

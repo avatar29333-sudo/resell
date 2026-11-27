@@ -1,3 +1,7 @@
+-- نسخة احتياطية قبل أي تعديل (المراجعة الأمنية): القيم القديمة محفوظة وتقدر ترجع
+CREATE TABLE IF NOT EXISTS "_backup_20261127_contract_status" AS SELECT id, status, now() AS "backedUpAt" FROM "Contract" WHERE status = 'SIGNED';
+CREATE TABLE IF NOT EXISTS "_backup_20261127_deal_fx" AS SELECT id, "lockedUsdEgpRate", "exchangeRateId", "rateLockedAt", now() AS "backedUpAt" FROM "Deal" WHERE "lockedUsdEgpRate" IS NOT NULL;
+
 -- CON-04: العقود اللي اتوقّعت قبل كده بنظام التوقيع الداخلي في بيانات التجربة بتتعلّم «متحقق منها»
 UPDATE "Contract" SET status = 'VERIFIED' WHERE status = 'SIGNED';
 

@@ -37,6 +37,8 @@ export const CITY: Map = {
   NEW_DAMIETTA: ["دمياط الجديدة", "New Damietta"],
 };
 export const CITY_KEYS = Object.keys(CITY) as (keyof typeof CITY)[];
+/** [عربي، إنجليزي] لمدينة — ما بيقعش لو المدينة جديدة ولسه خريطتها ما اتحملتش (بيرجع المفتاح) */
+export const cityPair = (k: string): readonly [string, string] => CITY[k] ?? [k, k];
 
 export const COUNTRY: Map = {
   EG: ["مصر", "Egypt"],

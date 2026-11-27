@@ -63,8 +63,9 @@ export async function buildDealEntries(dealId: string, actor: Actor, reason: str
     {
       kind: "kv",
       rows: [
-        ["البائع", `${deal.listing.seller.name} — ${deal.listing.seller.phone}`],
-        ["المشتري", `${deal.buyer.name} — ${deal.buyer.phone}`],
+        // نسخة المحامي: من غير أرقام الموبايل الكاملة
+        ["البائع", `${deal.listing.seller.name} — ${fullBank ? deal.listing.seller.phone : `•••${deal.listing.seller.phone.slice(-3)}`}`],
+        ["المشتري", `${deal.buyer.name} — ${fullBank ? deal.buyer.phone : `•••${deal.buyer.phone.slice(-3)}`}`],
         ["الفريق", `الوسيط: ${deal.broker?.name ?? "—"} · المحامي: ${deal.lawyer?.name ?? "—"} · المندوب: ${deal.agent?.name ?? "—"}`],
         ["القطعة", `${deal.listing.plot.city} — ${deal.listing.plot.district} — ${deal.listing.plot.code} — ${toNum(deal.listing.plot.areaSqm)} م²`],
         ["السعر المتفق", deal.agreedPrice ? `${toNum(deal.agreedPrice).toLocaleString("en-US")} ج.م` : "—"],
@@ -141,7 +142,7 @@ export async function buildDealEntries(dealId: string, actor: Actor, reason: str
   void agent;
   entries.push({
     path: "data.json",
-    data: json({ ...rest, listing: { ...listing, seller: { id: listing.seller.id, name: listing.seller.name, phone: listing.seller.phone } }, buyer: { id: buyer.id, name: buyer.name, phone: buyer.phone }, bank: { buyer: buyerBankAccount ? iban(buyerBankAccount) : null, seller: sellerBankAccount ? iban(sellerBankAccount) : null } }),
+    data: json({ ...rest, listing: { ...listing, seller: { id: listing.seller.id, name: listing.seller.name, phone: fullBank ? listing.seller.phone : null } }, buyer: { id: buyer.id, name: buyer.name, phone: fullBank ? buyer.phone : null }, bank: { buyer: buyerBankAccount ? iban(buyerBankAccount) : null, seller: sellerBankAccount ? iban(sellerBankAccount) : null } }),
   });
   return { entries: uniquePaths(entries), name: `${ref}_${new Date().toISOString().slice(0, 10)}`, partyIds: [deal.buyerId, deal.listing.sellerId] };
 }

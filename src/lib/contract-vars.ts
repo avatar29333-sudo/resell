@@ -24,30 +24,39 @@ const n = (v: unknown) => (v == null ? "" : Number(String(v)).toLocaleString("en
 const today = () => new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo" }).format(new Date());
 
 /** CON-01: بيانات الصفقة الحقيقية للتعبئة (اللي مش موجود بيفضل فاضي → المعاينة بتقول ناقص إيه) */
-export async function dealVars(deal: LoadedDeal, version: number) {
+export async function dealVars(deal: LoadedDeal, version: number, viewerId?: string | null) {
   await allCities();
   const plot = deal.listing.plot;
   const round = plot.offeringRoundId ? await db.offeringRound.findUnique({ where: { id: plot.offeringRoundId }, select: { nameAr: true } }) : null;
   const dep = deal.deposits.find((d) => d.escrowStatus !== "REFUNDED_TO_BUYER") ?? deal.deposits[0];
   const reg = await regNo();
+  // CON-01: قبل ما العمولة تتحسب (اتفاق العمولة بيتوقّع قبل السعر) → النسب الحالية من الإعدادات
+  const rates = await getSetting("commission.rates");
+  // PRIV-01: الطرف ما يشوفش اسم الطرف التاني ولا كود القطعة في نص العقد قبل موافقة صاحبها على الكشف
+  const disclosed = (uid: string) => new Set((deal.disclosures ?? []).filter((x) => x.userId === uid && !x.revokedAt).flatMap((x) => x.fields));
+  const isBuyer = viewerId === deal.buyerId;
+  const isSeller = viewerId === deal.listing.sellerId;
+  const sellerSees = disclosed(deal.listing.sellerId);
+  const buyerSees = disclosed(deal.buyerId);
+  const hiddenName = "(بيظهر بعد موافقة صاحبه على الكشف)";
   return {
     deal_ref: dealRef(deal.id),
     today: today(),
     template_version: `v${version}`,
-    seller_name: deal.listing.seller.name,
-    buyer_name: deal.buyer.name,
+    seller_name: isBuyer && !sellerSees.has("name") ? `البائع ${hiddenName}` : deal.listing.seller.name,
+    buyer_name: isSeller && !buyerSees.has("name") ? `المشتري ${hiddenName}` : deal.buyer.name,
     plot_city: (CITY[plot.city] ?? [plot.city])[0],
     plot_district: plot.district,
     plot_round: round?.nameAr ?? "غير محدد",
-    plot_code: plot.code,
+    plot_code: isBuyer && !sellerSees.has("plotCode") ? "(بيظهر بعد موافقة البائع)" : plot.code,
     plot_area: n(plot.areaSqm),
     listing_price: n(deal.listing.price),
     agreed_price: deal.agreedPrice ? n(deal.agreedPrice) : "",
     deposit_amount: dep ? n(dep.amount) : "",
     // DEAL-01: قبل اكتمال التوقيع سعر اليوم «استرشادي» وبيتثبت لحظة اكتمال توقيع الطرفين
     fx_rate: deal.lockedUsdEgpRate ? toNum(deal.lockedUsdEgpRate).toFixed(2) : await indicativeFx(),
-    commission_seller_pct: deal.commission ? String(toNum(deal.commission.sellerRatePct)) : "",
-    commission_buyer_pct: deal.commission ? String(toNum(deal.commission.buyerRatePct)) : "",
+    commission_seller_pct: String(deal.commission ? toNum(deal.commission.sellerRatePct) : rates.sellerPct),
+    commission_buyer_pct: String(deal.commission ? toNum(deal.commission.buyerRatePct) : rates.buyerPct),
     commission_seller_amount: deal.commission ? n(deal.commission.sellerAmount) : "",
     commission_buyer_amount: deal.commission ? n(deal.commission.buyerAmount) : "",
     broker_reg_no: reg,

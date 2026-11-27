@@ -54,9 +54,16 @@ export default async function NotificationsPage({ params }: { params: Promise<{ 
                 <span aria-hidden="true" className={`mt-2 size-2 shrink-0 ${n.readAt ? "bg-transparent" : "bg-brand"}`} />
                 <div className="flex flex-1 flex-col gap-0.5">
                   {n.link ? (
-                    <Link href={n.link} className="font-semibold text-navy hover:text-brand">
-                      {n.title}
-                    </Link>
+                    // روابط الـ API (تنزيل لمرة واحدة) <a> عادي — من غير prefetch يستهلك الرابط
+                    n.link.startsWith("/api/") ? (
+                      <a href={n.link} className="font-semibold text-navy hover:text-brand">
+                        {n.title}
+                      </a>
+                    ) : (
+                      <Link href={n.link} className="font-semibold text-navy hover:text-brand">
+                        {n.title}
+                      </Link>
+                    )
                   ) : (
                     <span className="font-semibold">{n.title}</span>
                   )}
@@ -67,9 +74,9 @@ export default async function NotificationsPage({ params }: { params: Promise<{ 
                   </span>
                 </div>
                 {n.link && (
-                  <Link href={n.link} className={`${btn.small} border border-line`}>
+                  <a href={n.link} className={`${btn.small} border border-line`}>
                     {L("افتح", "Open")}
-                  </Link>
+                  </a>
                 )}
               </li>
             ))}

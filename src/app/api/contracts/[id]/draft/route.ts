@@ -5,7 +5,7 @@ import { loadDealFor } from "@/lib/access";
 import { dealVars } from "@/lib/contract-vars";
 import { markdownToBlocks, renderTemplate } from "@/lib/templates";
 import { issuePdf } from "@/lib/issue-pdf";
-import { saveFile } from "@/lib/storage";
+import { readBytes, saveFile } from "@/lib/storage";
 import { requiredSigners } from "@/lib/deal-machine";
 import { dealRef } from "@/lib/action-otp-core";
 import { SEED_TEMPLATES } from "@/lib/template-seed";
@@ -35,9 +35,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // الأطراف ينزّلوا عقودهم بس؛ السمسار المسؤول والمحامي والأدمن
   if (!staff && !(side && requiredSigners(c.type).includes(side))) return new Response("Not allowed", { status: 403 });
   if (["VOID", "DRAFT", "PENDING_LAWYER"].includes(c.status)) return html(409, "العقد لسه ما اتعمدش", "<p>التنزيل للتوقيع بيتفتح بعد اعتماد المحامي.</p>");
+  // CON-06: بعد ما التوقيع بدأ ما بتتولدش نسخة جديدة (عشان ما تلغيش نسخة الطرف التاني) — بنرجّع آخر نسخة
+  if (["PARTIALLY_SIGNED", "SIGNED", "VERIFIED"].includes(c.status) && c.draftDocumentId) {
+    const existing = await db.document.findUnique({ where: { id: c.draftDocumentId } });
+    const bytes = existing ? await readBytes(existing.storageKey) : null;
+    if (existing && bytes) {
+      await audit(user.id, "contract.draft_redownloaded", "Contract", c.id, { code: c.draftCode });
+      return new Response(new Uint8Array(bytes), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${c.draftCode}.pdf"`, "Cache-Control": "private, no-store" } });
+    }
+  }
+  if (["PARTIALLY_SIGNED", "SIGNED", "VERIFIED"].includes(c.status)) return html(409, "التوقيع بدأ بالفعل", "<p>ما ينفعش نطلّع نسخة جديدة بعد ما التوقيع بدأ.</p>");
   const tv = c.templateVersionRef;
   if (!tv) return html(409, "النموذج مش مربوط بنسخة", "<p>كلّم الدعم — العقد ده محتاج يترتبط بنسخة نموذج.</p>");
-  const r = renderTemplate(tv.bodyMarkdown, await dealVars(deal, tv.version));
+  const r = renderTemplate(tv.bodyMarkdown, await dealVars(deal, tv.version, user.id));
   if (!r.ok) {
     return html(
       409,

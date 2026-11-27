@@ -76,6 +76,10 @@ export async function referBuyer(locale: string, listingId: string, form: FormDa
   const listing = await db.listing.findUnique({ where: { id: listingId }, select: { status: true, sellerId: true } });
   if (!listing || listing.status !== "PUBLISHED") redirect(back);
   const phone = (id as { value: string }).value;
+  // حد يومي للإحالات، وما ينفعش تحيل حساب فريق
+  if ((await db.auditLog.count({ where: { actorId: user.id, action: "partner.refer_buyer", createdAt: { gt: new Date(Date.now() - 24 * 3600_000) } } })) >= 20) redirect(`${back}?err=refer_limit#refer`);
+  const existingBuyer = await db.user.findUnique({ where: { phone }, select: { role: true } });
+  if (existingBuyer && existingBuyer.role !== "CLIENT") redirect(`${back}?err=refer_self#refer`);
   const buyer = (await db.user.findUnique({ where: { phone } })) ?? (await db.user.create({ data: { name, phone, role: "CLIENT", locale: loc } }));
   if (buyer.id === listing!.sellerId || buyer.id === user.id) redirect(`${back}?err=refer_self#refer`);
   await db.partnerReferral.upsert({ where: { listingId_buyerId: { listingId, buyerId: buyer.id } }, create: { partnerId: user.id, listingId, buyerId: buyer.id, buyerConsentAt: new Date() }, update: {} });

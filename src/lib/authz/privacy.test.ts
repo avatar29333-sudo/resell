@@ -39,7 +39,9 @@ describe("PRIV-01 disclosure by consent", () => {
     expect(can(seller, "document.view", { listing, deal: deal(), document: doc("OTHER", "buyer", "SHARED_WITH_COUNTERPARTY") }).allowed).toBe(true);
     expect(can(buyer, "document.view", { listing, deal: deal(), document: doc("OTHER", "seller") }).allowed).toBe(false);
     // نسخة العقد الموقّعة سجل مشترك للطرفين
-    expect(can(buyer, "document.view", { listing, deal: deal(), document: doc("CONTRACT_PDF", "seller") }).allowed).toBe(true);
+    expect(can(buyer, "document.view", { listing, deal: deal(), document: doc("CONTRACT_PDF", "seller", "SHARED_WITH_COUNTERPARTY") }).allowed).toBe(true);
+    // نسخة موافقة شخصية (خاصة) ما بتظهرش للطرف التاني
+    expect(can(buyer, "document.view", { listing, deal: deal(), document: doc("CONTRACT_PDF", "seller", "PRIVATE") }).allowed).toBe(false);
   });
   it("an unassigned broker can't open deal documents", () => {
     expect(can(strangerBroker, "document.view", { listing, deal: deal(["documents"]), document: doc("ALLOCATION_LETTER", "seller", "SHARED_WITH_COUNTERPARTY") }).allowed).toBe(false);

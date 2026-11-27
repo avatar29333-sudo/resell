@@ -24,3 +24,6 @@ export const newToken = () => randomBytes(18).toString("base64url");
 
 /** رابط الإيقاف اللي بيتحط في آخر كل رسالة */
 export const unsubscribeUrl = (locale: string, token: string) => `${siteUrl()}/${locale === "en" ? "en" : "ar"}/unsubscribe?t=${token}`;
+
+/** أي كود أرقام (4–8) أو كلمة سر تصدير في نص رسالة → •••••• قبل ما يتعرض في لوحة الفريق */
+export const redactCodes = (s: string) => s.replace(/(?<![\d+])\d{6}(?!\d)/g, "••••••").replace(/(كلمة سر[^:]*:\s*)\S+/g, "$1••••••");

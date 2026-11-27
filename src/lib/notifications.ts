@@ -21,7 +21,8 @@ export async function notify(userIds: (string | null | undefined)[], msg: Messag
     const users = await db.user.findMany({ where: { id: { in: ids }, anonymizedAt: null } });
     for (const u of users) {
       const [title, body] = u.locale === "en" ? msg.en : msg.ar;
-      const link = msg.link ? `/${u.locale}${msg.link}` : null;
+      // روابط الـ API (زي تنزيل التصدير) ما بتاخدش بادئة اللغة
+      const link = msg.link ? (msg.link.startsWith("/api/") ? msg.link : `/${u.locale}${msg.link}`) : null;
       const sentVia = await deliver(u, title, body ?? null, link).catch(() => null);
       await db.notification.create({ data: { userId: u.id, kind: msg.kind, title, body, link, sentVia } });
     }

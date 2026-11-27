@@ -81,10 +81,10 @@ export async function createListing(locale: string, _prev: ListState, form: Form
   const onBehalf = isPartner || user.role === "BROKER" || user.role === "BROKER_LEAD";
   if (isPartner && !user.partnerAgreedAt) return { error: ar ? "وافق على اتفاقية السمسار الشريك (نموذج 10) الأول من «حسابي»." : "Accept the partner agreement (form 10) first from your account." };
   if (onBehalf && form.get("clientConsent") !== "on") return { error: ar ? "لازم تأكد إن المالك موافق على العرض." : "Confirm the owner has consented to this listing." };
-  const ownerName = String(form.get("ownerName") ?? "").trim().replace(/s+/g, " ");
+  const ownerName = String(form.get("ownerName") ?? "").trim().replace(/\s+/g, " ");
   const ownerId = classifyIdentifier(String(form.get("ownerPhone") ?? ""));
   const ownerNationalId = String(form.get("ownerNationalId") ?? "").replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d))).trim();
-  if (onBehalf && (ownerName.length < 5 || ownerId.kind !== "phone" || !/^d{14}$|^[A-Z0-9]{6,12}$/i.test(ownerNationalId))) {
+  if (onBehalf && (ownerName.length < 5 || ownerId.kind !== "phone" || !/^\d{14}$|^[A-Z0-9]{6,12}$/i.test(ownerNationalId))) {
     return { error: ar ? "كمّل بيانات المالك: الاسم، الموبايل، ورقم البطاقة (14 رقم) أو الباسبور." : "Complete the owner's details: name, mobile and national ID (14 digits) or passport." };
   }
   const authDocId = String(form.get("authDocIds") ?? "");
@@ -164,6 +164,13 @@ export async function createListing(locale: string, _prev: ListState, form: Form
 
   // PERM-04: وسيط العرض = أقل وسيط عنده شغل (مش صاحب العرض)
   const brokerId = await leastLoaded("BROKER", [user.id]);
+  // PUB-03: حد يومي لرسايل تأكيد الملاك من نفس الشخص، وما ينفعش المالك يبقى حساب فريق
+  if (onBehalf) {
+    const today = await db.auditLog.count({ where: { actorId: user.id, action: "listing.create", createdAt: { gt: new Date(Date.now() - 24 * 3600_000) } } });
+    if (today >= 20) return { error: ar ? "وصلت للحد اليومي للعروض نيابة عن ملاك — كمّل بكرة." : "Daily limit for on-behalf listings reached — continue tomorrow." };
+    const existing = await db.user.findUnique({ where: { phone: (ownerId as { value: string }).value }, select: { role: true } });
+    if (existing && existing.role !== "CLIENT") return { error: ar ? "الرقم ده تبع حساب فريق — ما ينفعش يتعرض باسمه نيابة عنه." : "That number belongs to a team account." };
+  }
   // PUB-03: المالك (لو نيابة) — حساب موجود بالموبايل، أو حساب عميل جديد باسمه
   const owner = onBehalf
     ? ((await db.user.findUnique({ where: { phone: (ownerId as { value: string }).value } })) ?? (await db.user.create({ data: { name: ownerName, phone: (ownerId as { value: string }).value, role: "CLIENT", locale: l } })))

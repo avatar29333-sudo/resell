@@ -107,7 +107,8 @@ const DEAL_RECORDS = ["CONTRACT_PDF"];
  */
 function counterpartyMay(c: Ctx, otherSide: "BUYER" | "SELLER") {
   const d = c.document!;
-  if (DEAL_RECORDS.includes(d.type)) return true;
+  // نسخ العقود سجل مشترك — إلا النسخة الشخصية من موافقة طرف (خاصة بيه)
+  if (DEAL_RECORDS.includes(d.type) && d.visibility !== "PRIVATE") return true;
   const otherId = otherSide === "BUYER" ? c.deal?.buyerId : c.deal?.sellerId;
   const fromOther = d.ownerId === otherId || d.uploadedById === otherId;
   return fromOther ? d.visibility === "SHARED_WITH_COUNTERPARTY" : d.visibility !== "PRIVATE" && d.visibility !== "STAFF";

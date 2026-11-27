@@ -349,7 +349,10 @@ export async function signContract(locale: string, dealId: string, contractId: s
   await requireActionCode(user, contractActionKey(contract!.type), dealId, { contractId }, form, back);
   if (contract!.type === "COMMISSION_AGREEMENT" && contract!.templateVersionId) {
     const tv = await db.templateVersion.findUnique({ where: { id: contract!.templateVersionId }, include: { template: true } });
-    if (tv) await recordClickwrap(user, { kind: tv.template.key, versionId: tv.id, title: tv.template.titleAr, version: tv.version, text: renderTemplate(tv.bodyMarkdown, await dealVars(deal, tv.version)).text, dealId });
+    const rendered = tv ? renderTemplate(tv.bodyMarkdown, await dealVars(deal, tv.version, user.id)) : null;
+    // ما بيتسجلش موافقة على نص ناقص بيانات
+    if (!rendered?.ok) done(l, dealId, `?err=missing_data#contract-${contractId}`);
+    await recordClickwrap(user, { kind: tv!.template.key, versionId: tv!.id, title: tv!.template.titleAr, version: tv!.version, text: rendered!.text, dealId });
   }
   const all = [...sigs, { userId: user.id, role: side!, signedAt: new Date().toISOString(), providerRef: `DEMO-SIG-${Date.now()}` }];
   const complete = requiredSigners(contract!.type).every((r) => all.some((s) => s.role === r));
@@ -382,6 +385,8 @@ export async function signContract(locale: string, dealId: string, contractId: s
         fileName: `${contract!.type.toLowerCase()}-${contract!.id.slice(-6)}.pdf`,
         mimeType: "application/pdf",
         status: "APPROVED",
+        // نسخة العقد الموقّعة سجل مشترك للطرفين
+        visibility: "SHARED_WITH_COUNTERPARTY",
       },
     });
     pdfDocumentId = doc.id;
@@ -415,7 +420,9 @@ export async function verifyContract(locale: string, dealId: string, contractId:
   await guard(user, deal, "contract.approve", back, form);
   const contract = deal.contracts.find((c) => c.id === contractId);
   if (!contract || contract.status !== "SIGNED") done(l, dealId);
-  const checklist = VERIFY_CHECKS.map((k) => ({ key: k, passed: form.get(`chk_${k}`) === "on" }));
+  // الأحرف الأولى والكتابة بخط اليد بتخص النسخة الورقية بس
+  const checks = contract!.signedVia === "PAPER" ? VERIFY_CHECKS : (["signatures", "date"] as const);
+  const checklist = checks.map((k) => ({ key: k, passed: form.get(`chk_${k}`) === "on" }));
   if (checklist.some((c) => !c.passed)) done(l, dealId, "?err=verify_checklist");
   // CON-05: التوكيل لازم يكون «تقديم ومتابعة» مش «بيع» — لو فيه صلاحية بيع بيترفض
   if (contract!.type === "POWER_OF_ATTORNEY" && form.get("chk_filing_only") !== "on") done(l, dealId, "?err=poa_sale");
@@ -444,7 +451,8 @@ export async function respondPrice(locale: string, dealId: string, kind: "reject
   if (!deal.proposedPrice || deal.agreedPrice) done(l, dealId);
   const side = user.id === deal.buyerId ? "BUYER" : "SELLER";
   if (kind === "reject") {
-    await requireActionCode(user, "price.reject", dealId, {}, form, back);
+    await requireActionCode(user, "price.reject", dealId, { price: String(form.get("price") ?? "") }, form, back);
+    if (String(form.get("price")) !== String(toNum(deal.proposedPrice))) done(l, dealId, "?err=otp_mismatch");
     await db.deal.update({ where: { id: dealId }, data: { buyerPriceOkAt: null, sellerPriceOkAt: null } });
     await event(deal, user, "NOTE", { priceRejected: toNum(deal.proposedPrice), by: side });
   } else {
@@ -574,7 +582,9 @@ async function executeSettlement(user: User, deal: LoadedDeal, depositId: string
   if (target.block) throw new Error(`payout blocked: ${target.block}`);
   const dep = deal.deposits.find((x) => x.id === depositId);
   const n = netAfterFees(toNum(dep?.amount), fee);
-  await db.deposit.update({ where: { id: depositId }, data: { escrowStatus: to, settledAt: new Date(), payoutBankAccountId: target.acc!.id, payoutFeeEgp: n.fee, payoutNetEgp: n.net } });
+  // مرة واحدة بس: الصرف/الرد بيتم لو العربون لسه «محفوظ» لحظة التنفيذ (طلبين في نفس الوقت → واحد يعدّي)
+  const moved = await db.deposit.updateMany({ where: { id: depositId, escrowStatus: "HELD" }, data: { escrowStatus: to, settledAt: new Date(), payoutBankAccountId: target.acc!.id, payoutFeeEgp: n.fee, payoutNetEgp: n.net } });
+  if (moved.count !== 1) throw new Error("deposit already settled");
   await event(deal, user, "DEPOSIT_UPDATED", { depositId, status: to, amount: n.amount, fee: n.fee, net: n.net, account: `•••• ${target.acc!.ibanLast4}` });
   await notify([to === "RELEASED_TO_SELLER" ? deal.listing.sellerId : deal.buyerId], {
     kind: `deposit.${to.toLowerCase()}`,
@@ -593,10 +603,11 @@ export async function decidePayment(locale: string, dealId: string, approvalId: 
   if (!a || a.status !== "PENDING") done(l, dealId);
   if (a!.requestedById === user.id) done(l, dealId, "?err=forbidden");
   const approve = form.get("decision") === "APPROVED";
-  await db.paymentApproval.update({
-    where: { id: approvalId },
+  const decided = await db.paymentApproval.updateMany({
+    where: { id: approvalId, status: "PENDING" },
     data: { status: approve ? "APPROVED" : "REJECTED", decidedById: user.id, decidedAt: new Date(), note: String(form.get("note") ?? "") || null },
   });
+  if (decided.count !== 1) done(l, dealId); // اتقرر بالفعل (ضغطتين)
   await audit(user.id, `payment.${approve ? "approved" : "rejected"}`, "PaymentApproval", approvalId, { depositId: a!.depositId, action: a!.action });
   if (approve) {
     const target = await payoutTarget(deal, a!.action as "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER");
@@ -828,7 +839,8 @@ export async function replaceDealDocument(locale: string, dealId: string, docume
   await guard(user, deal, "deal.upload_doc", back, form);
   const old = deal.documents.find((d) => d.id === documentId && d.status !== "SUPERSEDED");
   const staff = !!user && [deal.brokerId, deal.lawyerId, deal.agentId].includes(user.id);
-  if (!old || (old.uploadedById !== user.id && !staff && user.role !== "ADMIN")) done(l, dealId, "?err=forbidden#other-docs");
+  // بس «مستندات أخرى» — نسخ العقود والإيصالات ما بتتبدلش من هنا (وبتفضل مرتبطة بالعقد)
+  if (!old || old.type !== "OTHER" || (old.uploadedById !== user.id && !staff && user.role !== "ADMIN")) done(l, dealId, "?err=forbidden#other-docs");
   const [draft] = await myDrafts(user.id, form.getAll("docIds").map(String).slice(0, 1));
   if (!draft) done(l, dealId, "?err=file#other-docs");
   const title = cleanTitle(form.get(`title_${draft.id}`)) ?? old!.title;
@@ -930,13 +942,15 @@ export async function uploadSignedContract(locale: string, dealId: string, contr
   const { l, user, deal, back } = await ctx(locale, dealId);
   const contract = deal.contracts.find((c) => c.id === contractId);
   const anchor = `#contract-${contractId}`;
-  if (!contract || !["APPROVED", "SENT_FOR_SIGNATURE", "PARTIALLY_SIGNED"].includes(contract.status)) done(l, dealId, `?err=forbidden${anchor}`);
+  if (!contract || !["SENT_FOR_SIGNATURE", "PARTIALLY_SIGNED"].includes(contract.status)) done(l, dealId, `?err=forbidden${anchor}`);
   const mySide = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
   const onBehalf = user.id === deal.brokerId || user.role === "ADMIN";
   if (user.role === "ADMIN") await guard(user, deal, "deal.upload_doc", back, form);
   const sideRaw = mySide ?? (onBehalf ? String(form.get("side") ?? "") : "");
   const side = sideRaw === "BUYER" || sideRaw === "SELLER" ? sideRaw : null;
   if (!side || !requiredSigners(contract!.type).includes(side)) done(l, dealId, `?err=forbidden${anchor}`);
+  // الطرف نفسه: نفس صلاحية التوقيع (حساب موثّق، صفقة شغالة)
+  if (mySide) await guard(user, deal, "contract.sign", back, form);
   // CON-05: التوكيل — رقمه ومكتب التوثيق إجباري
   const poaNumber = String(form.get("poaNumber") ?? "").trim().slice(0, 60);
   const poaNotary = String(form.get("poaNotary") ?? "").trim().slice(0, 120);
@@ -996,7 +1010,8 @@ export async function uploadSignedContract(locale: string, dealId: string, contr
   });
   // الأصل المرفوع بيتحفظ زي ما هو
   for (const [i, b] of blobs.entries()) await db.document.update({ where: { id: b.doc.id }, data: { dealId, title: `أصل مرفوع ${i + 1}/${blobs.length} — ${name}`, visibility: "PRIVATE" } });
-  const both = form.get("both") === "on" || isPoa;
+  // «النسخة عليها توقيع الطرفين» للوسيط/الأدمن بس — الطرف بيسجّل توقيعه هو (المحامي بيتحقق بعدها)
+  const both = isPoa || (!mySide && onBehalf && form.get("both") === "on");
   const roles = both ? requiredSigners(contract!.type) : [side!];
   const all = [...((contract!.signatures as Signature[]) ?? []).filter((s) => !roles.includes(s.role)), ...roles.map((r) => ({ userId: user.id, role: r, signedAt: new Date().toISOString(), providerRef: `PAPER-${signedDoc.id.slice(-6)}` }))];
   const complete = requiredSigners(contract!.type).every((r) => all.some((s) => s.role === r));

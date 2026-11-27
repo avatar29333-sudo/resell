@@ -35,6 +35,8 @@ export async function approveVersion(locale: string, versionId: string) {
   const me = await requireUser(l, `/${l}/templates`, ["LAWYER"]);
   const v = await db.templateVersion.findUnique({ where: { id: versionId }, include: { template: true } });
   if (!v || v.status !== "DRAFT") redirect(`/${l}/templates`);
+  // فصل مهام: المحامي ما يعتمدش نسخة هو اللي كتبها
+  if (v!.createdById === me.id) redirect(`/${l}/templates?t=${v!.template.key}&err=self_approve`);
   await db.templateVersion.update({ where: { id: versionId }, data: { status: "LAWYER_APPROVED", approvedByLawyerId: me.id, approvedAt: new Date() } });
   await audit(me.id, "template.lawyer_approved", "TemplateVersion", versionId, { key: v!.template.key, version: v!.version });
   revalidatePath(`/${l}/templates`);

@@ -30,7 +30,7 @@ export default async function LawyerPage({ params, searchParams }: Props) {
   const ar = locale === "ar";
   const me = await requireUser(locale, `/${locale}/lawyer`, ["LAWYER", "ADMIN"]);
   const isAdmin = me.role === "ADMIN";
-  const readyListings = (await db.listing.findMany({ where: { status: "IN_REVIEW", ...(isAdmin ? {} : { assignedLawyerId: me.id }) }, include: { plot: true, documents: { select: { type: true, status: true } } } })).filter((l) => can(subject(me), "listing.verify", { listing: listingCtx(l) }).allowed);
+  const readyListings = (await db.listing.findMany({ where: { status: "IN_REVIEW", ...(isAdmin ? {} : { assignedLawyerId: me.id }) }, include: { plot: true, documents: { select: { type: true, status: true } } } })).filter((l) => isAdmin ? listingCtx(l).requiredDocsApproved : can(subject(me), "listing.verify", { listing: listingCtx(l) }).allowed);
 
   // PERM-02: المحامي يشوف مستندات العروض والصفقات المسندة ليه بس، ومش ورق هو رافعه أو صاحبه
   const docScope: Prisma.DocumentWhereInput = isAdmin
@@ -78,7 +78,8 @@ export default async function LawyerPage({ params, searchParams }: Props) {
                   <span>
                     {label(CITY, l.plot.city, locale)} — {districtName(l.plot, locale)} — <span dir="ltr">{l.plot.code}</span>
                   </span>
-                  <form action={moveListing.bind(null, locale, l.id, "VERIFIED")}>
+                  <form action={moveListing.bind(null, locale, l.id, "VERIFIED")} className="flex flex-wrap gap-1">
+                    {isAdmin && <input name="overrideReason" required minLength={5} aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className="min-h-11 border border-line px-2" />}
                     <button className={`${btn.small} bg-ok text-white`}>{L("اعتماد قانوني", "Legal approval")}</button>
                   </form>
                 </li>

@@ -1,3 +1,5 @@
+import { allCities } from "@/lib/cities";
+import { cityPair } from "@/lib/labels";
 import { ImageResponse } from "next/og";
 import { db } from "@/lib/db";
 import { latestRate, totalEgp } from "@/lib/listing";
@@ -12,11 +14,12 @@ export const contentType = "image/png";
 export const alt = "Resell — Beit El Watan plot";
 
 export default async function Image({ params }: { params: Promise<{ locale: string; id: string }> }) {
+  await allCities();
   const { id } = await params;
   const l = await db.listing.findUnique({ where: { id }, include: { plot: true, seller: { select: { status: true } } } });
   const visible = l && ["PUBLISHED", "IN_DEAL", "SOLD"].includes(l.status) && l.seller.status === "ACTIVE";
   const rate = visible ? await latestRate() : null;
-  const city = visible ? CITY[l!.plot.city][1] : "Beit El Watan";
+  const city = visible ? cityPair(l!.plot.city)[1] : "Beit El Watan";
   const district = visible ? (l!.plot.districtEn ?? "") : "";
   const area = visible ? `${toNum(l!.plot.areaSqm).toLocaleString("en-US")} m²` : "";
   const price = visible ? `EGP ${Math.round(totalEgp(l!, toNum(rate?.sell ?? 50))).toLocaleString("en-US")}` : "";

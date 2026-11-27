@@ -69,7 +69,8 @@ export async function seedBeitElWatanGeo(prisma: PrismaClient) {
   if (!(await prisma.appSetting.findUnique({ where: { key: "geo.realSeeded" } }))) {
     for (const c of CITIES) {
       const real = new Set(c.districts.map((d) => d[0]));
-      const demo = await prisma.district.findMany({ where: { city: c.id, active: true } });
+      // أحياء بيانات التجربة بس (بأسمائها) — أي حي ضافه الأدمن بيفضل زي ما هو
+      const demo = await prisma.district.findMany({ where: { city: c.id, active: true, nameAr: { in: ["الحي الأول", "الحي الثاني", "الحي الثالث", "منطقة الجامعات"] } } });
       for (const d of demo) if (!real.has(d.nameAr)) await prisma.district.update({ where: { id: d.id }, data: { active: false } });
     }
     // «المرحلة الأولى…» الخاصة بكل مدينة كانت بيانات تجربة → تتوقف، والطروحات القومية هي المعروضة

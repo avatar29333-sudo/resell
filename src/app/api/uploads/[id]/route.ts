@@ -1,6 +1,6 @@
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { chunkOk } from "@/lib/upload-rules";
+import { CHUNK_BYTES, chunkOk } from "@/lib/upload-rules";
 
 /** DOC-01: جزء من الملف (?i=رقم الجزء) — الجسم بايتات خام */
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -10,6 +10,8 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   const s = await db.uploadSession.findUnique({ where: { id } });
   if (!s || s.userId !== user.id || s.documentId) return Response.json({ error: "session" }, { status: 404 });
   const i = Number(new URL(req.url).searchParams.get("i"));
+  // الحجم قبل ما نقرا الجسم
+  if (Number(req.headers.get("content-length") ?? 0) > CHUNK_BYTES) return Response.json({ error: "chunk" }, { status: 413 });
   const data = new Uint8Array(await req.arrayBuffer());
   if (!chunkOk(i, data.length, s.sizeBytes, s.chunkCount)) return Response.json({ error: "chunk" }, { status: 400 });
   await db.uploadChunk.upsert({ where: { sessionId_idx: { sessionId: id, idx: i } }, create: { sessionId: id, idx: i, data }, update: { data } });

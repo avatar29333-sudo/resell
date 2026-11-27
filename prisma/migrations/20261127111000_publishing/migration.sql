@@ -7,7 +7,12 @@ ALTER TABLE "User" ADD COLUMN "partnerAgreedAt" TIMESTAMP(3);
 ALTER TABLE "BuyRequest" ADD COLUMN "approvedAt" TIMESTAMP(3);
 ALTER TABLE "Deal" ADD COLUMN "referredByPartnerId" TEXT;
 ALTER TABLE "Deal" ADD CONSTRAINT "Deal_referredByPartnerId_fkey" FOREIGN KEY ("referredByPartnerId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
--- العروض والطلبات الموجودة: كانت ماشية بالنظام القديم — بتتعامل كمتوافق عليها
+-- العروض والطلبات الموجودة: كانت ماشية بالنظام القديم — بتتعامل كمتوافق عليها.
+-- مش موافقات جديدة: بتتسجل هنا إنها «قديمة» (legacy) عشان تتميّز عن موافقة حقيقية بالكود
+CREATE TABLE IF NOT EXISTS "_legacy_consents_20261127" AS
+  SELECT 'listing' AS kind, id FROM "Listing" WHERE "status" <> 'DRAFT'
+  UNION ALL SELECT 'buy_request', id FROM "BuyRequest"
+  UNION ALL SELECT 'partner', id FROM "User" WHERE "role" = 'PARTNER_BROKER';
 UPDATE "Listing" SET "authorizationConsentAt" = "createdAt", "ownerConfirmedAt" = "createdAt" WHERE "status" <> 'DRAFT';
 UPDATE "BuyRequest" SET "approvedAt" = "createdAt";
 UPDATE "User" SET "partnerAgreedAt" = COALESCE("partnerApprovedAt", CURRENT_TIMESTAMP) WHERE "role" = 'PARTNER_BROKER';

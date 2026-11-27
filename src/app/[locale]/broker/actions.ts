@@ -1,7 +1,9 @@
 "use server";
 
+import { cityPair } from "@/lib/labels";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { submitListingIfReady } from "@/lib/listing-submit";
 import type { ServiceRequestStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
@@ -39,7 +41,7 @@ export async function moveListing(locale: string, listingId: string, to: "VERIFI
   await db.listing.update({ where: { id: listingId }, data: { status: to, ...(to === "PUBLISHED" ? { publishedAt: new Date() } : {}) } });
   await audit(user.id, `listing.${to.toLowerCase()}`, "Listing", listingId, { from: l.status, to });
 
-  const place = (i: 0 | 1) => `${CITY[l.plot.city][i]} — ${districtName(l.plot, i ? "en" : "ar")}`;
+  const place = (i: 0 | 1) => `${cityPair(l.plot.city)[i]} — ${districtName(l.plot, i ? "en" : "ar")}`;
   if (to === "PUBLISHED") {
     await notify([l.sellerId, l.submittedById], {
       kind: "listing.published",
@@ -75,8 +77,8 @@ async function notifyMatchingBuyers(listingId: string) {
     .map((r) => r.buyerId);
   await notify(buyers, {
     kind: "buy_request.match",
-    ar: [`عرض جديد مطابق لطلبك: ${CITY[l.plot.city][0]} — ${facts.areaSqm} م²`],
-    en: [`New listing matching your request: ${CITY[l.plot.city][1]} — ${facts.areaSqm} m²`],
+    ar: [`عرض جديد مطابق لطلبك: ${cityPair(l.plot.city)[0]} — ${facts.areaSqm} م²`],
+    en: [`New listing matching your request: ${cityPair(l.plot.city)[1]} — ${facts.areaSqm} m²`],
     link: `/listings/${listingId}`,
   });
 }
@@ -127,6 +129,8 @@ export async function kycDecision(locale: string, profileId: string, form: FormD
   });
   await db.user.update({ where: { id: p.userId }, data: { accountLevel: approve ? "VERIFIED" : "BASIC", ...(approve ? {} : { kycRejections: { increment: 1 } }) } });
   await audit(user.id, `kyc.${approve ? "approve" : "reject"}`, "User", p.userId, { reason, before: p.user.accountLevel, after: approve ? "VERIFIED" : "BASIC" });
+  // PUB-01: مسودات العميل اللي وافق على نموذج 1 بتتبعت للمراجعة أول ما يتوثّق
+  if (approve) for (const d of await db.listing.findMany({ where: { sellerId: p.userId, status: "DRAFT", authorizationConsentAt: { not: null } }, select: { id: true } })) await submitListingIfReady(d.id, user.id);
   await notify([p.userId], {
     kind: approve ? "kyc.approved" : "kyc.rejected",
     ar: [approve ? "هويتك اتوثّقت — تقدر تعرض قطع وتبدي اهتمام وتوقّع" : "التوثيق اترفض — ارفع الصور تاني", reason ?? undefined],
@@ -196,8 +200,8 @@ export async function assignListingBroker(locale: string, listingId: string, for
   await audit(user.id, "listing.assign_broker", "Listing", listingId, { before: l.assignedBrokerId, after: brokerId });
   await notify([brokerId, l.assignedBrokerId], {
     kind: "listing.assignment",
-    ar: ["إسناد عرض اتغيّر", `${CITY[l.plot.city][0]} — ${districtName(l.plot, "ar")}`],
-    en: ["A listing assignment changed", `${CITY[l.plot.city][1]} — ${districtName(l.plot, "en")}`],
+    ar: ["إسناد عرض اتغيّر", `${cityPair(l.plot.city)[0]} — ${districtName(l.plot, "ar")}`],
+    en: ["A listing assignment changed", `${cityPair(l.plot.city)[1]} — ${districtName(l.plot, "en")}`],
     link: `/broker?tab=queue`,
   });
   revalidatePath(`/${loc(locale)}/broker`);

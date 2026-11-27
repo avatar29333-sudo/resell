@@ -20,14 +20,15 @@ export async function confirmOwner(locale: string, listingId: string, form: Form
   const listing = await db.listing.findUnique({ where: { id: listingId }, include: { seller: true, submittedBy: true, plot: true } });
   if (!listing || listing.ownerConfirmedAt || !listing.ownerConfirmCodeHash || !listing.ownerConfirmExpiresAt || listing.ownerConfirmExpiresAt < new Date()) redirect(`${back}?err=expired`);
   if (form.get("agree") !== "on") redirect(`${back}?err=agree`);
-  const wrong = await db.auditLog.count({ where: { action: "owner_confirm.wrong", entityId: listingId, createdAt: { gt: new Date(Date.now() - 3600_000) } } });
-  if (wrong >= 5) redirect(`${back}?err=locked`);
+  // عدّاد ذرّي: كل محاولة بتحجز مكانها قبل المقارنة — بعد 5 الكود بيتقفل (حتى مع طلبات متوازية)
+  const slot = await db.listing.updateMany({ where: { id: listingId, ownerConfirmAttempts: { lt: 5 } }, data: { ownerConfirmAttempts: { increment: 1 } } });
+  if (slot.count !== 1) redirect(`${back}?err=locked`);
   const code = String(form.get("code") ?? "").replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d))).trim();
   if (createHash("sha256").update(code).digest("hex") !== listing!.ownerConfirmCodeHash) {
     await audit(null, "owner_confirm.wrong", "Listing", listingId);
     redirect(`${back}?err=code`);
   }
-  await db.listing.update({ where: { id: listingId }, data: { ownerConfirmedAt: new Date(), authorizationConsentAt: new Date(), ownerConfirmCodeHash: null } });
+  await db.listing.update({ where: { id: listingId }, data: { ownerConfirmedAt: new Date(), authorizationConsentAt: new Date(), ownerConfirmCodeHash: null, ownerConfirmAttempts: 0 } });
   const tv = await publishedFor({ key: "listing_authorization" });
   if (tv) {
     const text = renderTemplate(tv.bodyMarkdown, await userVars(listing!.seller, tv.version, { plot_city: (CITY[listing!.plot.city] ?? [listing!.plot.city])[0], plot_district: listing!.plot.district, plot_round: "—", plot_code: listing!.plot.code, plot_area: String(toNum(listing!.plot.areaSqm)), listing_price: toNum(listing!.price).toLocaleString("en-US") })).text;

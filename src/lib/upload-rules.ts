@@ -2,6 +2,8 @@
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB للملف
 export const CHUNK_BYTES = 3 * 1024 * 1024; // أقل من حد الطلب الواحد في Vercel (4.5MB)
 export const MAX_SESSIONS_PER_HOUR = 60;
+/** حد يومي للحجم اللي المستخدم الواحد يرفعه (مراجعة أمنية — منع ملء التخزين) */
+export const MAX_BYTES_PER_DAY = 300 * 1024 * 1024;
 /** المسموح بعد التحويل: HEIC بيتحول JPG في المتصفح قبل الرفع */
 export const UPLOAD_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"] as const;
 export const isHeic = (name: string, type: string) => /image\/hei[cf]/i.test(type) || /\.(heic|heif)$/i.test(name);

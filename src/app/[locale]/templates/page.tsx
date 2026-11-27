@@ -79,7 +79,7 @@ export default async function TemplatesPage({ params, searchParams }: Props) {
         </nav>
         <div className="flex flex-col gap-6">
           {sp.ok === "published" && <Notice tone="green">{L("النسخة اتنشرت. العقود القديمة بتفضل على نسختها، والمطلوب منهم موافقة جديدة هيشوفوا تنبيه.", "Published. Older contracts keep their version; anyone who must re-consent will see a notice.")}</Notice>}
-          {sp.err && <Notice tone="red">{sp.err === "draft" ? L("النص قصير أو مفيش ملاحظة على التغيير.", "The text is too short or there's no change note.") : L("النشر بعد اعتماد المحامي بس.", "Publishing is only allowed after lawyer approval.")}</Notice>}
+          {sp.err && <Notice tone="red">{sp.err === "self_approve" ? L("ما ينفعش تعتمد نسخة إنت اللي كتبتها — محامي تاني أو الأدمن يكتبها وإنت تعتمد.", "You can't approve a version you wrote yourself.") : sp.err === "draft" ? L("النص قصير أو مفيش ملاحظة على التغيير.", "The text is too short or there's no change note.") : L("النشر بعد اعتماد المحامي بس.", "Publishing is only allowed after lawyer approval.")}</Notice>}
           <Card title={`${num(tpl.formNo, locale)}. ${ar ? tpl.titleAr : tpl.titleEn}`} actions={<Badge tone="blue">{{ CLICKWRAP: L("موافقة إلكترونية + كود", "Clickwrap + code"), SIGNED: L("توقيع (إلكتروني أو ورقي)", "Signature (e-sign or paper)"), NOTARIAL: L("شهر عقاري", "Notary") }[tpl.signing]}</Badge>}>
             <table className="w-full text-sm">
               <thead>
