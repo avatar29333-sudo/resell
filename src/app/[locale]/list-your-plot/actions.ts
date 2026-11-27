@@ -11,8 +11,24 @@ import { isLocale } from "@/i18n/config";
 import { idsByRole, notify } from "@/lib/notifications";
 import { can, subject } from "@/lib/authz";
 import { leastLoaded } from "@/lib/assign";
+import { validatePlotInput, type PlotErrors } from "@/lib/plot-input";
 
-export type ListState = { error?: string };
+export type ListState = { error?: string; fieldErrors?: PlotErrors };
+
+const FIELD_MSG: Record<string, Record<string, [string, string]>> = {
+  city: { required: ["اختار المدينة", "Choose the city"] },
+  district: { required: ["اختار المرحلة / الحي من القايمة", "Choose the phase / district from the list"] },
+  code: {
+    required: ["اكتب كود القطعة", "Enter the plot code"],
+    format: ["الكود لازم يكون بالشكل ده: NC-8E-1016 (بادئة المدينة-البلوك-الرقم)", "The code must look like NC-8E-1016 (city prefix-block-number)"],
+    prefix: ["بادئة الكود مش مطابقة للمدينة اللي اخترتها", "The code prefix doesn't match the chosen city"],
+  },
+  area: { range: ["المساحة لازم تكون بين 50 و 5000 م²", "The area must be between 50 and 5,000 m²"] },
+  construction: { range: ["نسبة التنفيذ لازم تكون رقم صحيح من 0 لـ 100", "Construction must be a whole number from 0 to 100"] },
+  deadline: { invalid: ["تاريخ المهلة مش صحيح", "The deadline date is invalid"] },
+  price: { required: ["اكتب السعر", "Enter the price"] },
+  paidUsd: { required: ["اكتب المبلغ المدفوع بالدولار", "Enter the amount paid in USD"] },
+};
 
 export async function createListing(locale: string, _prev: ListState, form: FormData): Promise<ListState> {
   const l = isLocale(locale) ? locale : "ar";
@@ -27,20 +43,23 @@ export async function createListing(locale: string, _prev: ListState, form: Form
   const isPartner = user.role === "PARTNER_BROKER";
   if (isPartner && form.get("clientConsent") !== "on") return { error: ar ? "لازم تأكد إن المالك موافق على العرض." : "Confirm the owner has consented to this listing." };
 
-  const city = String(form.get("city") ?? "");
-  const district = String(form.get("district") ?? "").trim();
-  const code = String(form.get("code") ?? "").trim().toUpperCase();
-  const area = Number(form.get("area"));
-  const price = Number(form.get("price"));
+  const s = (k: string) => String(form.get(k) ?? "");
+  const city = s("city");
   const priceType = form.get("priceType") === "PAID_PLUS_PREMIUM" ? "PAID_PLUS_PREMIUM" : "ALL_INCLUSIVE";
-  const paidUsd = Number(form.get("paidUsd")) || null;
-  const construction = Math.min(100, Math.max(0, Number(form.get("construction")) || 0));
-  const deadline = String(form.get("deadline") ?? "");
-
-  if (!CITY_KEYS.includes(city as never) || !district || !code) return { error: ar ? "كمّل بيانات القطعة" : "Complete the plot details" };
-  if (!(area > 0) || area > 5000) return { error: ar ? "المساحة مش منطقية" : "The area looks wrong" };
-  if (!(price > 0)) return { error: ar ? "اكتب السعر" : "Enter the price" };
-  if (priceType === "PAID_PLUS_PREMIUM" && !paidUsd) return { error: ar ? "اكتب المبلغ المدفوع بالدولار" : "Enter the amount paid in USD" };
+  const districts = await db.district.findMany({ where: { city: CITY_KEYS.includes(city as never) ? (city as City) : undefined }, select: { id: true, city: true, active: true, nameAr: true, nameEn: true } });
+  // DATA-07 + DATA-09: التحقق في السيرفر، والأخطاء لكل حقل
+  const v = validatePlotInput(
+    { city, districtId: s("districtId"), code: s("code"), area: s("area"), construction: s("construction"), deadline: s("deadline"), price: s("price"), priceType, paidUsd: s("paidUsd") },
+    { cities: CITY_KEYS as string[], districts, today: new Date() },
+  );
+  if (!v.ok) {
+    const first = Object.keys(v.errors)[0] as keyof PlotErrors;
+    return { error: FIELD_MSG[first]?.[v.errors[first] ?? ""]?.[ar ? 0 : 1] ?? (ar ? "كمّل بيانات القطعة" : "Complete the plot details"), fieldErrors: v.errors };
+  }
+  const { code, area, construction, price, paidUsd } = v.values;
+  const district = v.values.district!.nameAr;
+  const districtEn = v.values.district!.nameEn;
+  const deadline = v.values.deadline;
 
   // الملفات: خطاب التخصيص إجباري
   const files: [string, DocumentType][] = [
@@ -74,11 +93,12 @@ export async function createListing(locale: string, _prev: ListState, form: Form
       data: {
         city: city as City,
         district,
+        districtEn,
         code,
         areaSqm: area,
         paymentStatus: form.get("paymentStatus") === "FULLY_PAID" ? "FULLY_PAID" : "INSTALLMENTS",
         constructionPercent: construction,
-        buildDeadline: deadline ? new Date(deadline) : null,
+        buildDeadline: deadline,
         createdById: user.id,
       },
     }));
@@ -125,5 +145,7 @@ export async function createListing(locale: string, _prev: ListState, form: Form
     en: [`New listing assigned to you for review from ${user.name}`, `${area} m² — ${district}`],
     link: `/broker?tab=queue`,
   });
-  redirect(`/${l}/account?listed=1`);
+  // DATA-09: المهلة خلصت → العرض اتقبل، وبنعرض على البائع «إنقاذ المهلة»
+  if (v.values.deadlinePassed) await audit(user.id, "plot.deadline_passed", "Plot", plot.id, { deadline: deadline?.toISOString().slice(0, 10) ?? null });
+  redirect(`/${l}/account?listed=1${v.values.deadlinePassed ? "&rescue=1" : ""}`);
 }

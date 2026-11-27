@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { requireUser } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { can, subject } from "@/lib/authz";
 import { tr } from "@/lib/format";
 import { Card, Container, Notice, PageHeader } from "@/components/ui";
@@ -27,7 +28,11 @@ export default async function ListYourPlotPage({ params }: { params: Promise<{ l
       <Container className="max-w-3xl">
         {allowed ? (
           <Card>
-            <Wizard locale={locale} partner={user.role === "PARTNER_BROKER"} />
+            <Wizard
+              locale={locale}
+              partner={user.role === "PARTNER_BROKER"}
+              districts={await db.district.findMany({ where: { active: true }, orderBy: [{ city: "asc" }, { sort: "asc" }], select: { id: true, city: true, nameAr: true, nameEn: true } })}
+            />
           </Card>
         ) : staff ? (
           <Notice tone="amber">{L("حسابات الفريق ما بتعرضش قطع. العرض بيتعمل من حساب المالك أو السمسار الشريك.", "Team accounts can't list plots. Listings are created by the owner or a partner broker.")}</Notice>

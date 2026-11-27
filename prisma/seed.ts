@@ -576,6 +576,7 @@ async function backfillAssignments() {
     "20261127032500_backfill_lawyers",
     "20261127033000_fix_locked_rates",
     "20261127033500_fix_locked_rates_fallback",
+    "20261127042000_districts",
   ]) {
     const sql = readFileSync(join(process.cwd(), "prisma", "migrations", dir, "migration.sql"), "utf8");
     const updates = sql

@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { errorText } from "@/lib/errors";
 import { date, num, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import { CITY, CONTRACT_TYPE, DOC_TYPE, REVIEW_DECISION, label, toneOf } from "@/lib/labels";
 import { Badge, Card, Container, Empty, FileLink, Notice, PageHeader, Stat, Table, btn } from "@/components/ui";
 import { reviewDocument } from "./actions";
@@ -87,7 +88,7 @@ export default async function LawyerPage({ params, searchParams }: Props) {
                         </span>
                         {plot && (
                           <Link href={d.dealId ? `/${locale}/deals/${d.dealId}` : `/${locale}/listings/${d.listingId}`} className="text-sm text-brand">
-                            {label(CITY, plot.city, locale)} — {plot.district} · <span dir="ltr">{plot.code}</span>
+                            {label(CITY, plot.city, locale)} — {districtName(plot, locale)} · <span dir="ltr">{plot.code}</span>
                           </Link>
                         )}
                         <div className="h-[420px] border border-line bg-paper">

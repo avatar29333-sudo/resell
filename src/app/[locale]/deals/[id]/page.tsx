@@ -11,6 +11,7 @@ import { permissionsFor } from "@/lib/authz/ui";
 import { partyNameVisible } from "@/lib/authz/redact";
 import { BLOCKER_TEXT, blockersToAdvance, nextStage, requiredSigners, type Blocker } from "@/lib/deal-machine";
 import { date, dateTime, money, num, toNum, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import {
   CITY,
   COMMISSION_STATUS,
@@ -160,7 +161,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
             <Badge tone={toneOf(deal.status)}>{label(DEAL_STATUS, deal.status, locale)}</Badge>
-            {label(CITY, plot.city, locale)} — {plot.district} · {num(plot.areaSqm, locale)} {L("م²", "m²")}
+            {label(CITY, plot.city, locale)} — {districtName(plot, locale)} · {num(plot.areaSqm, locale)} {L("م²", "m²")}
             {codeVisible && (
               <span dir="ltr" className="border border-navy-soft px-1.5 text-sm">
                 {plot.code}

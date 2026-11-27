@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { Prisma, Role } from "@prisma/client";
+import type { City, Prisma, Role } from "@prisma/client";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { requireRecentAuth, requireUser } from "@/lib/auth";
@@ -11,7 +11,7 @@ import { updateDailyRate } from "@/lib/fx";
 import { checkManualRate } from "@/lib/fx-rules";
 import { moveBlobsToS3 } from "@/lib/storage";
 import { idsByRole, notify } from "@/lib/notifications";
-import { ROLE } from "@/lib/labels";
+import { CITY_KEYS, ROLE } from "@/lib/labels";
 import { redirect } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 
@@ -207,6 +207,36 @@ export async function saveOps(locale: string, form: FormData) {
     warnDays: Math.min(120, Math.max(1, Number(form.get("warnDays")) || 30)),
     expiredListing: form.get("expiredListing") === "hide" ? "hide" : "badge",
   });
+  refresh(l);
+}
+
+/** DATA-07: إضافة حي/مرحلة للقايمة، أو إيقافه (ما بيتمسحش عشان القطع القديمة) */
+export async function addDistrict(locale: string, form: FormData) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "settings.fees", {}, { back: back(l, "districts") });
+  const city = String(form.get("city") ?? "");
+  const nameAr = String(form.get("nameAr") ?? "").trim().replace(/\s+/g, " ");
+  const nameEn = String(form.get("nameEn") ?? "").trim().replace(/\s+/g, " ");
+  if (!CITY_KEYS.includes(city as never) || nameAr.length < 2 || nameEn.length < 2) redirect(`${back(l, "districts")}&err=district`);
+  const d = await db.district.upsert({
+    where: { city_nameAr: { city: city as City, nameAr } },
+    create: { city: city as City, nameAr, nameEn, sort: 50 },
+    update: { nameEn, active: true },
+  });
+  await audit(me.id, "district.save", "District", d.id, { city, nameAr, nameEn });
+  refresh(l);
+  redirect(`${back(l, "districts")}&city=${city}`);
+}
+
+export async function toggleDistrict(locale: string, id: string) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "settings.fees", {}, { back: back(l, "districts") });
+  const d = await db.district.findUnique({ where: { id } });
+  if (!d) return;
+  await db.district.update({ where: { id }, data: { active: !d.active } });
+  await audit(me.id, "district.toggle", "District", id, { before: d.active, after: !d.active });
   refresh(l);
 }
 

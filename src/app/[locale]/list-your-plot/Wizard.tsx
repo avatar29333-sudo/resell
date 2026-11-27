@@ -6,11 +6,31 @@ import { tr } from "@/lib/format";
 import { CITY, CITY_KEYS, label } from "@/lib/labels";
 import { btn, field, labelCls } from "@/components/ui";
 import { createListing, type ListState } from "./actions";
+import { CITY_PREFIX } from "@/lib/plot-code";
 
-export function Wizard({ locale, partner = false }: { locale: Locale; partner?: boolean }) {
+const FIELD_TEXT: Record<string, Record<string, [string, string]>> = {
+  city: { required: ["اختار المدينة", "Choose the city"] },
+  district: { required: ["اختار المرحلة / الحي من القايمة", "Choose the phase / district from the list"] },
+  code: {
+    required: ["اكتب كود القطعة", "Enter the plot code"],
+    format: ["الكود لازم يكون بالشكل ده: NC-8E-1016", "The code must look like NC-8E-1016"],
+    prefix: ["بادئة الكود مش مطابقة للمدينة", "The code prefix doesn't match the city"],
+  },
+  area: { range: ["المساحة بين 50 و 5000 م²", "Area must be 50–5,000 m²"] },
+  construction: { range: ["رقم صحيح من 0 لـ 100", "A whole number from 0 to 100"] },
+  deadline: { invalid: ["تاريخ مش صحيح", "Invalid date"] },
+  price: { required: ["اكتب السعر", "Enter the price"] },
+  paidUsd: { required: ["اكتب المبلغ المدفوع بالدولار", "Enter the amount paid in USD"] },
+};
+
+type District = { id: string; city: string; nameAr: string; nameEn: string };
+
+export function Wizard({ locale, partner = false, districts = [] }: { locale: Locale; partner?: boolean; districts?: District[] }) {
   const L = tr(locale);
   const [step, setStep] = useState(0);
   const [priceType, setPriceType] = useState("ALL_INCLUSIVE");
+  const [city, setCity] = useState<string>(CITY_KEYS[0]);
+  const cityDistricts = districts.filter((d) => d.city === city);
   const [localError, setLocalError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const [state, action, pending] = useActionState((p: ListState, f: FormData) => createListing(locale, p, f), {} as ListState);
@@ -31,6 +51,13 @@ export function Wizard({ locale, partner = false }: { locale: Locale; partner?: 
   };
 
   const error = localError ?? state.error;
+  const fe = state.fieldErrors ?? {};
+  const FieldError = ({ name }: { name: keyof typeof fe }) =>
+    fe[name] ? (
+      <span role="alert" className="text-xs font-semibold text-[#A32020]">
+        {FIELD_TEXT[name]?.[fe[name]!]?.[locale === "ar" ? 0 : 1] ?? ""}
+      </span>
+    ) : null;
 
   return (
     <form ref={formRef} action={action} className="flex flex-col gap-6">
@@ -55,26 +82,41 @@ export function Wizard({ locale, partner = false }: { locale: Locale; partner?: 
       <div data-step="0" hidden={step !== 0} className="grid gap-4 sm:grid-cols-2">
         <label className={labelCls}>
           {L("المدينة", "City")}
-          <select name="city" required className={field}>
+          <select name="city" required value={city} onChange={(e) => setCity(e.target.value)} className={field}>
             {CITY_KEYS.map((k) => (
               <option key={k} value={k}>
                 {label(CITY, k, locale)}
               </option>
             ))}
           </select>
+          <FieldError name="city" />
         </label>
         <label className={labelCls}>
           {L("المرحلة / الحي", "Phase / district")}
-          <input name="district" required placeholder={L("مثلاً الحي الأول", "e.g. District 1")} className={field} />
+          <select name="districtId" required key={city} defaultValue="" className={field}>
+            <option value="" disabled>
+              {L("اختار من القايمة", "Choose from the list")}
+            </option>
+            {cityDistricts.map((d) => (
+              <option key={d.id} value={d.id}>
+                {locale === "ar" ? d.nameAr : d.nameEn}
+              </option>
+            ))}
+          </select>
+          <FieldError name="district" />
         </label>
         <label className={labelCls}>
           {L("كود القطعة (من خطاب التخصيص)", "Plot code (from the allocation letter)")}
-          <input name="code" required dir="ltr" className={`${field} text-start`} />
-          <span className="text-xs">{L("مش هيظهر لأي مشتري قبل اتفاق العمولة.", "Hidden from buyers until the commission agreement.")}</span>
+          <input name="code" required dir="ltr" placeholder={`${CITY_PREFIX[city]}-8E-1016`} className={`${field} text-start`} />
+          <span className="text-xs">
+            {L(`الشكل: ${CITY_PREFIX[city]}-البلوك-الرقم. مش هيظهر لأي مشتري قبل اتفاق العمولة.`, `Format: ${CITY_PREFIX[city]}-block-number. Hidden from buyers until the commission agreement.`)}
+          </span>
+          <FieldError name="code" />
         </label>
         <label className={labelCls}>
           {L("المساحة (م²)", "Area (m²)")}
           <input name="area" type="number" min={50} max={5000} required className={field} />
+          <FieldError name="area" />
         </label>
         <label className={labelCls}>
           {L("حالة السداد", "Payment status")}
@@ -86,10 +128,13 @@ export function Wizard({ locale, partner = false }: { locale: Locale; partner?: 
         <label className={labelCls}>
           {L("نهاية مهلة البناء", "Build deadline")}
           <input name="deadline" type="date" className={field} />
+          <span className="text-xs">{L("لو المهلة خلصت، اكتب تاريخها برضه — هنعرض عليك «إنقاذ المهلة».", "If the deadline has passed, enter it anyway — we'll offer a deadline rescue.")}</span>
+          <FieldError name="deadline" />
         </label>
         <label className={labelCls}>
           {L("نسبة التنفيذ التقريبية (%)", "Approx. construction (%)")}
-          <input name="construction" type="number" min={0} max={100} defaultValue={0} className={field} />
+          <input name="construction" type="number" min={0} max={100} step={1} defaultValue={0} className={field} />
+          <FieldError name="construction" />
         </label>
       </div>
 
@@ -109,11 +154,13 @@ export function Wizard({ locale, partner = false }: { locale: Locale; partner?: 
           <label className={labelCls}>
             {L("المبلغ المدفوع للجهاز (دولار)", "Paid to the authority (USD)")}
             <input name="paidUsd" type="number" min={1} required className={field} />
+            <FieldError name="paidUsd" />
           </label>
         )}
         <label className={labelCls}>
           {priceType === "PAID_PLUS_PREMIUM" ? L("الأوفر المطلوب (ج.م)", "Premium asked (EGP)") : L("السعر الشامل المطلوب (ج.م)", "Total asking price (EGP)")}
           <input name="price" type="number" min={1} required className={field} />
+          <FieldError name="price" />
         </label>
       </div>
 

@@ -7,6 +7,7 @@ import { buyerCanSeeFiles } from "@/lib/deal-machine";
 import { plotGeo } from "@/lib/geo";
 import { audit } from "@/lib/audit";
 import { date, daysUntil, num, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import { CITY, DOC_STATUS, DOC_TYPE, PAYMENT_STATUS, REVIEW_DECISION, label } from "@/lib/labels";
 import { PlotMap } from "@/components/PlotMap";
 import { PrintButton } from "@/components/PrintButton";
@@ -68,7 +69,7 @@ export default async function InspectionReport({ params }: { params: Promise<{ l
         {(
           [
             [L("المدينة", "City"), label(CITY, listing.plot.city, locale)],
-            [L("المرحلة / الحي", "Phase / district"), listing.plot.district],
+            [L("المرحلة / الحي", "Phase / district"), districtName(listing.plot, locale)],
             [L("كود القطعة", "Plot code"), listing.plot.code],
             [L("المساحة", "Area"), `${num(listing.plot.areaSqm, locale)} ${L("م²", "m²")}`],
             [L("حالة السداد", "Payment status"), label(PAYMENT_STATUS, listing.plot.paymentStatus, locale)],

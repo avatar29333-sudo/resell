@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { scopeDealsFor, scopeServiceRequestsFor } from "@/lib/authz/scope";
 import { errorText } from "@/lib/errors";
 import { date, num, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import { CITY, DEAL_STAGE, SERVICE_STATUS, SERVICE_TYPE, label, toneOf } from "@/lib/labels";
 import { Badge, Card, Container, Empty, Notice, PageHeader, Stat, Table, btn, field } from "@/components/ui";
 import { updateServiceRequest } from "../broker/actions";
@@ -94,7 +95,7 @@ export default async function AgentPage({ params, searchParams }: Props) {
                 <tr key={d.id}>
                   <td>
                     <Link href={`/${locale}/deals/${d.id}`} className="font-semibold text-brand">
-                      #{d.id.slice(-6).toUpperCase()} · {label(CITY, d.listing.plot.city, locale)} — {d.listing.plot.district}
+                      #{d.id.slice(-6).toUpperCase()} · {label(CITY, d.listing.plot.city, locale)} — {districtName(d.listing.plot, locale)}
                     </Link>
                     {me.role === "ADMIN" && <div className="text-xs text-muted">{d.agent?.name}</div>}
                   </td>

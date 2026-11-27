@@ -5,6 +5,7 @@ import { idsByRole, notify } from "@/lib/notifications";
 import { CITY, DOC_TYPE } from "@/lib/labels";
 import { getSetting } from "@/lib/settings";
 import { validityState } from "@/lib/validity";
+import { districtName } from "@/lib/district";
 
 // مهمة يومية (Vercel Cron الساعة 8 الصبح بتوقيت القاهرة — vercel.json):
 // 1) سعر صرف النهارده  2) المستندات اللي انتهت  3) المستندات اللي هتنتهي خلال 30 يوم
@@ -75,7 +76,7 @@ export async function GET(req: Request) {
   for (const l of live) {
     const st = l.documents[0];
     const state = st ? validityState(st.expiresAt, now, validity.warnDays) : "ok";
-    const place = (i: 0 | 1) => `${CITY[l.plot.city][i]} — ${l.plot.district}`;
+    const place = (i: 0 | 1) => `${CITY[l.plot.city][i]} — ${districtName(l.plot, i ? "en" : "ar")}`;
     if ((state === "expired" || st?.status === "EXPIRED") && !l.statementExpiredAt) {
       await db.listing.update({ where: { id: l.id }, data: { statementExpiredAt: now } });
       await audit(null, "listing.statement_expired", "Listing", l.id, { documentId: st?.id ?? null });

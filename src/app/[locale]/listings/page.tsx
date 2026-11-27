@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { latestRate, totalEgp } from "@/lib/listing";
 import { getSetting } from "@/lib/settings";
 import { daysUntil, money, num, toNum, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import { CITY, CITY_KEYS, LISTING_STATUS, PAYMENT_STATUS, PRICE_TYPE, label, toneOf } from "@/lib/labels";
 import { Badge, Container, Empty, PageHeader, btn, field, labelCls } from "@/components/ui";
 
@@ -117,7 +118,7 @@ export default async function ListingsPage({ params, searchParams }: Props) {
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex flex-col">
                         <span className="text-lg font-bold">{label(CITY, l.plot.city, locale)}</span>
-                        <span className="text-sm text-muted">{l.plot.district}</span>
+                        <span className="text-sm text-muted">{districtName(l.plot, locale)}</span>
                       </div>
                       <Badge tone={toneOf(l.status)}>{label(LISTING_STATUS, l.status, locale)}</Badge>
                     </div>

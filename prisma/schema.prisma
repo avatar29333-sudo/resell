@@ -302,6 +302,8 @@ model Plot {
   id                 String            @id @default(cuid())
   city               City
   district           String //المرحلة / الحي
+  /// DATA-07: الاسم الإنجليزي للحي (من جدول District)
+  districtEn         String?
   code               String //كود القطعة
   areaSqm            Decimal           @db.Decimal(10, 2)
   //حدود القطعة (PostGIS). Prisma ما بيقراهاش مباشرة — بنكتب ونقرا بـ SQL.
@@ -321,6 +323,19 @@ model Plot {
   //نفس القطعة ما تتسجلش مرتين — ده أساس كشف العروض المكررة
   @@unique([city, district, code])
   @@index([buildDeadline])
+}
+
+/// DATA-07: قايمة الأحياء/المراحل لكل مدينة — الـ wizard بيختار منها بدل النص الحر
+model District {
+  id        String   @id @default(cuid())
+  city      City
+  nameAr    String
+  nameEn    String
+  sort      Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([city, nameAr])
 }
 
 model Listing {

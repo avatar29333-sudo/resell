@@ -12,6 +12,7 @@ import { matches } from "@/lib/matching";
 import { latestRate, totalEgp } from "@/lib/listing";
 import { leastLoaded } from "@/lib/assign";
 import { CITY } from "@/lib/labels";
+import { districtName } from "@/lib/district";
 import { toNum } from "@/lib/format";
 import { isLocale } from "@/i18n/config";
 
@@ -37,7 +38,7 @@ export async function moveListing(locale: string, listingId: string, to: "VERIFI
   await db.listing.update({ where: { id: listingId }, data: { status: to, ...(to === "PUBLISHED" ? { publishedAt: new Date() } : {}) } });
   await audit(user.id, `listing.${to.toLowerCase()}`, "Listing", listingId, { from: l.status, to });
 
-  const place = (i: 0 | 1) => `${CITY[l.plot.city][i]} — ${l.plot.district}`;
+  const place = (i: 0 | 1) => `${CITY[l.plot.city][i]} — ${districtName(l.plot, i ? "en" : "ar")}`;
   if (to === "PUBLISHED") {
     await notify([l.sellerId, l.submittedById], {
       kind: "listing.published",
@@ -170,8 +171,8 @@ export async function assignListingBroker(locale: string, listingId: string, for
   await audit(user.id, "listing.assign_broker", "Listing", listingId, { before: l.assignedBrokerId, after: brokerId });
   await notify([brokerId, l.assignedBrokerId], {
     kind: "listing.assignment",
-    ar: ["إسناد عرض اتغيّر", `${CITY[l.plot.city][0]} — ${l.plot.district}`],
-    en: ["A listing assignment changed", `${CITY[l.plot.city][1]} — ${l.plot.district}`],
+    ar: ["إسناد عرض اتغيّر", `${CITY[l.plot.city][0]} — ${districtName(l.plot, "ar")}`],
+    en: ["A listing assignment changed", `${CITY[l.plot.city][1]} — ${districtName(l.plot, "en")}`],
     link: `/broker?tab=queue`,
   });
   revalidatePath(`/${loc(locale)}/broker`);

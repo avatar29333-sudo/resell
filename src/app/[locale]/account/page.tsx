@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { BLOCKER_TEXT, STAGES, blockersToAdvance, nextStage, requiredSigners, stageIndex, type Stage } from "@/lib/deal-machine";
 import { date, money, num, toNum, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import {
   ACCOUNT_LEVEL,
   BUY_REQUEST_STATUS,
@@ -28,7 +29,7 @@ import { createBuyRequest, setBuyRequestStatus, setMyListingStatus, submitKyc, u
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; denied?: string; upload?: string }>;
+  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string }>;
 };
 
 // مراحل العرض من ناحية البائع
@@ -119,6 +120,14 @@ export default async function AccountPage({ params, searchParams }: Props) {
       <Container className="flex flex-col gap-6">
         {sp.welcome && <Notice tone="green">{L("حسابك اتعمل. وثّق هويتك عشان تقدر تبيع أو تشتري.", "Your account is ready. Verify your ID to buy or sell.")}</Notice>}
         {sp.listed && <Notice tone="green">{L("قطعتك وصلت وهي دلوقتي قيد المراجعة. هنبلغك على واتساب.", "Your plot was received and is now in review. We'll update you on WhatsApp.")}</Notice>}
+        {sp.rescue && (
+          <Notice tone="amber">
+            {L("تاريخ مهلة البناء اللي كتبته عدّى — العرض اتقبل ومتعلّم «المهلة خلصت».", "The build deadline you entered has passed — the listing was accepted and marked “deadline passed”.")}{" "}
+            <Link href={`/${locale}/rescue`} className="font-semibold text-brand underline">
+              {L("اعرف إزاي تنقذ المهلة", "See how to rescue the deadline")}
+            </Link>
+          </Notice>
+        )}
         {sp.denied && <Notice tone="amber">{L("الصفحة دي مش متاحة لحسابك.", "That page isn't available to your account.")}</Notice>}
         {sp.upload === "ok" && <Notice tone="green">{L("النسخة الجديدة اترفعت ووصلت للوسيط.", "The new version was uploaded and sent to the broker.")}</Notice>}
         {sp.upload === "bad" && <Notice tone="red">{L("الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا.", "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB.")}</Notice>}
@@ -155,7 +164,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                     <DealCard
                       locale={locale}
                       href={`/${locale}/deals/${d.id}`}
-                      title={`${label(CITY, d.listing.plot.city, locale)} — ${d.listing.plot.district}`}
+                      title={`${label(CITY, d.listing.plot.city, locale)} — ${districtName(d.listing.plot, locale)}`}
                       meta={`${num(d.listing.plot.areaSqm, locale)} ${L("م²", "m²")} · ${money(d.agreedPrice ?? d.listing.price, "EGP", locale)}${d.agreedPrice ? L(" (متفق)", " (agreed)") : ""}`}
                       status={d.status}
                       stage={stage}
@@ -182,7 +191,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                 <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                   <div className="flex flex-col gap-0.5">
                     <Link href={`/${locale}/deals/${d.id}`} className="font-semibold text-navy hover:text-brand">
-                      {label(CITY, d.listing.plot.city, locale)} — {d.listing.plot.district} · {num(d.listing.plot.areaSqm, locale)} {L("م²", "m²")}
+                      {label(CITY, d.listing.plot.city, locale)} — {districtName(d.listing.plot, locale)} · {num(d.listing.plot.areaSqm, locale)} {L("م²", "m²")}
                     </Link>
                     <span className={`text-sm ${d.status === "COMPLETED" ? "text-ok" : "text-[#A32020]"}`}>{endReason(d)}</span>
                     <span className="text-xs text-muted">
@@ -233,7 +242,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <Link href={`/${locale}/listings/${l.id}`} className="text-lg font-bold text-navy hover:text-brand">
-                          {label(CITY, l.plot.city, locale)} — {l.plot.district}
+                          {label(CITY, l.plot.city, locale)} — {districtName(l.plot, locale)}
                         </Link>
                         <div className="text-sm text-muted">
                           <span dir="ltr">{l.plot.code}</span> · {num(l.plot.areaSqm, locale)} {L("م²", "m²")} · {money(l.price, l.currency, locale)}
@@ -241,6 +250,18 @@ export default async function AccountPage({ params, searchParams }: Props) {
                       </div>
                       <Badge tone={toneOf(l.status)}>{label(LISTING_STATUS, l.status, locale)}</Badge>
                     </div>
+                    {/* DATA-09: المهلة خلصت → خيار «إنقاذ المهلة» */}
+                    {l.plot.buildDeadline && l.plot.buildDeadline < new Date() && !["SOLD", "WITHDRAWN"].includes(l.status) && (
+                      <Notice tone="amber">
+                        {L("مهلة البناء للقطعة دي خلصت.", "The build deadline for this plot has passed.")}{" "}
+                        <Link href={`/${locale}/rescue?plot=${encodeURIComponent(l.plot.code)}`} className="font-semibold text-brand underline">
+                          {L("اطلب «إنقاذ المهلة»", "Request a deadline rescue")}
+                        </Link>
+                      </Notice>
+                    )}
+                    {l.statementExpiredAt && (
+                      <Notice tone="amber">{L("إفادة الجهاز انتهت — ارفع إفادة حديثة عشان العرض يرجع طبيعي.", "The authority statement expired — upload a recent one to restore the listing.")}</Notice>
+                    )}
                     {l.status === "WITHDRAWN" ? (
                       <MiniSteps steps={LISTING_FLOW.map((s) => label(LISTING_STATUS, s, locale))} current={0} stopped />
                     ) : (
@@ -307,7 +328,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                   <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                     <div className="flex flex-col gap-0.5">
                       <Link href={`/${locale}/deals/${d.id}`} className="font-semibold text-navy hover:text-brand">
-                        {label(CITY, d.listing.plot.city, locale)} — {d.listing.plot.district} · <span dir="ltr">{d.listing.plot.code}</span>
+                        {label(CITY, d.listing.plot.city, locale)} — {districtName(d.listing.plot, locale)} · <span dir="ltr">{d.listing.plot.code}</span>
                       </Link>
                       <span className={`text-sm ${d.status === "COMPLETED" ? "text-ok" : "text-[#A32020]"}`}>
                         {d.status === "COMPLETED"

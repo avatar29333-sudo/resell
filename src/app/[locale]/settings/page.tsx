@@ -9,21 +9,22 @@ import { scopeAuditFor, scopeUsersFor } from "@/lib/authz/scope";
 import { errorText } from "@/lib/errors";
 import { getSetting } from "@/lib/settings";
 import { date, dateTime, money, num, tr } from "@/lib/format";
-import { ACCOUNT_LEVEL, ACCOUNT_STATUS, CONTRACT_TYPE, RATE_SOURCE, ROLE, label } from "@/lib/labels";
+import { ACCOUNT_LEVEL, ACCOUNT_STATUS, CITY, CITY_KEYS, CONTRACT_TYPE, RATE_SOURCE, ROLE, label } from "@/lib/labels";
 import { Badge, Card, Container, DL, Notice, PageHeader, Table, Tabs, btn, field, labelCls } from "@/components/ui";
-import { addManualRate, bumpTemplate, fetchRateNow, moveFilesToS3, saveCommission, saveFees, saveOps, setUserRole, suspendUser, unsuspendUser } from "./actions";
+import { addDistrict, addManualRate, bumpTemplate, fetchRateNow, moveFilesToS3, saveCommission, saveFees, saveOps, setUserRole, suspendUser, toggleDistrict, unsuspendUser } from "./actions";
 import { RoleForm } from "./RoleForm";
 import { storageMode } from "@/lib/storage";
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ tab?: string; q?: string; page?: string; role?: string; entity?: string; fx?: string; moved?: string; failed?: string; err?: string; ok?: string; buy?: string; sell?: string }>;
+  searchParams: Promise<{ tab?: string; q?: string; page?: string; role?: string; city?: string;entity?: string; fx?: string; moved?: string; failed?: string; err?: string; ok?: string; buy?: string; sell?: string }>;
 };
 
 const PAGE = 50;
 const SETTINGS_ERRORS: Record<string, [string, string]> = {
   reg_no: ["السمسار الشريك لازم يكون ليه رقم قيد في سجل الوسطاء.", "A partner broker needs a broker registry number."],
   confirm: ["لازم تأكد تغيير الدور من رسالة التأكيد.", "Please confirm the role change in the dialog."],
+  district: ["اكتب اسم الحي بالعربي والإنجليزي.", "Enter the district name in Arabic and English."],
   rate_invalid: ["سعر البيع لازم يكون أكبر من أو يساوي سعر الشراء.", "The sell rate must be greater than or equal to the buy rate."],
   rate_deviation: ["السعر بعيد عن آخر سعر آلي أكتر من الحد المسموح — علّم على «متأكد» لو ده مقصود.", "The rate is further from the last automatic rate than allowed — tick “I'm sure” if intended."],
 };
@@ -41,6 +42,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
     fx: can(s, "fx.manual").allowed,
     commission: can(s, "commission.rates").allowed,
     templates: can(s, "template.edit").allowed,
+    districts: can(s, "settings.fees").allowed,
     storage: can(s, "storage.manage").allowed,
     audit: can(s, "audit.view").allowed || can(s, "audit.view_money").allowed,
   };
@@ -70,6 +72,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             { key: "fx", label: L("سعر الصرف", "Exchange rate"), href: `${base}?tab=fx` },
             { key: "commission", label: L("العمولة والرسوم", "Commission and fees"), href: `${base}?tab=commission` },
             { key: "templates", label: L("نماذج العقود", "Contract templates"), href: `${base}?tab=templates` },
+            { key: "districts", label: L("الأحياء والمراحل", "Districts"), href: `${base}?tab=districts` },
             { key: "storage", label: L("خزنة الملفات", "File vault"), href: `${base}?tab=storage` },
             { key: "audit", label: L("سجل التدقيق", "Audit log"), href: `${base}?tab=audit` },
           ].filter((t) => tabs.includes(t.key as never))}
@@ -78,6 +81,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         {tab === "fx" && <Fx locale={locale} />}
         {tab === "commission" && <Commission locale={locale} />}
         {tab === "templates" && <Templates locale={locale} />}
+        {tab === "districts" && <Districts locale={locale} />}
         {tab === "storage" && <Storage locale={locale} />}
         {tab === "audit" && <Audit locale={locale} entity={sp.entity} />}
       </Container>
@@ -339,6 +343,51 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             </tr>
           ))}
         </Table>
+      </Card>
+    );
+  }
+
+  async function Districts({ locale }: { locale: "ar" | "en" }) {
+    const city = (CITY_KEYS as string[]).includes(sp.city ?? "") ? sp.city! : CITY_KEYS[0];
+    const rows = await db.district.findMany({ where: { city: city as never }, orderBy: [{ sort: "asc" }, { nameAr: "asc" }] });
+    const counts = await db.plot.groupBy({ by: ["district"], where: { city: city as never }, _count: true });
+    return (
+      <Card title={L("الأحياء والمراحل (اختيارات wizard إضافة القطعة)", "Districts (choices in the add-plot wizard)")}>
+        <nav className="flex flex-wrap gap-1.5">
+          {CITY_KEYS.map((c) => (
+            <Link key={c} href={`${base}?tab=districts&city=${c}`} className={`inline-flex min-h-9 items-center border px-2.5 text-sm ${c === city ? "border-navy bg-navy text-white" : "border-line"}`}>
+              {label(CITY, c, locale)}
+            </Link>
+          ))}
+        </nav>
+        <Table head={[L("بالعربي", "Arabic"), L("بالإنجليزي", "English"), L("قطع", "Plots"), L("الحالة", "Status")]}>
+          {rows.map((d) => (
+            <tr key={d.id}>
+              <td className="font-semibold">{d.nameAr}</td>
+              <td>{d.nameEn}</td>
+              <td>{num(counts.find((c) => c.district === d.nameAr)?._count ?? 0, locale)}</td>
+              <td>
+                <form action={toggleDistrict.bind(null, locale, d.id)} className="flex items-center gap-2">
+                  <Badge tone={d.active ? "green" : "gray"}>{d.active ? L("ظاهر", "Shown") : L("موقوف", "Hidden")}</Badge>
+                  <button className={`${btn.small} border border-line`}>{d.active ? L("أوقفه", "Hide") : L("رجّعه", "Show")}</button>
+                </form>
+              </td>
+            </tr>
+          ))}
+        </Table>
+        <form action={addDistrict.bind(null, locale)} className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="city" value={city} />
+          <label className={labelCls}>
+            {L("الاسم بالعربي", "Arabic name")}
+            <input name="nameAr" required minLength={2} className={`${field} w-48`} />
+          </label>
+          <label className={labelCls}>
+            {L("الاسم بالإنجليزي", "English name")}
+            <input name="nameEn" required minLength={2} dir="ltr" className={`${field} w-48`} />
+          </label>
+          <button className={btn.primary}>{L("أضف / حدّث", "Add / update")}</button>
+        </form>
+        <p className="text-xs text-muted">{L("الحي ما بيتمسحش عشان القطع القديمة — بيتوقف بس فيختفي من الاختيارات.", "Districts are never deleted (older plots use them) — hiding removes them from the choices.")}</p>
       </Card>
     );
   }

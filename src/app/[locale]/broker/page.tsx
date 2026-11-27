@@ -10,6 +10,7 @@ import { scopeDealsFor, scopeKycQueueFor, scopePrivateListingsFor, scopeServiceR
 import { errorText } from "@/lib/errors";
 import { getSetting } from "@/lib/settings";
 import { date, daysUntil, money, num, toNum, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import {
   CITY,
   COMMISSION_STATUS,
@@ -120,7 +121,7 @@ async function Queue({ locale, me }: { locale: "ar" | "en"; me: User }) {
                 <tr key={l.id}>
                   <td>
                     <Link href={`/${locale}/listings/${l.id}`} className="font-semibold text-brand">
-                      {label(CITY, l.plot.city, locale)} — {l.plot.district}
+                      {label(CITY, l.plot.city, locale)} — {districtName(l.plot, locale)}
                     </Link>
                     <div className="text-xs text-muted" dir="ltr">
                       {l.plot.code} · {num(l.plot.areaSqm, locale)} m²

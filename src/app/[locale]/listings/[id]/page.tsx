@@ -7,6 +7,7 @@ import { isStaff } from "@/lib/access";
 import { can, dealCtx, listingCtx, subject } from "@/lib/authz";
 import { latestRate, totalEgp } from "@/lib/listing";
 import { date, daysUntil, money, num, toNum, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import { CITY, DEAL_STAGE, DOC_STATUS, DOC_TYPE, LISTING_STATUS, PAYMENT_STATUS, PRICE_TYPE, label, toneOf } from "@/lib/labels";
 import { Badge, Card, Container, DL, FileLink, Notice, PageHeader, btn } from "@/components/ui";
 import { expressInterest } from "../actions";
@@ -71,7 +72,7 @@ export default async function ListingPage({ params }: Props) {
           { href: `/${locale}/listings`, label: L("سجل العروض", "Listings") },
           { href: `/${locale}/listings/${id}`, label: label(CITY, listing.plot.city, locale) },
         ]}
-        title={`${label(CITY, listing.plot.city, locale)} — ${listing.plot.district}`}
+        title={`${label(CITY, listing.plot.city, locale)} — ${districtName(listing.plot, locale)}`}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
             <Badge tone={toneOf(listing.status)}>{label(LISTING_STATUS, listing.status, locale)}</Badge>
@@ -99,7 +100,7 @@ export default async function ListingPage({ params }: Props) {
             <DL
               items={[
                 [L("المدينة", "City"), label(CITY, listing.plot.city, locale)],
-                [L("المرحلة / الحي", "Phase / district"), listing.plot.district],
+                [L("المرحلة / الحي", "Phase / district"), districtName(listing.plot, locale)],
                 [
                   L("كود القطعة", "Plot code"),
                   canSeeCode ? (
