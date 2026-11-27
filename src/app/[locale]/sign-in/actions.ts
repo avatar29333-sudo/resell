@@ -6,6 +6,7 @@ import { audit } from "@/lib/audit";
 import { DEMO_MODE, checkCode, clearPending, createSession, getPending, homeFor, issueCode, setPending } from "@/lib/auth";
 import { maskEmail, type Channel } from "@/lib/notify";
 import { decryptSecret, verifyTotp } from "@/lib/totp";
+import { classifyIdentifier } from "@/lib/identifier";
 import { isValidPhone, maskPhone, normalizePhone } from "@/lib/format";
 import { isLocale, type Locale } from "@/i18n/config";
 
@@ -21,9 +22,12 @@ export type SignInState = {
 };
 
 const M = {
-  empty: ["اكتب رقم الموبايل أو الإيميل أو الاسم", "Enter your mobile number, email or name"],
-  manyNames: ["فيه أكتر من حساب بالاسم ده. ادخل برقم الموبايل أو الإيميل", "More than one account has this name. Use your mobile or email"],
-  rate: ["طلبت رموز كتير. استنى ساعة وجرّب تاني", "Too many codes requested. Try again in an hour"],
+  empty: ["اكتب رقم الموبايل أو الإيميل", "Enter your mobile number or email"],
+  identifier: [
+    "اكتب رقم موبايل بكود الدولة (مثلاً +966501234567) أو إيميل صحيح",
+    "Enter a mobile number with country code (e.g. +966501234567) or a valid email",
+  ],
+  rate: ["محاولات كتير. استنى 15 دقيقة وجرّب تاني", "Too many attempts. Please wait 15 minutes and try again"],
   name: ["اكتب الاسم بالكامل (اسمين على الأقل)", "Enter your full name (at least two words)"],
   phone: ["رقم الموبايل مش صحيح. اكتبه بكود الدولة، مثلاً +966501234567", "Invalid mobile number. Include the country code, e.g. +966501234567"],
   email: ["الإيميل مش صحيح", "Invalid email"],
@@ -33,7 +37,7 @@ const M = {
   session: ["الجلسة خلصت. ابدأ من الأول", "Session expired. Please start again"],
   missing: ["مفيش رمز. اطلب رمز جديد", "No code found. Request a new one"],
   expired: ["الرمز خلص. اطلب رمز جديد", "The code expired. Request a new one"],
-  locked: ["محاولات كتير غلط. اطلب رمز جديد", "Too many wrong attempts. Request a new one"],
+  locked: ["محاولات كتير غلط. استنى 15 دقيقة واطلب رمز جديد", "Too many wrong attempts. Wait 15 minutes and request a new code"],
   wrong: ["الرمز غلط", "Wrong code"],
   terms: ["لازم توافق على الشروط وسياسة الخصوصية", "You must accept the terms and privacy policy"],
   totpWrong: ["رمز تطبيق التحقق غلط أو خلص — جرّب الرمز اللي ظاهر دلوقتي", "Wrong or expired authenticator code — try the current one"],
@@ -51,26 +55,16 @@ export async function identify(locale: Locale, _prev: SignInState, form: FormDat
   const raw = String(form.get("identifier") ?? "").trim();
   if (!raw) return { step: "identify", error: msg(locale, "empty") };
 
-  let user = null;
-  const prefill: SignInState["prefill"] = {};
-  if (raw.includes("@")) {
-    user = await db.user.findUnique({ where: { email: raw.toLowerCase() } });
-    prefill.email = raw.toLowerCase();
-  } else if ((raw.match(/[\d٠-٩]/g) ?? []).length >= 8) {
-    const phone = normalizePhone(raw);
-    user = await db.user.findUnique({ where: { phone } });
-    prefill.phone = phone;
-  } else {
-    const matches = await db.user.findMany({ where: { name: { equals: raw, mode: "insensitive" }, anonymizedAt: null }, take: 2 });
-    if (matches.length > 1) return { step: "identify", error: msg(locale, "manyNames") };
-    user = matches[0] ?? null;
-    prefill.name = raw;
-  }
+  // SEC-01: موبايل دولي أو إيميل بس — مفيش بحث بالاسم
+  const id = classifyIdentifier(raw);
+  if (id.kind === "invalid") return { step: "identify", error: msg(locale, "identifier") };
+  const prefill: SignInState["prefill"] = id.kind === "email" ? { email: id.value } : { phone: id.value };
+  const user = id.kind === "email" ? await db.user.findUnique({ where: { email: id.value } }) : await db.user.findUnique({ where: { phone: id.value } });
 
   if (!user || user.anonymizedAt) return { step: "register", prefill };
 
   // دخل بالإيميل؟ يبقى الرمز يروح الإيميل. غير كده واتساب، ويقدر يغيّر بعدين.
-  const channel: Channel = raw.includes("@") && user.email ? "email" : "whatsapp";
+  const channel: Channel = id.kind === "email" && user.email ? "email" : "whatsapp";
   const issued = await issueCode(user.phone, "sign_in", channel, user.email);
   if (!issued.ok) return { step: "identify", error: msg(locale, "rate") };
   await setPending({ phone: user.phone, email: user.email, signIn: true });
@@ -175,9 +169,12 @@ export async function resend(locale: Locale, prev: SignInState, channel: Channel
   return { ...prev, error: undefined, channel: issued.channel, demoCode: issued.code };
 }
 
-/** دخول سريع بحسابات التجربة — شغال في الوضع التجريبي بس */
+/** دخول سريع بحسابات التجربة — السيرفر بيرفضه لو DEMO_MODE مش true (SEC-01) */
 export async function demoSignIn(locale: string, userId: string) {
-  if (!DEMO_MODE) return;
+  if (!DEMO_MODE) {
+    await audit(null, "auth.demo_sign_in_rejected", "User", userId);
+    throw new Error("Demo sign-in is disabled");
+  }
   const user = await db.user.findUnique({ where: { id: userId } });
   if (!user) return;
   await audit(user.id, "auth.demo_sign_in", "User", user.id);

@@ -610,11 +610,13 @@ model LoginCode {
   codeHash  String    @db.Char(64)
   purpose   String    @default("sign_in") // sign_in أو sign_up
   attempts  Int       @default(0)
+  ip        String?
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
 
   @@index([phone, createdAt])
+  @@index([ip, createdAt])
 }
 
 /// مخزن ملفات احتياطي: بيتستخدم لما S3 مش متظبط (التطوير والنسخة التجريبية).

@@ -205,8 +205,16 @@ export function SignInFlow({ locale, next, demo }: { locale: Locale; next: strin
     <form action={run((f) => identify(locale, state, f))} className="flex flex-col gap-4">
       {err}
       <label className={labelCls}>
-        {L("رقم الموبايل أو الإيميل أو الاسم", "Mobile number, email or name")}
-        <input name="identifier" required autoComplete="username" className={field} placeholder={L("مثلاً +966501234567", "e.g. +966501234567")} />
+        {L("رقم الموبايل (بكود الدولة) أو الإيميل", "Mobile number (with country code) or email")}
+        <input
+          name="identifier"
+          required
+          dir="ltr"
+          autoComplete="username"
+          inputMode="email"
+          className={`${field} text-start`}
+          placeholder={L("مثلاً +966501234567", "e.g. +966501234567")}
+        />
       </label>
       <button type="submit" disabled={busy} className={btn.primary}>
         {busy ? L("لحظة…", "One moment…") : L("كمّل", "Continue")}
