@@ -11,6 +11,7 @@ import { permissionsFor } from "@/lib/authz/ui";
 import { partyNameVisible } from "@/lib/authz/redact";
 import { BLOCKER_TEXT, blockersToAdvance, nextStage, requiredSigners, type Blocker } from "@/lib/deal-machine";
 import { date, dateTime, money, num, toNum, tr } from "@/lib/format";
+import { latestRate } from "@/lib/listing";
 import { districtName } from "@/lib/district";
 import {
   CITY,
@@ -58,8 +59,10 @@ type Props = { params: Promise<{ locale: string; id: string }>; searchParams: Pr
 const CONTRACT_FOR_STAGE: Partial<Record<string, ContractType[]>> = {
   INTEREST: ["COMMISSION_AGREEMENT"],
   PRICE_AGREED: ["PRELIMINARY_CONTRACT", "DEPOSIT_RECEIPT"],
-  PRELIMINARY_CONTRACT: ["DEPOSIT_RECEIPT"],
+  // DEAL-02: نموذج 6 (تعهد المشتري) قبل تقديم التنازل
+  PRELIMINARY_CONTRACT: ["DEPOSIT_RECEIPT", "BUYER_UNDERTAKING", "POWER_OF_ATTORNEY"],
   TRANSFER_FILED: ["POWER_OF_ATTORNEY"],
+  AUTHORITY_APPROVED: ["CLOSING"],
 };
 
 const CANCEL_REASONS: [string, string, string][] = [
@@ -99,6 +102,8 @@ export default async function DealRoom({ params, searchParams }: Props) {
   const ar = locale === "ar";
   const me = await requireUser(locale, `/${locale}/deals/${id}`);
   const deal = await loadDealFor(me, id);
+  // DEAL-01: سعر النهارده (استرشادي) لحد ما يتقفل
+  const indicativeRate = toNum((await latestRate())?.sell ?? 0);
   if (!deal) redirect(`/${locale}/account?denied=1`);
   // MKT-14
   const story = deal.status === "COMPLETED" ? await db.dealStory.findUnique({ where: { dealId: deal.id } }) : null;
@@ -266,8 +271,12 @@ export default async function DealRoom({ params, searchParams }: Props) {
                     const statusText =
                       c.status === "VOID"
                         ? L("ملغي", "Void")
-                        : c.status === "SIGNED"
-                          ? L("اتوقّع من الطرفين", "Signed by both sides")
+                        : c.status === "VERIFIED"
+                          ? L("اتوقّع واتحقق منه", "Signed and verified")
+                          : c.status === "SIGNED"
+                          ? L("اتوقّع من الطرفين · مستني التحقق", "Signed by both sides · awaiting verification")
+                          : c.status === "PARTIALLY_SIGNED"
+                          ? L("اتوقّع من طرف · مستني الطرف التاني", "Signed by one side · awaiting the other")
                           : c.status === "SENT_FOR_SIGNATURE"
                             ? L(`اعتمده المحامي · ${signedCount ? "مستني توقيع الطرف التاني" : "مستني توقيع الطرفين"}`, `Approved by lawyer · ${signedCount ? "awaiting the other signature" : "awaiting both signatures"}`)
                             : c.status === "APPROVED"
@@ -472,10 +481,11 @@ export default async function DealRoom({ params, searchParams }: Props) {
                     [L("السعر المقترح", "Proposed price"), deal.proposedPrice ? money(deal.proposedPrice, "EGP", locale) : "—"],
                     [L("السعر المتفق", "Agreed price"), deal.agreedPrice ? money(deal.agreedPrice, deal.agreedCurrency, locale) : "—"],
                     [
-                      L("سعر الصرف المثبّت", "Locked FX rate"),
-                      deal.lockedUsdEgpRate && deal.exchangeRate
-                        ? `${num(deal.lockedUsdEgpRate, locale, 2)} — ${L("سعر يوم", "rate of")} ${date(deal.exchangeRate.date, locale)}`
-                        : L("بيتثبت لحظة توقيع العقد المبدئي", "Locked when the preliminary contract is signed"),
+                      L("سعر الصرف", "FX rate"),
+                      // DEAL-01: «مقفول» بعد توقيع العقد الابتدائي، و«استرشادي» قبله
+                      deal.lockedUsdEgpRate && deal.rateLockedAt
+                        ? `${num(deal.lockedUsdEgpRate, locale, 2)} — ${L("مقفول بتاريخ", "locked on")} ${date(deal.rateLockedAt, locale)}${deal.exchangeRate ? ` (${L("سعر يوم", "rate of")} ${date(deal.exchangeRate.date, locale)})` : ""}`
+                        : `${num(indicativeRate, locale, 2)} — ${L("استرشادي · بيتقفل لحظة توقيع الطرفين على العقد الابتدائي", "indicative · locks when both parties sign the preliminary contract")}`,
                     ],
                   ]}
                 />

@@ -20,6 +20,7 @@ import { idsByRole, notify } from "@/lib/notifications";
 import { CONTRACT_TYPE, DEAL_STAGE } from "@/lib/labels";
 import { leastLoaded } from "@/lib/assign";
 import { lockRateAt } from "@/lib/fx-lock";
+import { fxLockUpdate } from "@/lib/fx-lock-rule";
 import { referralReward } from "@/lib/referral-rules";
 import { isDemoMode } from "@/lib/demo";
 
@@ -119,7 +120,7 @@ export async function advanceStage(locale: string, dealId: string, form?: FormDa
     for (const o of others) {
       await db.deal.update({ where: { id: o.id }, data: { status: "CANCELLED" } });
       await db.dealEvent.create({ data: { dealId: o.id, type: "CANCELLED", actorId: user.id, data: { reason: "sold_to_other" } } });
-      await db.contract.updateMany({ where: { dealId: o.id, status: { not: "SIGNED" } }, data: { status: "VOID" } });
+      await db.contract.updateMany({ where: { dealId: o.id, status: { notIn: ["SIGNED", "VERIFIED"] } }, data: { status: "VOID" } });
       await notify([o.buyerId], {
         kind: "deal.sold_to_other",
         ar: ["القطعة اللي كنت مهتم بيها اتباعت لمشتري تاني", "تقدر تدوّر على قطع شبهها في السجل."],
@@ -355,11 +356,13 @@ export async function signContract(locale: string, dealId: string, contractId: s
     data: { signatures: all, ...(complete ? { status: "SIGNED", signedAt: new Date(), pdfDocumentId } : {}) },
   });
   // DATA-01: سعر الصرف بيتثبت مرة واحدة لحظة اكتمال توقيع العقد المبدئي
+  // DEAL-01: القفل لحظة اكتمال توقيع الطرفين على العقد الابتدائي بس
   if (complete && contract!.type === "PRELIMINARY_CONTRACT" && !deal.rateLockedAt) {
     const locked = await lockRateAt(new Date());
-    if (locked) {
-      await db.deal.update({ where: { id: dealId }, data: { lockedUsdEgpRate: locked.sell, exchangeRateId: locked.id, rateLockedAt: new Date() } });
-      await audit(user.id, "deal.rate_locked", "Deal", dealId, { rateId: locked.id, sell: toNum(locked.sell), rateDate: locked.date.toISOString() });
+    const upd = fxLockUpdate({ contractType: contract!.type, signingComplete: complete, alreadyLockedAt: deal.rateLockedAt, rate: locked ? { id: locked.id, sell: toNum(locked.sell), source: locked.source } : null, now: new Date() });
+    if (upd && locked) {
+      await db.deal.update({ where: { id: dealId }, data: upd });
+      await audit(user.id, "deal.rate_locked", "Deal", dealId, { rateId: locked.id, sell: toNum(locked.sell), rateDate: locked.date.toISOString(), source: locked.source });
     }
   }
   await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, signedBy: side, complete });
@@ -595,7 +598,7 @@ export async function setDealStatus(locale: string, dealId: string, status: "ACT
   if (status === "CANCELLED" && reason === "other" && !note) done(l, dealId, "?err=note_required");
   await db.deal.update({ where: { id: dealId }, data: { status } });
   if (status === "CANCELLED") {
-    await db.contract.updateMany({ where: { dealId, status: { not: "SIGNED" } }, data: { status: "VOID" } });
+    await db.contract.updateMany({ where: { dealId, status: { notIn: ["SIGNED", "VERIFIED"] } }, data: { status: "VOID" } });
     if (deal.commission) await db.commission.update({ where: { id: deal.commission.id }, data: { status: "WAIVED" } });
     if (deal.listing.status === "IN_DEAL") await db.listing.update({ where: { id: deal.listingId }, data: { status: "PUBLISHED" } });
   }
