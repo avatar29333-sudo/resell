@@ -138,6 +138,12 @@ export const CONTRACT_TYPE: Map = {
   PRELIMINARY_CONTRACT: ["العقد المبدئي", "Preliminary contract"],
   DEPOSIT_RECEIPT: ["محضر العربون", "Deposit receipt"],
   POWER_OF_ATTORNEY: ["توكيل التقديم والمتابعة", "Filing power of attorney"],
+  BUYER_UNDERTAKING: ["تعهد المشتري", "Buyer undertaking"],
+  CLOSING: ["محضر الإغلاق", "Closing record"],
+  CANCELLATION: ["محضر الإلغاء", "Cancellation record"],
+  LISTING_AUTHORIZATION: ["تفويض عرض القطعة", "Listing authorization"],
+  RESCUE_SERVICE: ["اتفاق خدمة إنقاذ المهلة", "Deadline rescue service agreement"],
+  PARTNER_AGREEMENT: ["اتفاقية السمسار الشريك", "Partner broker agreement"],
 };
 
 export const CONTRACT_STATUS: Map = {
@@ -146,6 +152,8 @@ export const CONTRACT_STATUS: Map = {
   APPROVED: ["معتمد", "Approved"],
   SENT_FOR_SIGNATURE: ["مستني التوقيع", "Awaiting signatures"],
   SIGNED: ["متوقّع", "Signed"],
+  PARTIALLY_SIGNED: ["متوقّع من طرف", "Partially signed"],
+  VERIFIED: ["متوقّع ومتحقق منه", "Signed and verified"],
   VOID: ["ملغي", "Void"],
 };
 

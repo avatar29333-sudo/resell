@@ -164,6 +164,12 @@ enum ContractType {
   PRELIMINARY_CONTRACT // عقد مبدئي
   DEPOSIT_RECEIPT // محضر عربون
   POWER_OF_ATTORNEY // توكيل (للتقديم والمتابعة بس)
+  BUYER_UNDERTAKING // نموذج 6: تعهد المشتري
+  CLOSING // نموذج 7: محضر الإغلاق
+  CANCELLATION // نموذج 8: محضر الإلغاء
+  LISTING_AUTHORIZATION // نموذج 1: تفويض عرض
+  RESCUE_SERVICE // نموذج 9: خدمة إنقاذ المهلة
+  PARTNER_AGREEMENT // نموذج 10: اتفاقية الشريك
 }
 
 enum ContractStatus {
@@ -173,6 +179,8 @@ enum ContractStatus {
   SENT_FOR_SIGNATURE
   SIGNED
   VOID
+  PARTIALLY_SIGNED // CON-04: طرف وقّع والتاني لسه
+  VERIFIED // CON-04: النسخة الموقّعة اتحقق منها (مزوّد أو المحامي)
 }
 
 enum CommissionStatus {
@@ -510,6 +518,8 @@ model Deal {
   /// OPS-02: حالة ملف التنازل في الجهاز (SUBMITTED / NEEDS_INFO / APPROVED / REJECTED)
   authorityStatus    String?
   authorityUpdatedAt DateTime?
+  /// DEAL-01: مصدر سعر الصرف المثبّت
+  fxSource        String?
   /// MKT-10: مصدر المشتري لما أبدى اهتمام
   source          Json?
   /// DATA-04: صفقة من بيانات التجربة — ما تدخلش في المؤشر ولا العدادات لما DEMO_MODE مقفول

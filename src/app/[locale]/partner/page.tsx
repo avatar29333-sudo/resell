@@ -75,7 +75,7 @@ export default async function PartnerPage({ params }: { params: Promise<{ locale
                     {l.deals.length === 0
                       ? "—"
                       : l.deals.map((d) => {
-                          const agreed = d.contracts.some((c) => c.type === "COMMISSION_AGREEMENT" && c.status === "SIGNED");
+                          const agreed = d.contracts.some((c) => c.type === "COMMISSION_AGREEMENT" && (c.status === "SIGNED" || c.status === "VERIFIED"));
                           return (
                             <div key={d.id} className="text-sm">
                               <Link href={`/${locale}/deals/${d.id}`} className="text-brand">

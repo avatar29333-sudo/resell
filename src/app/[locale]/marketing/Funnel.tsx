@@ -33,7 +33,7 @@ export async function Funnel({ locale, from, to }: { locale: "ar" | "en"; from?:
     ...requests.map((r) => ({ channel: ch(r.source), kind: "lead" as const })),
     ...listings.map((l) => ({ channel: ch(l.seller.source), kind: "verified" as const })),
     ...deals
-      .filter((d) => d.contracts.some((c) => c.type === "COMMISSION_AGREEMENT" && c.status === "SIGNED"))
+      .filter((d) => d.contracts.some((c) => c.type === "COMMISSION_AGREEMENT" && (c.status === "SIGNED" || c.status === "VERIFIED")))
       .map((d) => ({ channel: ch(d.source ?? d.buyer.source), kind: "agreement" as const })),
     ...deals
       .filter((d) => d.status === "COMPLETED" && d.closedAt && d.closedAt >= start && d.closedAt <= end)

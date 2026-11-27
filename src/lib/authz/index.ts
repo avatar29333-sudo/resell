@@ -39,7 +39,7 @@ export function listingCtx(l: {
   };
 }
 
-const signedByBoth = (cs: (ContractLite & { signatures?: unknown })[], type: string) => cs.some((c) => c.type === type && c.status === "SIGNED");
+const signedByBoth = (cs: (ContractLite & { signatures?: unknown })[], type: string) => cs.some((c) => c.type === type && (c.status === "SIGNED" || c.status === "VERIFIED"));
 
 /** سياق الصفقة من صفقة محمّلة */
 export function dealCtx(d: {

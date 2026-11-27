@@ -40,8 +40,23 @@ describe("DATA-05 — شروط الانتقال", () => {
 
   it("التقديم في الجهاز: عربون محفوظ + مندوب", () => {
     const f = { ...base, stage: "PRELIMINARY_CONTRACT" as const };
-    expect(blockersToAdvance(f)).toEqual(["need_deposit_held", "need_agent"]);
-    expect(blockersToAdvance({ ...f, deposits: [{ escrowStatus: "HELD" }], hasAgent: true })).toEqual([]);
+    // DEAL-02: الانتقال لـ «تقديم التنازل» محتاج نموذج 3 ونموذج 4 متحقق منهم + العربون في البنك + نموذج 6 موقّع + مندوب
+    expect(blockersToAdvance(f)).toEqual(["need_preliminary_verified", "need_deposit_contract_verified", "need_deposit_held", "need_buyer_undertaking", "need_agent"]);
+    const ready = {
+      ...f,
+      deposits: [{ escrowStatus: "HELD" }],
+      hasAgent: true,
+      contracts: [
+        { type: "PRELIMINARY_CONTRACT", status: "VERIFIED" },
+        { type: "DEPOSIT_RECEIPT", status: "VERIFIED" },
+        { type: "BUYER_UNDERTAKING", status: "SIGNED" },
+      ],
+    };
+    expect(blockersToAdvance(ready)).toEqual([]);
+    // regression: العقد الابتدائي «موقّع» بس من غير تحقق ما يكفيش
+    expect(blockersToAdvance({ ...ready, contracts: [{ type: "PRELIMINARY_CONTRACT", status: "SIGNED" }, ready.contracts[1], ready.contracts[2]] })).toEqual(["need_preliminary_verified"]);
+    // ومن غير تعهد المشتري ما ينفعش
+    expect(blockersToAdvance({ ...ready, contracts: ready.contracts.slice(0, 2) })).toEqual(["need_buyer_undertaking"]);
   });
 
   it("موافقة الجهاز بعد إيصال التقديم، والإغلاق بعد اعتماد خطاب الموافقة", () => {
