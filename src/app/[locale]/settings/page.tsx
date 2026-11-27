@@ -256,6 +256,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
 
   async function Commission({ locale }: { locale: "ar" | "en" }) {
     const [rescue, regNo, reward] = await Promise.all([getSetting("rescue"), getSetting("brokerRegistrationNumber"), getSetting("referral.reward")]);
+    const dealFees = await getSetting("deal.fees");
     const [rates, fees, fourEyes, fxCfg, brokersCfg, validity] = await Promise.all([
       getSetting("commission.rates"),
       getSetting("service.fees"),
@@ -343,6 +344,14 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               {L("حد الأربع عيون للصرف (ج.م)", "Four-eyes payout limit (EGP)")}
               <input name="fourEyesLimit" type="number" min={0} step={1000} defaultValue={fourEyes.limitEgp} className={`${field} w-44`} />
               <span className="text-xs text-muted">{money(fourEyes.limitEgp, "EGP", locale)}</span>
+            </label>
+            <label className={labelCls}>
+              {L("رسوم التنازل التقديرية على المشتري (ج.م، 0 = بتتحدد من الجهاز)", "Estimated buyer transfer fee (EGP, 0 = set by the authority)")}
+              <input name="transferFeeEgp" type="number" min={0} step={500} defaultValue={dealFees.transferFeeEgp} className={`${field} w-44`} />
+            </label>
+            <label className={labelCls}>
+              {L("رسوم التوثيق التقديرية (ج.م)", "Estimated notary fee (EGP)")}
+              <input name="notaryFeeEgp" type="number" min={0} step={100} defaultValue={dealFees.notaryFeeEgp} className={`${field} w-44`} />
             </label>
             <label className={labelCls}>
               {L("أقصى فرق للسعر اليدوي عن الآلي (%)", "Max manual rate gap from automatic (%)")}

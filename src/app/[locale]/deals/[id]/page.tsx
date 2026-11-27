@@ -4,7 +4,9 @@ import type { ContractType } from "@prisma/client";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { factsOf, loadDealFor } from "@/lib/access";
+import { factsOf, loadDealFor, overviewOf } from "@/lib/access";
+import { DealOverview, DealTimeline, StatementLink } from "./Overview";
+import { eventCategory, eventSentence, type EventCategory } from "@/lib/deal-overview";
 import { can, dealCtx, listingCtx, subject } from "@/lib/authz";
 import { allowedDealUploads, type UploadSide } from "@/lib/authz/policy";
 import { permissionsFor } from "@/lib/authz/ui";
@@ -60,7 +62,7 @@ import {
   uploadDealDocument,
 } from "../actions";
 
-type Props = { params: Promise<{ locale: string; id: string }>; searchParams: Promise<{ err?: string; ok?: string; new?: string; ev?: string }> };
+type Props = { params: Promise<{ locale: string; id: string }>; searchParams: Promise<{ err?: string; ok?: string; new?: string; ev?: string; log?: string }> };
 
 // العقد اللي بيتعمل في كل مرحلة (DATA-05)
 const CONTRACT_FOR_STAGE: Partial<Record<string, ContractType[]>> = {
@@ -173,6 +175,9 @@ export default async function DealRoom({ params, searchParams }: Props) {
     ...d,
     canOpen: can(subject(me), "document.view", { ...lc, document: { type: d.type, ownerId: d.ownerId, uploadedById: d.uploadedById, status: d.status } }).allowed,
   }));
+  const ovw = overviewOf(deal);
+  const dealFees = await getSetting("deal.fees");
+  const logFilter = (["money", "docs", "comms", "stage"] as const).find((x) => x === sp.log) as EventCategory | undefined;
   const events = deal.events.filter((e) => !(e.data as { internal?: boolean } | null)?.internal || p["deal.internal_note"].allowed);
 
   return (
@@ -229,6 +234,26 @@ export default async function DealRoom({ params, searchParams }: Props) {
 
         <StageStepper stage={deal.stage} locale={locale} cancelled={deal.status === "CANCELLED"} />
 
+        {/* TXN-01: 4 كروت ثابتة أعلى الغرفة */}
+        <DealOverview
+          locale={locale}
+          facts={ovw}
+          side={side}
+          staffMoney={!side && p["deal.view_money"].allowed}
+          plot={plot}
+          codeVisible={codeVisible}
+          price={toNum(deal.agreedPrice ?? deal.proposedPrice ?? deal.listing.price)}
+          commission={deal.commission ? { sellerAmount: toNum(deal.commission.sellerAmount), buyerAmount: toNum(deal.commission.buyerAmount), sellerRatePct: toNum(deal.commission.sellerRatePct), buyerRatePct: toNum(deal.commission.buyerRatePct), status: deal.commission.status } : null}
+          fees={dealFees}
+          remainingUsd={deal.listing.remainingUsd ? toNum(deal.listing.remainingUsd) : null}
+          fx={{ locked: !!(deal.lockedUsdEgpRate && deal.rateLockedAt), rate: deal.lockedUsdEgpRate ? toNum(deal.lockedUsdEgpRate) : indicativeRate, at: deal.rateLockedAt }}
+          dealId={deal.id}
+        />
+        <div className="flex flex-wrap gap-2">
+          <StatementLink locale={locale} dealId={deal.id} />
+        </div>
+        <DealTimeline locale={locale} facts={ovw} />
+
         {open && to && (
           <Card title={L(`الخطوة الجاية: ${label(DEAL_STAGE, to, locale)}`, `Next: ${label(DEAL_STAGE, to, locale)}`)}>
             {blockers.length ? (
@@ -257,7 +282,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
         <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <div className="flex flex-col gap-6">
             <Card
-              title={L("العقود", "Contracts")}
+              title={<span id="contracts" className="scroll-mt-24">{L("العقود", "Contracts")}</span>}
               actions={
                 p["contract.create"].allowed &&
                 open &&
@@ -439,15 +464,22 @@ export default async function DealRoom({ params, searchParams }: Props) {
                   <button className={btn.secondary}>{L("أضف", "Add")}</button>
                 </form>
               )}
-              <ol className="flex flex-col gap-3 border-s-2 border-line ps-4">
-                {events.map((e) => {
+              {/* TXN-01: فلتر «فلوس / مستندات / تواصل» */}
+              <nav aria-label={L("فلتر السجل", "Log filter")} className="flex flex-wrap gap-2">
+                {([[undefined, "الكل", "All"], ["money", "فلوس", "Money"], ["docs", "مستندات", "Documents"], ["comms", "تواصل", "Communication"], ["stage", "مراحل", "Stages"]] as const).map(([k, a, e]) => (
+                  <Link key={a} href={`/${locale}/deals/${id}${k ? `?log=${k}` : ""}#log`} aria-current={logFilter === k ? "true" : undefined} className={`inline-flex min-h-11 items-center border px-3 text-sm font-semibold ${logFilter === k ? "border-navy bg-navy text-white" : "border-line"}`}>
+                    {ar ? a : e}
+                  </Link>
+                ))}
+              </nav>
+              <ol id="log" className="flex scroll-mt-24 flex-col gap-3 border-s-2 border-line ps-4">
+                {events.filter((e) => !logFilter || eventCategory(e.type, (e.data ?? {}) as Record<string, unknown>) === logFilter).map((e) => {
                   const data = (e.data ?? {}) as Record<string, unknown>;
+                  const actorName = e.actor && (namesVisible || !side || e.actorId === me.id || [deal.brokerId, deal.lawyerId, deal.agentId].includes(e.actorId)) ? (e.actorId === me.id ? L("إنت", "You") : e.actor.name) : L("طرف في الصفقة", "A party");
                   return (
                     <li key={e.id} className="flex flex-col gap-0.5">
                       <span className="font-semibold">
-                        {label(DEAL_EVENT, e.type, locale)}
-                        {e.toStage && ` → ${label(DEAL_STAGE, e.toStage, locale)}`}
-                        {typeof data.type === "string" && ` · ${label(data.type in CONTRACT_TYPE ? CONTRACT_TYPE : DOC_TYPE, data.type, locale)}`}
+                        {eventSentence({ type: e.type, toStage: e.toStage, data }, actorName, ar)}
                         {data.internal === true && <Badge tone="gray">{L("داخلية", "Internal")}</Badge>}
                       </span>
                       {typeof data.note === "string" && <span>{data.note}</span>}
@@ -510,7 +542,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
             </Card>
 
             {p["deal.view_money"].allowed && (
-              <Card title={L("السعر", "Price")}>
+              <Card title={<span id="price" className="scroll-mt-24">{L("السعر", "Price")}</span>}>
                 <DL
                   items={[
                     [L("السعر المطلوب", "Asking price"), money(deal.listing.price, deal.listing.currency, locale)],
@@ -588,7 +620,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
             )}
 
             {p["deposit.view"].allowed && (
-              <Card title={L("العربون", "Deposit")}>
+              <Card title={<span id="deposit" className="scroll-mt-24">{L("العربون", "Deposit")}</span>}>
                 <p className="text-sm text-muted">{L("الفلوس نفسها في حساب ضمان عند البنك، والمنصة بتتابع الحالة بس.", "The money sits in a bank escrow account; the platform only tracks its status.")}</p>
                 {deal.deposits.map((d) => {
                   // DATA-02: الحالة من الحقيقة

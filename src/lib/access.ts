@@ -112,3 +112,19 @@ export async function loadDealFor(user: User, dealId: string) {
   }
   return deal;
 }
+
+/** TXN-01: بيانات «وضوح المعاملة» من الصفقة المحمّلة */
+export function overviewOf(deal: LoadedDeal): import("./deal-overview").OverviewInput {
+  const f = factsOf(deal);
+  const n = (v: unknown) => (v == null ? null : Number(String(v)));
+  const entered = [...deal.events].filter((e) => e.type === "STAGE_CHANGED" && e.toStage === deal.stage).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0]?.createdAt;
+  return {
+    ...f,
+    proposedPrice: n(deal.proposedPrice),
+    buyerPriceOkAt: deal.buyerPriceOkAt,
+    sellerPriceOkAt: deal.sellerPriceOkAt,
+    contracts: deal.contracts.map((c) => ({ id: c.id, type: c.type, status: c.status, signatures: ((c.signatures as { role: string }[] | null) ?? []).map((s) => ({ role: s.role })) })),
+    deposits: deal.deposits.map((d) => ({ id: d.id, amount: n(d.amount) ?? 0, escrowStatus: d.escrowStatus, buyerSentAt: d.buyerSentAt, sellerReceivedAt: d.sellerReceivedAt, bankReference: d.bankReference, heldAt: d.heldAt, settledAt: d.settledAt })),
+    stageEnteredAt: entered ?? deal.createdAt,
+  };
+}

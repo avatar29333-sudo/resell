@@ -200,6 +200,7 @@ export async function saveOps(locale: string, form: FormData) {
   const dev = Math.min(50, Math.max(0.5, Number(form.get("maxDeviationPct")) || 5));
   const access = form.get("unassignedBrokers") === "read" ? "read" : "none";
   await saveSetting(me.id, "payments.fourEyes", { limitEgp: limit });
+  await saveSetting(me.id, "deal.fees", { transferFeeEgp: Math.max(0, Number(form.get("transferFeeEgp")) || 0), notaryFeeEgp: Math.max(0, Number(form.get("notaryFeeEgp")) || 0) });
   await saveSetting(me.id, "fx.manual", { maxDeviationPct: dev });
   await saveSetting(me.id, "deals.unassignedBrokers", { access });
   await saveSetting(me.id, "documents.validity", {
