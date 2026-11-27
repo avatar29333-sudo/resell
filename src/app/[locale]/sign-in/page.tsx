@@ -21,7 +21,7 @@ export default async function SignInPage({ params, searchParams }: Props) {
   // حسابات التجربة: الفريق + أول عميلين
   const demoUsers = DEMO_MODE
     ? [
-        ...(await db.user.findMany({ where: { role: { not: "CLIENT" } }, orderBy: [{ role: "asc" }, { name: "asc" }], take: 10 })),
+        ...(await db.user.findMany({ where: { role: { not: "CLIENT" }, status: "ACTIVE" }, orderBy: [{ role: "asc" }, { name: "asc" }], take: 12 })),
         ...(await db.user.findMany({ where: { role: "CLIENT", listings: { some: {} } }, orderBy: { phone: "asc" }, take: 1 })),
         ...(await db.user.findMany({ where: { role: "CLIENT", dealsAsBuyer: { some: {} } }, orderBy: { phone: "asc" }, take: 1 })),
       ]

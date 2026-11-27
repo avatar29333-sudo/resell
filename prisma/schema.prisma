@@ -27,6 +27,21 @@ enum Role {
   AGENT // مندوب الجهاز
   FINANCE // مالي
   ADMIN // أدمن
+  PARTNER_BROKER // سمسار شريك من برّه (PERM-05)
+  BROKER_LEAD // مسؤول الوسطاء (PERM-05)
+}
+
+/// حالة الحساب (PERM-07)
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+/// طلب صرف محتاج موافقة أدمن — قاعدة الأربع عيون (PERM-09)
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 /// مستويات الحساب — افتراض مبدئي لحد ما نطابقها مع شاشة «مستويات الحساب»
@@ -97,6 +112,7 @@ enum DocumentType {
   CONTRACT_PDF // نسخة عقد
   POWER_OF_ATTORNEY // توكيل
   OTHER
+  FILING_RECEIPT // إيصال تقديم الطلب في الجهاز (المندوب)
 }
 
 enum DocumentStatus {
@@ -220,8 +236,24 @@ model User {
   totpEnabledAt    DateTime?
   // موافقة صريحة على الشروط وسياسة الخصوصية (قانون 151)
   termsAcceptedAt  DateTime?
+  // PERM-07: إيقاف الحساب
+  status           AccountStatus @default(ACTIVE)
+  suspendedAt      DateTime?
+  suspendReason    String?
+  // PERM-08: بيزيد مع تغيير الدور أو الإيقاف → كل الجلسات القديمة بتتقفل
+  sessionVersion   Int          @default(0)
+  // PERM-05: السمسار الشريك — رقم القيد بيتراجع من الأدمن قبل التفعيل
+  brokerRegNo      String?
+  partnerApprovedAt DateTime?
+  // عدد مرات رفض التوثيق (بعد 3 = مراجعة أدمن)
+  kycRejections    Int          @default(0)
 
   notifications       Notification[]
+  assignedListingsBroker Listing[] @relation("ListingBroker")
+  assignedListingsLawyer Listing[] @relation("ListingLawyer")
+  submittedListings      Listing[] @relation("ListingSubmitter")
+  paymentRequests        PaymentApproval[] @relation("ApprovalRequester")
+  paymentDecisions       PaymentApproval[] @relation("ApprovalDecider")
   kycProfile          KycProfile?      @relation("KycUser")
   kycReviews          KycProfile[]     @relation("KycReviewer")
   listings            Listing[]        @relation("Seller")
@@ -305,6 +337,15 @@ model Listing {
   paidAmountUsd Decimal?      @db.Decimal(14, 2)
   status        ListingStatus @default(DRAFT)
   publishedAt   DateTime?
+  // PERM-04: الإسناد — الوسيط والمحامي المسؤولين عن العرض
+  assignedBrokerId String?
+  assignedBroker   User?      @relation("ListingBroker", fields: [assignedBrokerId], references: [id])
+  assignedLawyerId String?
+  assignedLawyer   User?      @relation("ListingLawyer", fields: [assignedLawyerId], references: [id])
+  // PERM-05: السمسار الشريك اللي رفع العرض نيابة عن عميله + موافقة العميل
+  submittedById    String?
+  submittedBy      User?      @relation("ListingSubmitter", fields: [submittedById], references: [id])
+  clientConsentAt  DateTime?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -314,6 +355,26 @@ model Listing {
   @@index([status, publishedAt])
   @@index([plotId])
   @@index([sellerId])
+  @@index([assignedBrokerId])
+}
+
+/// PERM-09: صرف فوق الحد محتاج موافقة أدمن قبل ما يتنفذ
+model PaymentApproval {
+  id            String         @id @default(cuid())
+  depositId     String
+  deposit       Deposit        @relation(fields: [depositId], references: [id])
+  action        String // RELEASED_TO_SELLER أو REFUNDED_TO_BUYER
+  amount        Decimal        @db.Decimal(14, 2)
+  status        ApprovalStatus @default(PENDING)
+  requestedById String
+  requestedBy   User           @relation("ApprovalRequester", fields: [requestedById], references: [id])
+  decidedById   String?
+  decidedBy     User?          @relation("ApprovalDecider", fields: [decidedById], references: [id])
+  note          String?
+  createdAt     DateTime       @default(now())
+  decidedAt     DateTime?
+
+  @@index([status, createdAt])
 }
 
 /// المستندات: كل إصدار بيتحفظ، ومفيش حذف.
@@ -389,6 +450,12 @@ model Deal {
   status          DealStatus @default(ACTIVE)
   agreedPrice     Decimal?   @db.Decimal(14, 2)
   agreedCurrency  Currency?
+  // السعر المقترح من الوسيط — بيتسجل «متفق» بعد ما الطرفين يوافقوا جوه الغرفة
+  proposedPrice   Decimal?   @db.Decimal(14, 2)
+  buyerPriceOkAt  DateTime?
+  sellerPriceOkAt DateTime?
+  // DATA-01: سعر الصرف بيتثبت مرة واحدة لحظة توقيع العقد المبدئي
+  rateLockedAt    DateTime?
   //سعر الصرف المثبّت وقت اتفاق السعر (نسخة من القيمة + المرجع)
   lockedUsdEgpRate Decimal?  @db.Decimal(12, 4)
   exchangeRateId  String?
@@ -482,6 +549,7 @@ model Deposit {
   currency          Currency     @default(EGP)
   receiptDocumentId String?      @unique
   receiptDocument   Document?    @relation(fields: [receiptDocumentId], references: [id])
+  approvals         PaymentApproval[]
   escrowStatus      EscrowStatus @default(AWAITING_TRANSFER)
   bankReference     String?
   heldAt            DateTime?
