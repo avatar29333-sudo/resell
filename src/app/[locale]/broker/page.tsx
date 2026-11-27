@@ -127,7 +127,10 @@ async function Queue({ locale, me }: { locale: "ar" | "en"; me: User }) {
                       {label(CITY, l.plot.city, locale)} — {districtName(l.plot, locale)}
                     </Link>
                     <div className="text-xs text-muted" dir="ltr">
-                      {l.plot.code} · {num(l.plot.areaSqm, locale)} m²
+                      {l.plot.code}
+                    </div>
+                    <div className="text-xs text-muted">
+                      {num(l.plot.areaSqm, locale)} {L("م²", "m²")}
                     </div>
                     <div className="text-xs text-muted">
                       {L("الوسيط:", "Broker:")} {l.assignedBroker?.name ?? L("مش متسند", "Unassigned")}

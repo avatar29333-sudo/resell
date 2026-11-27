@@ -38,7 +38,7 @@ export async function submitRescue(locale: string, _prev: RescueState, form: For
       requesterId: user?.id,
       city,
       plotCode,
-      message: [area && `${ar ? "المساحة" : "Area"}: ${area} m²`, String(form.get("message") ?? "").trim()].filter(Boolean).join(" — ") || null,
+      message: [area && `${ar ? "المساحة" : "Area"}: ${area} ${ar ? "م²" : "m²"}`, String(form.get("message") ?? "").trim()].filter(Boolean).join(" — ") || null,
     },
   });
 

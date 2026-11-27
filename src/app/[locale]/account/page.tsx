@@ -373,6 +373,13 @@ export default async function AccountPage({ params, searchParams }: Props) {
             </Link>
           </Card>
 
+          {/* UX-11: حسابات الفريق الموثّقة (أو أي حساب موثّق من غير ملف) ما يتطلبش منها توثيق */}
+          {me.accountLevel === "VERIFIED" && (!kyc || kyc.status === "APPROVED") ? (
+            <Card title={<span id="kyc">{L("توثيق الهوية", "ID verification")}</span>}>
+              <Badge tone="green">{L("حسابك موثّق", "Your account is verified")}</Badge>
+              <p className="text-sm text-muted">{L("مش محتاج ترفع أي حاجة.", "Nothing to upload.")}</p>
+            </Card>
+          ) : (
           <Card title={<span id="kyc">{L("توثيق الهوية", "ID verification")}</span>}>
             {kyc && <Badge tone={toneOf(kyc.status)}>{label(VERIFICATION, kyc.status, locale)}</Badge>}
             {sp.kyc === "sent" && <Notice tone="green">{L("استلمنا صورك، والمراجعة خلال يوم عمل.", "We received your images; review takes one working day.")}</Notice>}
@@ -405,6 +412,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
               </form>
             )}
           </Card>
+          )}
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">

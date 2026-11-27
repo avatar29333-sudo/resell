@@ -4,6 +4,13 @@ import { isPrivatePath } from "@/lib/meta";
 
 /** SEC-08: هيدرز الأمان لكل الصفحات (ملفات /api/files ليها هيدرز خاصة بيها ومش داخلة هنا) */
 export function middleware(req: NextRequest) {
+  // UX-11: مسار من غير لغة (مثلاً /xyz) → /ar/xyz عشان يطلع بصفحة الموقع (404 عربي لو مش موجود)
+  const first = req.nextUrl.pathname.split("/")[1] ?? "";
+  if (first && first !== "ar" && first !== "en" && first !== "api" && !first.includes(".")) {
+    const url = req.nextUrl.clone();
+    url.pathname = `/ar${req.nextUrl.pathname}`;
+    return NextResponse.redirect(url);
+  }
   const nonce = btoa(crypto.randomUUID());
   let s3Origin: string | null = null;
   try {
