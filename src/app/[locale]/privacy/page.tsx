@@ -2,7 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { tr } from "@/lib/format";
+import { pageMeta } from "@/lib/meta";
 import { Container, Notice, PageHeader } from "@/components/ui";
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "سياسة الخصوصية", "Privacy policy");
 
 export default async function PrivacyPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;

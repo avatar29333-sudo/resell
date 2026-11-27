@@ -9,12 +9,15 @@ import { arrangeListings, registerHref } from "@/lib/register";
 import { daysUntil, money, num, toNum, tr } from "@/lib/format";
 import { districtName } from "@/lib/district";
 import { CITY, CITY_KEYS, LISTING_STATUS, PAYMENT_STATUS, PRICE_TYPE, label, toneOf } from "@/lib/labels";
+import { pageMeta } from "@/lib/meta";
 import { Badge, Container, Empty, PageHeader, btn, field, labelCls } from "@/components/ui";
 
 type Props = {
   params: Promise<{ locale: string }>;
   searchParams: Promise<{ city?: string; area?: string; budget?: string; sort?: string; paid?: string; inDeal?: string; page?: string }>;
 };
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "سجل العروض", "Listings register");
 
 export default async function ListingsPage({ params, searchParams }: Props) {
   const { locale } = await params;

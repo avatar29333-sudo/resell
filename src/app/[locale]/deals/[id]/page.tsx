@@ -83,6 +83,12 @@ const ERRORS: Record<string, [string, string]> = {
   file: ["اختار ملف PDF أو صورة (JPG/PNG/WebP).", "Choose a PDF or image (JPG/PNG/WebP) file."],
 };
 
+export async function generateMetadata({ params }: { params: Promise<{ locale: string; id: string }> }) {
+  const { locale, id } = await params;
+  const t = locale === "en" ? "Deal" : "صفقة";
+  return { title: `${t} #${id.slice(-6).toUpperCase()}`, robots: { index: false, follow: false } };
+}
+
 export default async function DealRoom({ params, searchParams }: Props) {
   const { locale, id } = await params;
   if (!isLocale(locale)) notFound();

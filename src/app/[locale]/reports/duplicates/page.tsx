@@ -7,9 +7,12 @@ import { findDuplicates, sameBuyerGroups } from "@/lib/duplicates";
 import { districtName } from "@/lib/district";
 import { date, money, num, toNum, tr } from "@/lib/format";
 import { CITY, DEAL_STAGE, DEAL_STATUS, LISTING_STATUS, label, toneOf } from "@/lib/labels";
+import { pageMeta } from "@/lib/meta";
 import { Badge, Card, Container, Empty, PageHeader } from "@/components/ui";
 
 /** DATA-08 — تقرير الأدمن بالقطع المحتمل تكرارها */
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "قطع محتمل تكرارها", "Possible duplicates", { noindex: true });
+
 export default async function DuplicatesPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();

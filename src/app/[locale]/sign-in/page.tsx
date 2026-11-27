@@ -7,9 +7,12 @@ import { tr } from "@/lib/format";
 import { ROLE, label } from "@/lib/labels";
 import { Card, Container, PageHeader } from "@/components/ui";
 import { SignInFlow } from "./SignInFlow";
+import { pageMeta } from "@/lib/meta";
 import { demoSignIn } from "./actions";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ next?: string }> };
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "دخول أو حساب جديد", "Sign in", { noindex: true });
 
 export default async function SignInPage({ params, searchParams }: Props) {
   const { locale } = await params;

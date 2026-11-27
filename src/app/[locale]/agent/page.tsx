@@ -12,6 +12,7 @@ import { CITY, DEAL_STAGE, SERVICE_STATUS, SERVICE_TYPE, label, toneOf } from "@
 import { Badge, Card, Container, Empty, FileLink, Notice, PageHeader, Stat, btn, field } from "@/components/ui";
 import { updateServiceRequest } from "../broker/actions";
 import { submitSiteReport, updateAuthorityStatus } from "./actions";
+import { pageMeta } from "@/lib/meta";
 import { SiteReportForm } from "./SiteReportForm";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ from?: string; err?: string; ok?: string }> };
@@ -35,6 +36,8 @@ const AGENT_ERRORS: Record<string, [string, string]> = {
 };
 
 /** صفحة المندوب (SEC-04 + OPS-02): المعاينات والصفقات المسندة ليه بس */
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "لوحة المندوب", "Field agent dashboard", { noindex: true });
+
 export default async function AgentPage({ params, searchParams }: Props) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();

@@ -6,9 +6,12 @@ import { REQUIRE_STAFF_2FA, STAFF_ROLES, requireUser } from "@/lib/auth";
 import { decryptSecret, otpauthUri } from "@/lib/totp";
 import { date, tr } from "@/lib/format";
 import { Badge, Card, Container, Notice, PageHeader, btn, field, labelCls } from "@/components/ui";
+import { pageMeta } from "@/lib/meta";
 import { confirmTotp, deleteMyAccount, disableTotp, startTotp } from "./actions";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ ok?: string; err?: string; required?: string }> };
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "الأمان والتحقق الثنائي", "Security", { noindex: true });
 
 export default async function SecurityPage({ params, searchParams }: Props) {
   const { locale } = await params;

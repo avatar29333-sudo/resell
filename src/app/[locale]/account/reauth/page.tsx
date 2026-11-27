@@ -4,11 +4,14 @@ import { isLocale } from "@/i18n/config";
 import { DEMO_MODE, REAUTH_MINUTES, requireUser } from "@/lib/auth";
 import { maskPhone, tr } from "@/lib/format";
 import { Card, Container, Notice, PageHeader, btn, field, labelCls } from "@/components/ui";
+import { pageMeta } from "@/lib/meta";
 import { confirmReauth, sendReauthCode } from "./actions";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ next?: string; sent?: string; err?: string }> };
 
 /** PERM-08: تأكيد الهوية تاني قبل الأفعال الحرجة (صرف، تغيير دور، أسعار الصرف) */
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "أكّد هويتك", "Confirm it\'s you", { noindex: true });
+
 export default async function ReauthPage({ params, searchParams }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();

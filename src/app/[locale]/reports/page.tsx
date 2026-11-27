@@ -9,6 +9,7 @@ import { loadIndex } from "@/lib/price-index-data";
 import { STAGES } from "@/lib/deal-machine";
 import { money, num, toNum, tr } from "@/lib/format";
 import { CITY, CITY_KEYS, DEAL_STAGE, LISTING_STATUS, SERVICE_STATUS, label } from "@/lib/labels";
+import { pageMeta } from "@/lib/meta";
 import { Card, Container, PageHeader, Stat, Table } from "@/components/ui";
 
 function Bars({ rows, locale }: { rows: { label: string; value: number }[]; locale: "ar" | "en" }) {
@@ -27,6 +28,8 @@ function Bars({ rows, locale }: { rows: { label: string; value: number }[]; loca
     </ul>
   );
 }
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "التقارير", "Reports", { noindex: true });
 
 export default async function ReportsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;

@@ -5,6 +5,7 @@ import { isLocale, type Locale } from "@/i18n/config";
 import { loadIndex } from "@/lib/price-index-data";
 import { money, num, tr } from "@/lib/format";
 import { CITY, CITY_KEYS, label } from "@/lib/labels";
+import { pageMeta } from "@/lib/meta";
 import { Card, Container, Empty, PageHeader, Table } from "@/components/ui";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ city?: string }> };
@@ -55,6 +56,8 @@ function LineChart({ points, locale }: { points: { x: Date; y: number; n: number
     </svg>
   );
 }
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "مؤشر أسعار بيت الوطن", "Beit El Watan price index");
 
 export default async function PriceIndexPage({ params, searchParams }: Props) {
   const { locale } = await params;

@@ -14,6 +14,12 @@ import { PrintButton } from "@/components/PrintButton";
 import { Logo } from "@/components/Logo";
 
 // تقرير المعاينة — صفحة مجهّزة للطباعة أو الحفظ PDF من المتصفح
+export async function generateMetadata({ params }: { params: Promise<{ locale: string; id: string }> }) {
+  const { locale, id } = await params;
+  const t = locale === "en" ? "Inspection report" : "تقرير المعاينة";
+  return { title: `${t} #${id.slice(-6).toUpperCase()}`, robots: { index: false, follow: false } };
+}
+
 export default async function InspectionReport({ params }: { params: Promise<{ locale: string; id: string }> }) {
   const { locale, id } = await params;
   if (!isLocale(locale)) notFound();

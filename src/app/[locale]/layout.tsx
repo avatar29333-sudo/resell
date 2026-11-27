@@ -8,6 +8,7 @@ import { getDictionary } from "@/i18n/dictionaries";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { LocalizedValidity } from "@/components/LocalizedValidity";
+import { siteUrl } from "@/lib/meta";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
@@ -27,10 +28,13 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const { locale } = await params;
   if (!isLocale(locale)) return {};
   const t = getDictionary(locale);
+  // UX-08: كل صفحة بتحط عنوانها، والقالب بيضيف « · Resell»
   return {
-    title: t.meta.title,
+    metadataBase: new URL(siteUrl()),
+    title: { default: t.meta.title, template: "%s · Resell" },
     description: t.meta.description,
     alternates: { languages: { ar: "/ar", en: "/en" } },
+    openGraph: { siteName: "Resell", locale: locale === "ar" ? "ar_EG" : "en_US", type: "website" },
   };
 }
 

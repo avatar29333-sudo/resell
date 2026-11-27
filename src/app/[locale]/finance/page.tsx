@@ -11,6 +11,7 @@ import { CITY, COMMISSION_STATUS, DEAL_STAGE, DEAL_STATUS, label, toneOf } from 
 import { Badge, Card, Container, Empty, Notice, PageHeader, Stat, Table, Tabs, btn, field, labelCls } from "@/components/ui";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { confirmDeposit, setCommissionStatus, settleDeposit } from "../deals/actions";
+import { pageMeta } from "@/lib/meta";
 import { saveReconciliation } from "./actions";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string; ok?: string }> };
@@ -30,6 +31,8 @@ const FIN_OK: Record<string, [string, string]> = {
 };
 
 /** OPS-01 — شاشة المالية: العرابين، العمولات، والمطابقة الشهرية */
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "المالية", "Finance", { noindex: true });
+
 export default async function FinancePage({ params, searchParams }: Props) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();

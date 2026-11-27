@@ -13,6 +13,7 @@ import { ACCOUNT_LEVEL, ACCOUNT_STATUS, CITY, CITY_KEYS, CONTRACT_TYPE, RATE_SOU
 import { Badge, Card, Container, DL, Notice, PageHeader, Table, Tabs, btn, field, labelCls } from "@/components/ui";
 import { addDistrict, addManualRate, bumpTemplate, fetchRateNow, moveFilesToS3, saveCommission, saveFees, saveOps, setUserRole, suspendUser, toggleDistrict, unsuspendUser } from "./actions";
 import { RoleForm } from "./RoleForm";
+import { pageMeta } from "@/lib/meta";
 import { storageMode } from "@/lib/storage";
 
 type Props = {
@@ -28,6 +29,8 @@ const SETTINGS_ERRORS: Record<string, [string, string]> = {
   rate_invalid: ["سعر البيع لازم يكون أكبر من أو يساوي سعر الشراء.", "The sell rate must be greater than or equal to the buy rate."],
   rate_deviation: ["السعر بعيد عن آخر سعر آلي أكتر من الحد المسموح — علّم على «متأكد» لو ده مقصود.", "The rate is further from the last automatic rate than allowed — tick “I'm sure” if intended."],
 };
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "الإعدادات", "Settings", { noindex: true });
 
 export default async function SettingsPage({ params, searchParams }: Props) {
   const { locale } = await params;

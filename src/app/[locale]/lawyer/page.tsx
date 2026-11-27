@@ -11,11 +11,14 @@ import { CITY, CONTRACT_TYPE, DOC_TYPE, REVIEW_DECISION, label, toneOf } from "@
 import { Badge, Card, Container, Empty, FileLink, Notice, PageHeader, Stat, Table, btn } from "@/components/ui";
 import { reviewDocument } from "./actions";
 import { CHECKLISTS } from "./checklists";
+import { pageMeta } from "@/lib/meta";
 import { ReviewForm } from "./ReviewForm";
 
 const REVIEWABLE = ["ALLOCATION_LETTER", "PAYMENT_RECEIPT", "AUTHORITY_STATEMENT", "POWER_OF_ATTORNEY", "OTHER"] as const;
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ err?: string }> };
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "شاشة المحامي", "Lawyer workspace", { noindex: true });
 
 export default async function LawyerPage({ params, searchParams }: Props) {
   const { locale } = await params;

@@ -1,11 +1,14 @@
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { date, daysUntil, num, tr } from "@/lib/format";
+import { pageMeta } from "@/lib/meta";
 import { RescueCalculator, RescueForm } from "./RescueParts";
 
 // قرار مجلس الإدارة رقم 220 بتاريخ 16 نوفمبر 2026 — التقديم خلال شهرين
 const DECISION_DATE = new Date("2026-11-16");
 const DEADLINE = new Date("2027-01-16");
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "إنقاذ مهلة البناء", "Build deadline rescue");
 
 export default async function RescuePage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;

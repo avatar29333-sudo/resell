@@ -6,7 +6,10 @@ import { db } from "@/lib/db";
 import { can, subject } from "@/lib/authz";
 import { tr } from "@/lib/format";
 import { Card, Container, Notice, PageHeader } from "@/components/ui";
+import { pageMeta } from "@/lib/meta";
 import { Wizard } from "./Wizard";
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "اعرض قطعتك", "List your plot", { noindex: true });
 
 export default async function ListYourPlotPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
@@ -17,6 +18,21 @@ import { PlotMap } from "@/components/PlotMap";
 import { CostCalculator } from "@/components/CostCalculator";
 
 type Props = { params: Promise<{ locale: string; id: string }> };
+
+/** UX-08: «أرض 405م² · القاهرة الجديدة — المرحلة الرابعة · Resell» + وصف للمشاركة */
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { locale, id } = await params;
+  if (!isLocale(locale)) return {};
+  const l = await db.listing.findUnique({ where: { id }, include: { plot: true, seller: { select: { status: true } } } });
+  if (!l || !["PUBLISHED", "IN_DEAL", "SOLD"].includes(l.status) || l.seller.status !== "ACTIVE") return { title: locale === "ar" ? "عرض" : "Listing", robots: { index: false } };
+  const area = num(l.plot.areaSqm, locale);
+  const place = `${label(CITY, l.plot.city, locale)} — ${districtName(l.plot, locale)}`;
+  const title = locale === "ar" ? `أرض ${area}م² · ${place}` : `${area} m² plot · ${place}`;
+  const rate = await latestRate();
+  const price = money(totalEgp(l, toNum(rate?.sell ?? 50)), "EGP", locale);
+  const description = locale === "ar" ? `${price} شامل · ورق متراجع مع محامي · بيت الوطن` : `${price} all-in · lawyer-checked papers · Beit El Watan`;
+  return { title, description, openGraph: { title: `${title} · Resell`, description, type: "website" }, alternates: { languages: { ar: `/ar/listings/${id}`, en: `/en/listings/${id}` } } };
+}
 
 export default async function ListingPage({ params }: Props) {
   const { locale, id } = await params;

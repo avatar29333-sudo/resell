@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SECURITY_HEADERS, buildCsp } from "@/lib/csp";
+import { isPrivatePath } from "@/lib/meta";
 
 /** SEC-08: هيدرز الأمان لكل الصفحات (ملفات /api/files ليها هيدرز خاصة بيها ومش داخلة هنا) */
 export function middleware(req: NextRequest) {
@@ -20,13 +21,15 @@ export function middleware(req: NextRequest) {
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   res.headers.set("Content-Security-Policy", csp);
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+  // UX-08: الصفحات الخاصة noindex حتى لو حد لقى رابطها
+  if (isPrivatePath(req.nextUrl.pathname)) res.headers.set("X-Robots-Tag", "noindex, nofollow");
   return res;
 }
 
 export const config = {
   matcher: [
     {
-      source: "/((?!api/files|_next/static|_next/image|favicon.ico|icon|apple-icon).*)",
+      source: "/((?!api/files|_next/static|_next/image|favicon.ico|icon|apple-icon|sitemap.xml|robots.txt).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

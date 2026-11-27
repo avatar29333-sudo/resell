@@ -26,6 +26,7 @@ import {
 import { Badge, Card, Container, DL, Empty, Notice, PageHeader, btn, field, labelCls } from "@/components/ui";
 import { ClearDraft } from "../list-your-plot/ClearDraft";
 import { MiniSteps } from "@/components/MiniSteps";
+import { pageMeta } from "@/lib/meta";
 import { createBuyRequest, setBuyRequestStatus, setMyListingStatus, submitKyc, uploadNewVersion } from "./actions";
 
 type Props = {
@@ -35,6 +36,8 @@ type Props = {
 
 // مراحل العرض من ناحية البائع
 const LISTING_FLOW = ["DRAFT", "IN_REVIEW", "VERIFIED", "PUBLISHED", "IN_DEAL", "SOLD"] as const;
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "حسابي", "My account", { noindex: true });
 
 export default async function AccountPage({ params, searchParams }: Props) {
   const { locale } = await params;

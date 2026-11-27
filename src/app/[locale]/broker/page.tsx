@@ -27,9 +27,12 @@ import {
 } from "@/lib/labels";
 import { Badge, Card, Container, Empty, FileLink, Notice, PageHeader, Stat, Table, Tabs, btn, field } from "@/components/ui";
 import { AdminReason } from "@/components/AdminReason";
+import { pageMeta } from "@/lib/meta";
 import { assignListingBroker, kycDecision, moveListing, sendDocsToLawyer, updateServiceRequest } from "./actions";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string }> };
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "لوحة الوسيط", "Broker dashboard", { noindex: true });
 
 export default async function BrokerPage({ params, searchParams }: Props) {
   const { locale } = await params;
