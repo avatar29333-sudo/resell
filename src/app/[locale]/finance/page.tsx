@@ -6,6 +6,8 @@ import { requireUser } from "@/lib/auth";
 import { can, dealCtx, subject } from "@/lib/authz";
 import { errorText } from "@/lib/errors";
 import { PAYOUT_ERRORS, decryptIban } from "@/lib/bank";
+import { loadTx } from "@/lib/transactions-load";
+import { dealRef } from "@/lib/action-otp-core";
 import { audit } from "@/lib/audit";
 import { date, money, num, toNum, tr } from "@/lib/format";
 import { heldTotalAt, monthEnd, reconcileDiff } from "@/lib/reconcile";
@@ -16,7 +18,7 @@ import { confirmDeposit, setCommissionStatus, settleDeposit } from "../deals/act
 import { pageMeta } from "@/lib/meta";
 import { decideBankAccount, payReferral, saveReconciliation } from "./actions";
 
-type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string; ok?: string }> };
+type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string; ok?: string; overdue?: string }> };
 
 const FIN_ERRORS: Record<string, [string, string]> = {
   self: ["ما ينفعش تتحقق من حسابك أنت.", "You can't verify your own account."],
@@ -48,7 +50,10 @@ export default async function FinancePage({ params, searchParams }: Props) {
   const L = tr(locale);
   const ar = locale === "ar";
   const me = await requireUser(locale, `/${locale}/finance`, ["FINANCE", "ADMIN"]);
-  const tab = ["deposits", "commissions", "referrals", "reconcile", "banks"].includes(sp.tab ?? "") ? sp.tab! : "deposits";
+  const tab = ["deposits", "commissions", "referrals", "reconcile", "banks", "transactions"].includes(sp.tab ?? "") ? sp.tab! : "deposits";
+  // TXN-02: الحركات + تنبيه المستحق اللي عدّى موعده
+  const allTx = await loadTx({}, null);
+  const overdueTx = allTx.filter((r) => r.overdue);
   const base = `/${locale}/finance`;
 
   const pendingBanks = await db.bankAccount.count({ where: { status: "PENDING" } });
@@ -66,6 +71,14 @@ export default async function FinancePage({ params, searchParams }: Props) {
       <Container className="flex flex-col gap-6">
         {sp.err && <Notice tone="red">{errorText(sp.err, ar, FIN_ERRORS)}</Notice>}
         {sp.ok && FIN_OK[sp.ok] && <Notice tone={sp.ok === "diff" || sp.ok === "approval_requested" ? "amber" : "green"}>{FIN_OK[sp.ok][ar ? 0 : 1]}</Notice>}
+        {overdueTx.length > 0 && (
+          <Notice tone="red">
+            {L(`${num(overdueTx.length, locale)} مبلغ مستحق عدّى موعده.`, `${overdueTx.length} due amounts are past their date.`)}{" "}
+            <Link href={`${base}?tab=transactions&overdue=1`} className="font-semibold underline">
+              {L("اعرضهم", "Show them")}
+            </Link>
+          </Notice>
+        )}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label={L("عرابين مستنية تأكيد البنك", "Deposits awaiting bank confirmation")} value={num(awaiting, locale)} href={`${base}?tab=deposits`} />
           <Stat label={L("محفوظ في البنك", "Held at the bank")} value={money(held._sum.amount ?? 0, "EGP", locale)} hint={L(`${num(held._count, locale)} عربون`, `${held._count} deposits`)} />
@@ -79,6 +92,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
             { key: "commissions", label: L("العمولات", "Commissions"), href: `${base}?tab=commissions` },
             { key: "referrals", label: L("مكافآت الإحالة", "Referral rewards"), href: `${base}?tab=referrals` },
             { key: "reconcile", label: L("المطابقة الشهرية", "Monthly reconciliation"), href: `${base}?tab=reconcile` },
+            { key: "transactions", label: L("كل الحركات", "All transactions"), href: `${base}?tab=transactions`, count: overdueTx.length },
             { key: "banks", label: L("حسابات بانتظار التحقق", "Accounts awaiting verification"), href: `${base}?tab=banks`, count: pendingBanks },
           ]}
         />
@@ -87,6 +101,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
         {tab === "commissions" && <Commissions />}
         {tab === "reconcile" && <Reconcile />}
         {tab === "banks" && <Banks />}
+        {tab === "transactions" && <Transactions />}
       </Container>
     </>
   );
@@ -296,6 +311,48 @@ export default async function FinancePage({ params, searchParams }: Props) {
   }
 
   /** BANK-01: الرقم كامل للمالية بس، وكل عرض بيتسجل في سجل التدقيق */
+  /** TXN-02: كل الحركات لكل المنصة — فلاتر + CSV */
+  function Transactions() {
+    const status = sp.status && ["DUE", "PAID", "HELD", "RELEASED", "REFUNDED"].includes(sp.status) ? sp.status : "";
+    const rows = allTx.filter((r) => (!status || r.status === status) && (sp.overdue !== "1" || r.overdue));
+    const q = `${status ? `&status=${status}` : ""}${sp.overdue === "1" ? "&overdue=1" : ""}`;
+    return (
+      <Card title={L("كل الحركات المالية", "All money movements")} actions={<a href={`/api/finance/transactions?${q.slice(1)}`} className={`${btn.small} border border-brand text-brand`}>{L("تصدير CSV", "Export CSV")}</a>}>
+        <form className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="tab" value="transactions" />
+          <select name="status" defaultValue={status} aria-label={L("الحالة", "Status")} className={`${field} w-44`}>
+            <option value="">{L("كل الحالات", "All statuses")}</option>
+            <option value="DUE">{L("مستحق", "Due")}</option>
+            <option value="PAID">{L("مدفوع", "Paid")}</option>
+            <option value="HELD">{L("محجوز", "Held")}</option>
+            <option value="RELEASED">{L("مُفرج عنه", "Released")}</option>
+            <option value="REFUNDED">{L("مرتجع", "Refunded")}</option>
+          </select>
+          <label className="flex min-h-11 items-center gap-2">
+            <input type="checkbox" name="overdue" value="1" defaultChecked={sp.overdue === "1"} className="size-5" /> {L("المتأخر بس", "Overdue only")}
+          </label>
+          <button className={btn.secondary}>{L("فلتر", "Filter")}</button>
+        </form>
+        <Table head={[L("التاريخ", "Date"), L("الصفقة", "Deal"), L("البند", "Item"), L("المبلغ", "Amount"), L("الحالة", "Status"), L("المرجع", "Ref")]}>
+          {rows.slice(0, 300).map((r, i) => (
+            <tr key={i} className={r.overdue ? "bg-[#FBECEC]" : ""}>
+              <td>{date(r.date, locale)}</td>
+              <td>
+                <Link href={`/${locale}/deals/${r.dealId}`} dir="ltr" className="text-brand underline">
+                  {dealRef(r.dealId)}
+                </Link>
+              </td>
+              <td>{r.item}{r.overdue && <Badge tone="red">{L("متأخر", "Overdue")}</Badge>}</td>
+              <td className="tabular-nums">{money(r.amount, r.currency, locale)}</td>
+              <td>{r.status}</td>
+              <td dir="ltr">{r.ref ?? "—"}</td>
+            </tr>
+          ))}
+        </Table>
+      </Card>
+    );
+  }
+
   async function Banks() {
     const rows = await db.bankAccount.findMany({ where: { status: "PENDING" }, orderBy: { createdAt: "asc" }, include: { user: { select: { name: true, phone: true } }, proofDocument: { select: { id: true } } } });
     for (const r of rows) await audit(me.id, "bank.view_full", "BankAccount", r.id);

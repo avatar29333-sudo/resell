@@ -434,6 +434,10 @@ export default async function AccountPage({ params, searchParams }: Props) {
               <Link href={`/${locale}/account/security`} className={`${btn.small} border border-brand text-brand`}>
                 {L("الخصوصية والأمان", "Privacy & security")}
               </Link>
+              {/* TXN-02 */}
+              <Link href={`/${locale}/account/transactions`} className={`${btn.small} border border-brand text-brand`}>
+                {L("معاملاتي", "My transactions")}
+              </Link>
               {/* BANK-01 */}
               <Link href={`/${locale}/account/bank`} className={`${btn.small} border border-brand text-brand`}>
                 {L("حساباتي البنكية", "My bank accounts")}
