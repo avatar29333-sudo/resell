@@ -210,6 +210,22 @@ export async function saveOps(locale: string, form: FormData) {
   refresh(l);
 }
 
+/** MKT-01 + MKT-15: قرار إنقاذ المهلة (التواريخ والنسبة) + رقم القيد في سجل الوسطاء */
+export async function saveMarketing(locale: string, form: FormData) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "settings.fees", {}, { back: back(l, "commission") });
+  const d = (k: string, fallback: string) => (/^\d{4}-\d{2}-\d{2}$/.test(String(form.get(k))) ? String(form.get(k)) : fallback);
+  const cur = await getSetting("rescue");
+  await saveSetting(me.id, "rescue", {
+    decisionDate: d("decisionDate", cur.decisionDate),
+    deadline: d("deadline", cur.deadline),
+    feePct: Math.min(50, Math.max(0, Number(form.get("feePct")) || cur.feePct)),
+  });
+  await saveSetting(me.id, "brokerRegistrationNumber", { value: String(form.get("brokerRegistrationNumber") ?? "").trim().slice(0, 60) });
+  refresh(l);
+}
+
 /** DATA-07: إضافة حي/مرحلة للقايمة، أو إيقافه (ما بيتمسحش عشان القطع القديمة) */
 export async function addDistrict(locale: string, form: FormData) {
   const l = loc(locale);

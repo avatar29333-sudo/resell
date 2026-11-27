@@ -19,6 +19,10 @@ export const DEFAULTS = {
   "payments.fourEyes": { limitEgp: 500_000 } as { limitEgp: number },
   /** OPS-04 — السعر اليدوي ما يبعدش عن آخر سعر آلي أكتر من النسبة دي إلا بتأكيد صريح */
   "fx.manual": { maxDeviationPct: 5 } as { maxDeviationPct: number },
+  /** MKT-01 — قرار إنقاذ المهلة: تاريخ القرار وآخر موعد للتقديم (بيتعدّل من لوحة الأدمن) */
+  rescue: { decisionDate: "2026-11-16", deadline: "2027-01-16", feePct: 10 } as { decisionDate: string; deadline: string; feePct: number },
+  /** MKT-15 — رقم القيد في سجل الوسطاء (بيظهر في الفوتر والعقود وصور المشاركة) */
+  brokerRegistrationNumber: { value: "" } as { value: string },
   /** DATA-04 — أقل عدد صفقات في مدينة/شهر عشان رقم المؤشر يظهر */
   priceIndex: { minDeals: 5 } as { minDeals: number },
   /** DATA-03 — صلاحية إفادة الجهاز: الشهور، التنبيه قبلها، والعرض المنتهي يختفي ولا يظهر بشارة */

@@ -38,7 +38,17 @@ export async function submitRescue(locale: string, _prev: RescueState, form: For
       requesterId: user?.id,
       city,
       plotCode,
-      message: [area && `${ar ? "المساحة" : "Area"}: ${area} ${ar ? "م²" : "m²"}`, String(form.get("message") ?? "").trim()].filter(Boolean).join(" — ") || null,
+      // MKT-01: القيم من الحاسبة (الشريحة والسعر والمبلغ بالدولار) بتوصل للوسيط مع الطلب
+      message:
+        [
+          area && `${ar ? "المساحة" : "Area"}: ${area} ${ar ? "م²" : "m²"}`,
+          form.get("tier") && `${ar ? "الشريحة" : "Tier"}: ${{ a: ">70%", b: "35–70%", c: "<35%" }[String(form.get("tier"))] ?? ""}`,
+          Number(form.get("price")) > 0 && `${ar ? "السعر الحالي" : "Current price"}: ${Number(form.get("price")).toLocaleString("en-US")} EGP`,
+          Number(form.get("feeUsd")) > 0 && `${ar ? "المبلغ التقديري" : "Estimated fee"}: $${Number(form.get("feeUsd")).toLocaleString("en-US")}`,
+          String(form.get("message") ?? "").trim(),
+        ]
+          .filter(Boolean)
+          .join(" — ") || null,
     },
   });
 

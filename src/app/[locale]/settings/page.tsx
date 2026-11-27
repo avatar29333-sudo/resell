@@ -13,6 +13,7 @@ import { getSetting } from "@/lib/settings";
 import { date, dateTime, money, num, tr } from "@/lib/format";
 import { ACCOUNT_LEVEL, ACCOUNT_STATUS, CITY, CITY_KEYS, CONTRACT_TYPE, RATE_SOURCE, ROLE, label } from "@/lib/labels";
 import { Badge, Card, Container, DL, Notice, PageHeader, Table, Tabs, btn, field, labelCls } from "@/components/ui";
+import { saveMarketing } from "./actions";
 import { addDistrict, addManualRate, bumpTemplate, fetchRateNow, moveFilesToS3, saveCommission, saveFees, saveOps, setUserRole, suspendUser, toggleDistrict, unsuspendUser } from "./actions";
 import { RoleForm } from "./RoleForm";
 import { pageMeta } from "@/lib/meta";
@@ -237,6 +238,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   }
 
   async function Commission({ locale }: { locale: "ar" | "en" }) {
+    const [rescue, regNo] = await Promise.all([getSetting("rescue"), getSetting("brokerRegistrationNumber")]);
     const [rates, fees, fourEyes, fxCfg, brokersCfg, validity] = await Promise.all([
       getSetting("commission.rates"),
       getSetting("service.fees"),
@@ -280,6 +282,30 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               <input name="buyerLawyerFeeEgp" type="number" min={0} defaultValue={fees.buyerLawyerFeeEgp ?? 0} className={`${field} w-40`} />
             </label>
             <p className="w-full text-sm text-muted">{L("الأرقام دي بتظهر في حاسبة التكلفة في صفحة كل قطعة.", "These figures feed the cost calculator on each plot page.")}</p>
+            <button className={btn.primary}>{L("حفظ", "Save")}</button>
+          </form>
+        </Card>
+        <Card title={L("القيد والتسويق", "Registration and marketing")}>
+          {!regNo.value && (
+            <Notice tone="red">{L("رقم القيد في سجل الوسطاء فاضي — لازم يتكتب قبل الإطلاق (بيظهر في الفوتر والعقود وصور المشاركة).", "The broker registry number is empty — it must be set before launch (shown in the footer, contracts and share images).")}</Notice>
+          )}
+          <form action={saveMarketing.bind(null, locale)} className="flex flex-wrap items-end gap-2">
+            <label className={labelCls}>
+              {L("رقم القيد في سجل الوسطاء", "Broker registry number")}
+              <input name="brokerRegistrationNumber" defaultValue={regNo.value} dir="ltr" className={`${field} w-52`} />
+            </label>
+            <label className={labelCls}>
+              {L("تاريخ قرار التسهيلات", "Relief decision date")}
+              <input name="decisionDate" type="date" defaultValue={rescue.decisionDate} className={`${field} w-44`} />
+            </label>
+            <label className={labelCls}>
+              {L("آخر موعد لتقديم إنقاذ المهلة", "Deadline-rescue application deadline")}
+              <input name="deadline" type="date" defaultValue={rescue.deadline} className={`${field} w-44`} />
+            </label>
+            <label className={labelCls}>
+              {L("نسبة مقابل السنة (%)", "One-year fee (%)")}
+              <input name="feePct" type="number" min={0} max={50} step={0.5} defaultValue={rescue.feePct} className={`${field} w-28`} />
+            </label>
             <button className={btn.primary}>{L("حفظ", "Save")}</button>
           </form>
         </Card>
