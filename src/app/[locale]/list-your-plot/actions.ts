@@ -1,7 +1,14 @@
 "use server";
 
+import { cleanTitle } from "@/lib/upload-rules";
+import { createHash, randomInt } from "node:crypto";
+import { classifyIdentifier } from "@/lib/identifier";
+import { queueMessage } from "@/lib/outbox";
+import { siteUrl } from "@/lib/meta";
+import { allCities } from "@/lib/cities";
 import { redirect } from "next/navigation";
-import type { City, DocumentType } from "@prisma/client";
+import type { DocumentType } from "@prisma/client";
+type City = string;
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
@@ -59,6 +66,7 @@ const FIELD_MSG: Record<string, Record<string, [string, string]>> = {
 };
 
 export async function createListing(locale: string, _prev: ListState, form: FormData): Promise<ListState> {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const l = isLocale(locale) ? locale : "ar";
   const ar = l === "ar";
   const user = await requireUser(l, `/${l}/list-your-plot`);
@@ -69,7 +77,19 @@ export async function createListing(locale: string, _prev: ListState, form: Form
     return { error: ar ? "لازم توثّق هويتك الأول عشان تعرض قطعة." : "You need to verify your ID before listing a plot." };
   }
   const isPartner = user.role === "PARTNER_BROKER";
-  if (isPartner && form.get("clientConsent") !== "on") return { error: ar ? "لازم تأكد إن المالك موافق على العرض." : "Confirm the owner has consented to this listing." };
+  // PUB-03: الشريك أو الوسيط بيعرض نيابة عن مالك — بيانات المالك + التفويض الموقّع، والمالك بيأكّد بكود
+  const onBehalf = isPartner || user.role === "BROKER" || user.role === "BROKER_LEAD";
+  if (isPartner && !user.partnerAgreedAt) return { error: ar ? "وافق على اتفاقية السمسار الشريك (نموذج 10) الأول من «حسابي»." : "Accept the partner agreement (form 10) first from your account." };
+  if (onBehalf && form.get("clientConsent") !== "on") return { error: ar ? "لازم تأكد إن المالك موافق على العرض." : "Confirm the owner has consented to this listing." };
+  const ownerName = String(form.get("ownerName") ?? "").trim().replace(/\s+/g, " ");
+  const ownerId = classifyIdentifier(String(form.get("ownerPhone") ?? ""));
+  const ownerNationalId = String(form.get("ownerNationalId") ?? "").replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d))).trim();
+  if (onBehalf && (ownerName.length < 5 || ownerId.kind !== "phone" || !/^\d{14}$|^[A-Z0-9]{6,12}$/i.test(ownerNationalId))) {
+    return { error: ar ? "كمّل بيانات المالك: الاسم، الموبايل، ورقم البطاقة (14 رقم) أو الباسبور." : "Complete the owner's details: name, mobile and national ID (14 digits) or passport." };
+  }
+  const authDocId = String(form.get("authDocIds") ?? "");
+  const authDoc = onBehalf && authDocId ? await db.document.findFirst({ where: { id: authDocId, ownerId: user.id, uploadedById: user.id, type: "OTHER", listingId: null, dealId: null } }) : null;
+  if (onBehalf && !authDoc) return { error: ar ? "ارفع التفويض الموقّع من المالك (نموذج 1)." : "Upload the authorization signed by the owner (form 1)." };
 
   const s = (k: string) => String(form.get(k) ?? "");
   const city = s("city");
@@ -85,6 +105,9 @@ export async function createListing(locale: string, _prev: ListState, form: Form
     return { error: FIELD_MSG[first]?.[v.errors[first] ?? ""]?.[ar ? 0 : 1] ?? (ar ? "كمّل بيانات القطعة" : "Complete the plot details"), fieldErrors: v.errors };
   }
   const { code, area, construction, price, paidUsd } = v.values;
+  // GEO-02: الطرح لازم يكون تبع نفس المدينة (أو عام)
+  const roundId = s("offeringRoundId");
+  const round = roundId ? await db.offeringRound.findFirst({ where: { id: roundId, isActive: true, OR: [{ cityId: city }, { cityId: null }] } }) : null;
   const district = v.values.district!.nameAr;
   const districtEn = v.values.district!.nameEn;
   const deadline = v.values.deadline;
@@ -128,6 +151,8 @@ export async function createListing(locale: string, _prev: ListState, form: Form
         city: city as City,
         district,
         districtEn,
+        districtId: v.values.district!.id,
+        offeringRoundId: round?.id ?? null,
         code,
         areaSqm: area,
         paymentStatus: form.get("paymentStatus") === "FULLY_PAID" ? "FULLY_PAID" : "INSTALLMENTS",
@@ -139,25 +164,55 @@ export async function createListing(locale: string, _prev: ListState, form: Form
 
   // PERM-04: وسيط العرض = أقل وسيط عنده شغل (مش صاحب العرض)
   const brokerId = await leastLoaded("BROKER", [user.id]);
+  // PUB-03: حد يومي لرسايل تأكيد الملاك من نفس الشخص، وما ينفعش المالك يبقى حساب فريق
+  if (onBehalf) {
+    const today = await db.auditLog.count({ where: { actorId: user.id, action: "listing.create", createdAt: { gt: new Date(Date.now() - 24 * 3600_000) } } });
+    if (today >= 20) return { error: ar ? "وصلت للحد اليومي للعروض نيابة عن ملاك — كمّل بكرة." : "Daily limit for on-behalf listings reached — continue tomorrow." };
+    const existing = await db.user.findUnique({ where: { phone: (ownerId as { value: string }).value }, select: { role: true } });
+    if (existing && existing.role !== "CLIENT") return { error: ar ? "الرقم ده تبع حساب فريق — ما ينفعش يتعرض باسمه نيابة عنه." : "That number belongs to a team account." };
+  }
+  // PUB-03: المالك (لو نيابة) — حساب موجود بالموبايل، أو حساب عميل جديد باسمه
+  const owner = onBehalf
+    ? ((await db.user.findUnique({ where: { phone: (ownerId as { value: string }).value } })) ?? (await db.user.create({ data: { name: ownerName, phone: (ownerId as { value: string }).value, role: "CLIENT", locale: l } })))
+    : user;
+  const ownerCode = onBehalf ? String(randomInt(0, 1_000_000)).padStart(6, "0") : null;
   const listing = await db.listing.create({
     data: {
       plotId: plot.id,
-      sellerId: user.id,
+      sellerId: owner.id,
       submittedById: user.id,
+      ownerConfirmCodeHash: ownerCode ? createHash("sha256").update(ownerCode).digest("hex") : null,
+      ownerConfirmExpiresAt: ownerCode ? new Date(Date.now() + 7 * 24 * 3600_000) : null,
       assignedBrokerId: brokerId,
-      clientConsentAt: isPartner ? new Date() : null,
+      clientConsentAt: onBehalf ? new Date() : null,
       priceType,
       price,
       currency: "EGP",
       paidAmountUsd: priceType === "PAID_PLUS_PREMIUM" ? paidUsd : null,
       // MKT-02: الأقساط الباقية بالدولار (اختياري، رقم موجب بس)
       remainingUsd: Number(form.get("remainingUsd")) > 0 && form.get("paymentStatus") !== "FULLY_PAID" ? Number(form.get("remainingUsd")) : null,
-      status: "IN_REVIEW",
+      // PUB-01: مسودة لحد موافقة المالك على نموذج 1 (أو تأكيده بالكود لو نيابة) — بعدها بتتبعت للمراجعة تلقائياً
+      status: "DRAFT",
     },
   });
+  if (authDoc) await db.document.update({ where: { id: authDoc.id }, data: { listingId: listing.id, plotId: plot.id, title: `تفويض المالك (نموذج 1) — ${ownerName} — ${ownerNationalId.slice(-4)}` } });
+  if (onBehalf && ownerCode) {
+    const link = `${siteUrl()}/${l}/owner-confirm/${listing.id}`;
+    const text = `Resell: ${user.name} عرض قطعتك ${code} للبيع نيابة عنك. لو موافق افتح ${link} واكتب الكود ${ownerCode}. لو مش إنت اللي فوّضته تجاهل الرسالة.`;
+    await queueMessage("whatsapp", owner.phone, "listing.owner_confirm", text);
+    await queueMessage("sms", owner.phone, "listing.owner_confirm", text);
+  }
 
   // الملفات اللي اترفعت مؤقتاً بتتربط بالعرض
   if (drafts.length) await db.document.updateMany({ where: { id: { in: drafts } }, data: { listingId: listing.id, plotId: plot.id } });
+  // DOC-01: «مستندات أخرى» بعنوان — مسودات رفعها نفس المستخدم
+  const otherIds = form.getAll("docIds").map(String).slice(0, 20);
+  if (otherIds.length) {
+    const others = await db.document.findMany({ where: { id: { in: otherIds }, ownerId: user.id, uploadedById: user.id, type: "OTHER", dealId: null, listingId: null, plotId: null } });
+    for (const d of others) {
+      await db.document.update({ where: { id: d.id }, data: { listingId: listing.id, plotId: plot.id, title: cleanTitle(form.get(`title_${d.id}`)) ?? d.fileName } });
+    }
+  }
   for (const u of uploads) {
     const s = await saveFile(u.data, u.type);
     await db.document.create({
@@ -177,13 +232,8 @@ export async function createListing(locale: string, _prev: ListState, form: Form
   }
   await audit(user.id, "listing.create", "Listing", listing.id, { plotId: plot.id, files: uploads.length + drafts.length, brokerId });
   if (brokerId) await audit(null, "listing.assign_broker", "Listing", listing.id, { before: null, after: brokerId, auto: true });
-  await notify(brokerId ? [brokerId] : await idsByRole("BROKER_LEAD"), {
-    kind: "listing.new",
-    ar: [`عرض جديد مسند ليك مستني المراجعة من ${user.name}`, `${area} م² — ${district}`],
-    en: [`New listing assigned to you for review from ${user.name}`, `${area} m² — ${district}`],
-    link: `/broker?tab=queue`,
-  });
+  // الوسيط بيتبلّغ لما العرض يتبعت للمراجعة (بعد موافقة المالك) — submitListingIfReady
   // DATA-09: المهلة خلصت → العرض اتقبل، وبنعرض على البائع «إنقاذ المهلة»
   if (v.values.deadlinePassed) await audit(user.id, "plot.deadline_passed", "Plot", plot.id, { deadline: deadline?.toISOString().slice(0, 10) ?? null });
-  redirect(`/${l}/account?listed=1${v.values.deadlinePassed ? "&rescue=1" : ""}`);
+  redirect(onBehalf ? `/${l}/account?listed=owner#my-plots` : `/${l}/account?listed=1${v.values.deadlinePassed ? "&rescue=1" : ""}#consents`);
 }

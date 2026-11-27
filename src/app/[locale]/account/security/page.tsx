@@ -4,10 +4,14 @@ import QRCode from "qrcode";
 import { isLocale } from "@/i18n/config";
 import { REQUIRE_STAFF_2FA, STAFF_ROLES, requireUser } from "@/lib/auth";
 import { decryptSecret, otpauthUri } from "@/lib/totp";
-import { date, tr } from "@/lib/format";
+import { date, dateTime, tr } from "@/lib/format";
 import { Badge, Card, Container, Notice, PageHeader, btn, field, labelCls } from "@/components/ui";
 import { pageMeta } from "@/lib/meta";
-import { confirmTotp, deleteMyAccount, disableTotp, startTotp } from "./actions";
+import { confirmTotp, deleteMyAccount, disableTotp, requestCorrection, setOtpChannel, startTotp, toggleMarketing } from "./actions";
+import { db } from "@/lib/db";
+import { DOC_TYPE, ROLE, label } from "@/lib/labels";
+import { CHANNELS, CHANNEL_LABEL, OTP_ERRORS, effectiveChannel } from "@/lib/action-otp";
+import { OtpConfirm } from "@/components/OtpConfirm";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ ok?: string; err?: string; required?: string }> };
 
@@ -20,6 +24,22 @@ export default async function SecurityPage({ params, searchParams }: Props) {
   const L = tr(locale);
   const me = await requireUser(locale, `/${locale}/account/security`);
   const staff = STAFF_ROLES.includes(me.role);
+  const ar = locale === "ar";
+  const channel = effectiveChannel(me);
+  // PRIV-01: كل فتح لمستند متسجل — المستخدم يشوف مين فتح ملفاته (الدور والاسم الأول)
+  const myDocs = await db.document.findMany({ where: { OR: [{ ownerId: me.id }, { uploadedById: me.id }] }, select: { id: true, type: true, title: true } });
+  // + أي تصدير ملف صفقة/مستخدم فيه بياناتك (إلا طلب جهة رسمية ممنوع الإخطار بيه — ADM-EXP-03)
+  const views = await db.auditLog.findMany({
+    where: { actorId: { not: me.id }, OR: [{ action: "document.view", entityType: "Document", entityId: { in: myDocs.map((d) => d.id) } }, { action: "export.included", entityType: "User", entityId: me.id }] },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: { actor: { select: { name: true, role: true } } },
+  });
+  const docName = (id: string) => {
+    if (id === me.id) return L("ملف تصدير فيه بياناتك", "An export that includes your data");
+    const d = myDocs.find((x) => x.id === id);
+    return d ? (d.title ?? label(DOC_TYPE, d.type, locale)) : "—";
+  };
 
   // سر لسه في التفعيل: نعرض QR والمفتاح عشان يتضاف للتطبيق
   let qr: string | null = null;
@@ -34,7 +54,10 @@ export default async function SecurityPage({ params, searchParams }: Props) {
     required: L("التحقق الثنائي إجباري لحسابات الفريق.", "Two-factor authentication is required for team accounts."),
     confirm: L("اكتب كلمة «احذف» عشان نتأكد.", "Type DELETE to confirm."),
     open_deals: L("عندك صفقات شغالة. لازم تخلص أو تتلغي الأول قبل حذف الحساب.", "You have open deals. They must finish or be cancelled before deleting your account."),
+    channel: L("القناة دي مش متاحة لحسابك (التطبيق لازم يكون متفعّل، والإيميل لازم يكون متسجّل).", "That channel isn't available (the app must be on, and email must be set)."),
+    ...Object.fromEntries(Object.entries(OTP_ERRORS).map(([k, v]) => [k, ar ? v[0] : v[1]])),
     staff: L("حسابات الفريق بتتقفل من الأدمن، مش من هنا.", "Team accounts are closed by an admin, not here."),
+    correction: L("اكتب التصحيح المطلوب (10 حروف على الأقل).", "Describe the correction (at least 10 characters)."),
   };
 
   return (
@@ -102,7 +125,28 @@ export default async function SecurityPage({ params, searchParams }: Props) {
           )}
         </Card>
 
-        <Card title={L("بياناتك وخصوصيتك", "Your data and privacy")}>
+        {sp.ok === "channel" && <Notice tone="green">{L("قناة كود التحقق اتغيرت.", "Your verification channel was changed.")}</Notice>}
+        <Card title={L("قناة كود التأكيد للموافقات", "Confirmation-code channel for approvals")} actions={<Badge tone="blue">{CHANNEL_LABEL[channel][ar ? 0 : 1]}</Badge>}>
+          <p className="leading-7 text-muted">
+            {L("كل موافقة جوه الصفقة (سعر، توقيع، عربون، إلغاء) بتتأكد بكود من 6 أرقام صالح 5 دقايق ومربوط بالإجراء ده بس. تغيير القناة بيتأكد بكود على القناة الحالية.", "Every approval in a deal (price, signature, deposit, cancellation) is confirmed with a 6-digit code valid for 5 minutes and bound to that action only. Changing the channel is confirmed by a code on the current channel.")}
+          </p>
+          <OtpConfirm locale={locale} action="otp.channel_change" subjectId={null} fields={["channel"]} preview={L("تغيير قناة كود التحقق للقناة اللي هتختارها", "Change your verification channel to the one you pick")} submitLabel={L("غيّر القناة", "Change channel")} formAction={setOtpChannel.bind(null, locale)}>
+            <label className={labelCls}>
+              {L("القناة الجديدة", "New channel")}
+              <select name="channel" defaultValue={channel} className={field}>
+                {CHANNELS.filter((c) => (c !== "totp" || me.totpEnabledAt) && (c !== "email" || me.email)).map((c) => (
+                  <option key={c} value={c}>
+                    {CHANNEL_LABEL[c][ar ? 0 : 1]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </OtpConfirm>
+        </Card>
+
+        {sp.ok === "correction" && <Notice tone="green">{L("طلب التصحيح اتبعت للإدارة.", "Your correction request was sent to the admin.")}</Notice>}
+        {sp.ok === "marketing_off" && <Notice tone="green">{L("سحبنا موافقتك التسويقية — مش هيوصلك أي تسويق.", "Marketing consent withdrawn — no marketing messages.")}</Notice>}
+        <Card title={<span id="privacy">{L("بياناتك وخصوصيتك", "Your data and privacy")}</span>}>
           <p className="leading-7 text-muted">
             {L("وافقت على الشروط وسياسة الخصوصية: ", "You accepted the terms and privacy policy: ")}
             {me.termsAcceptedAt ? date(me.termsAcceptedAt, locale) : L("قبل تحديث السياسة", "before the policy update")}.{" "}
@@ -110,6 +154,42 @@ export default async function SecurityPage({ params, searchParams }: Props) {
               {L("اقرا سياسة الخصوصية", "Read the privacy policy")}
             </Link>
           </p>
+          <p className="leading-7">{L("🔒 معلوماتك سرية: ما بتتعرضش للطرف الآخر غير بموافقتك، ومش بتتباع ولا بتتشارك لأي غرض تسويقي.", "🔒 Your information is confidential: shown to the other party only with your consent, never sold or shared for marketing.")}</p>
+          <div className="flex flex-wrap gap-2">
+            <a href="/api/me/export" className={btn.secondary}>{L("حمّل بياناتي (JSON)", "Download my data (JSON)")}</a>
+            <form action={toggleMarketing.bind(null, locale)}>
+              <button className={btn.secondary}>{me.marketingOptOutAt ? L("رجّع موافقتي التسويقية", "Restore marketing consent") : L("اسحب موافقتي التسويقية", "Withdraw marketing consent")}</button>
+            </form>
+          </div>
+          <details>
+            <summary className="min-h-11 cursor-pointer py-2 font-semibold text-brand">{L("صحّح بياناتي", "Correct my data")}</summary>
+            <form action={requestCorrection.bind(null, locale)} className="flex flex-col gap-2">
+              <label className={labelCls}>
+                {L("إيه اللي محتاج يتصحح؟", "What needs correcting?")}
+                <textarea name="text" required minLength={10} rows={3} className={field} />
+              </label>
+              <button className={`${btn.primary} self-start`}>{L("ابعت الطلب", "Send request")}</button>
+            </form>
+          </details>
+          <p className="text-sm text-muted">{L("المستندات المرتبطة بعقود بتفضل محفوظة للمدة القانونية حتى لو طلبت الحذف، لأن القانون بيلزمنا.", "Documents tied to contracts are kept for the legal period even if you ask for deletion, as the law requires.")}</p>
+        </Card>
+
+        {/* PRIV-01: «مين شاف ملفاتي؟» */}
+        <Card title={L("مين شاف ملفاتي؟", "Who viewed my files?")}>
+          {views.length === 0 ? (
+            <p className="text-muted">{L("محدش فتح ملفاتك غيرك.", "Nobody but you has opened your files.")}</p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-line text-sm">
+              {views.map((v) => (
+                <li key={String(v.id)} className="flex flex-wrap justify-between gap-2 py-2">
+                  <span>
+                    <strong>{docName(v.entityId)}</strong> — {label(ROLE, v.actor?.role ?? "", locale)} {v.actor?.name.split(" ").filter((w) => w !== "أ.")[0] ?? ""}
+                  </span>
+                  <span className="text-[13px] text-muted">{dateTime(v.createdAt, locale)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
 
         {!staff && (

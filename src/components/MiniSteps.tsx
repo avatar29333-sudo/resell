@@ -12,7 +12,7 @@ export function MiniSteps({ steps, current, stopped }: { steps: string[]; curren
           />
         ))}
       </ol>
-      <div className="flex justify-between text-xs text-muted">
+      <div className="flex justify-between text-[13px] text-muted">
         <span>{steps[0]}</span>
         <span>{steps[steps.length - 1]}</span>
       </div>

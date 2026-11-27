@@ -1,17 +1,17 @@
-import { checkCode } from "@/lib/plot-code";
+import { checkCode, type CodeSpec } from "@/lib/plot-code";
 
 /** UX-02: تحقق خطوة بخطوة في المتصفح بنفس قواعد السيرفر (السيرفر بيتحقق تاني) */
 export type Draft = Record<string, string>;
 export const DRAFT_KEY = "resell.listDraft.v1";
 
-export function stepErrors(step: number, v: Draft, files: Record<string, { id: string; name: string } | undefined>) {
+export function stepErrors(step: number, v: Draft, files: Record<string, { id: string; name: string } | undefined>, spec?: CodeSpec | null) {
   const e: Record<string, string> = {};
   if (step === 0) {
     if (!v.city) e.city = "required";
     if (!v.districtId) e.district = "required";
     if (!v.code?.trim()) e.code = "required";
     else {
-      const c = checkCode(v.city, v.code);
+      const c = checkCode(v.city, v.code, spec);
       if (c.error) e.code = c.error;
     }
     const area = Number(v.area);

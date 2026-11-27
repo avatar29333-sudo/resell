@@ -1,6 +1,8 @@
+import { allCities } from "@/lib/cities";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { City } from "@prisma/client";
+/** GEO-01: المدينة = مفتاح نصي من جدول المدن */
+type City = string;
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { latestRate, totalEgp } from "@/lib/listing";
@@ -24,6 +26,7 @@ type Props = {
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "سجل العروض", "Listings register");
 
 export default async function ListingsPage({ params, searchParams }: Props) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const sp = await searchParams;
@@ -129,10 +132,10 @@ export default async function ListingsPage({ params, searchParams }: Props) {
               const days = daysUntil(l.plot.buildDeadline);
               const verified = new Set(l.documents.map((d) => d.type));
               return (
-                <li key={l.id}>
+                <li key={l.id} className="flex flex-col">
                   <Link
                     href={`/${locale}/listings/${l.id}`}
-                    className="flex h-full flex-col gap-3 border border-line bg-white p-5 hover:border-brand hover:shadow-[0_8px_30px_rgba(10,25,68,0.10)]"
+                    className="flex flex-1 flex-col gap-3 border border-line bg-white p-5 hover:border-brand hover:shadow-[0_8px_30px_rgba(10,25,68,0.10)]"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex flex-col">

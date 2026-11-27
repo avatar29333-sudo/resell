@@ -1,3 +1,4 @@
+import { allCities } from "@/lib/cities";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { isLocale } from "@/i18n/config";
@@ -32,6 +33,7 @@ function Bars({ rows, locale }: { rows: { label: string; value: number }[]; loca
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "التقارير", "Reports", { noindex: true });
 
 export default async function ReportsPage({ params }: { params: Promise<{ locale: string }> }) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const L = tr(locale);
@@ -126,7 +128,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
                 </tr>
               ))}
           </Table>
-          <p className="text-xs text-muted">
+          <p className="text-[13px] text-muted">
             {L(`من الصفقات المقفولة بس؛ أقل من ${num(index.minDeals, locale)} صفقات في الشهر = بيانات غير كافية.`, `Closed deals only; fewer than ${index.minDeals} deals in a month = insufficient data.`)}
           </p>
         </Card>

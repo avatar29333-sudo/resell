@@ -1,7 +1,9 @@
 "use server";
 
+import { cityPair } from "@/lib/labels";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { submitListingIfReady } from "@/lib/listing-submit";
 import type { ServiceRequestStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
@@ -35,10 +37,11 @@ export async function moveListing(locale: string, listingId: string, to: "VERIFI
   await authorize(user, action, { listing: listingCtx(l) }, { back: back(locale), reason: overrideReason(form) });
   const from = { VERIFIED: ["IN_REVIEW"], PUBLISHED: ["VERIFIED"], DRAFT: ["IN_REVIEW", "VERIFIED", "PUBLISHED"] }[to];
   if (!from.includes(l.status)) return;
+  // PUB-01: شرط موافقة المالك (نموذج 1) وتأكيده بقى جوه السياسة نفسها (listing.publish)
   await db.listing.update({ where: { id: listingId }, data: { status: to, ...(to === "PUBLISHED" ? { publishedAt: new Date() } : {}) } });
   await audit(user.id, `listing.${to.toLowerCase()}`, "Listing", listingId, { from: l.status, to });
 
-  const place = (i: 0 | 1) => `${CITY[l.plot.city][i]} — ${districtName(l.plot, i ? "en" : "ar")}`;
+  const place = (i: 0 | 1) => `${cityPair(l.plot.city)[i]} — ${districtName(l.plot, i ? "en" : "ar")}`;
   if (to === "PUBLISHED") {
     await notify([l.sellerId, l.submittedById], {
       kind: "listing.published",
@@ -63,7 +66,7 @@ async function notifyMatchingBuyers(listingId: string) {
   const l = await db.listing.findUniqueOrThrow({ where: { id: listingId }, include: { plot: true } });
   const rate = await latestRate();
   const facts = { city: l.plot.city, areaSqm: toNum(l.plot.areaSqm), totalEgp: totalEgp(l, toNum(rate?.sell ?? 50)) };
-  const reqs = await db.buyRequest.findMany({ where: { status: "ACTIVE", buyerId: { not: l.sellerId } } });
+  const reqs = await db.buyRequest.findMany({ where: { status: "ACTIVE", approvedAt: { not: null }, buyerId: { not: l.sellerId } } });
   const buyers = reqs
     .filter((r) =>
       matches(
@@ -74,8 +77,8 @@ async function notifyMatchingBuyers(listingId: string) {
     .map((r) => r.buyerId);
   await notify(buyers, {
     kind: "buy_request.match",
-    ar: [`عرض جديد مطابق لطلبك: ${CITY[l.plot.city][0]} — ${facts.areaSqm} م²`],
-    en: [`New listing matching your request: ${CITY[l.plot.city][1]} — ${facts.areaSqm} m²`],
+    ar: [`عرض جديد مطابق لطلبك: ${cityPair(l.plot.city)[0]} — ${facts.areaSqm} م²`],
+    en: [`New listing matching your request: ${cityPair(l.plot.city)[1]} — ${facts.areaSqm} m²`],
     link: `/listings/${listingId}`,
   });
 }
@@ -126,6 +129,8 @@ export async function kycDecision(locale: string, profileId: string, form: FormD
   });
   await db.user.update({ where: { id: p.userId }, data: { accountLevel: approve ? "VERIFIED" : "BASIC", ...(approve ? {} : { kycRejections: { increment: 1 } }) } });
   await audit(user.id, `kyc.${approve ? "approve" : "reject"}`, "User", p.userId, { reason, before: p.user.accountLevel, after: approve ? "VERIFIED" : "BASIC" });
+  // PUB-01: مسودات العميل اللي وافق على نموذج 1 بتتبعت للمراجعة أول ما يتوثّق
+  if (approve) for (const d of await db.listing.findMany({ where: { sellerId: p.userId, status: "DRAFT", authorizationConsentAt: { not: null } }, select: { id: true } })) await submitListingIfReady(d.id, user.id);
   await notify([p.userId], {
     kind: approve ? "kyc.approved" : "kyc.rejected",
     ar: [approve ? "هويتك اتوثّقت — تقدر تعرض قطع وتبدي اهتمام وتوقّع" : "التوثيق اترفض — ارفع الصور تاني", reason ?? undefined],
@@ -195,9 +200,27 @@ export async function assignListingBroker(locale: string, listingId: string, for
   await audit(user.id, "listing.assign_broker", "Listing", listingId, { before: l.assignedBrokerId, after: brokerId });
   await notify([brokerId, l.assignedBrokerId], {
     kind: "listing.assignment",
-    ar: ["إسناد عرض اتغيّر", `${CITY[l.plot.city][0]} — ${districtName(l.plot, "ar")}`],
-    en: ["A listing assignment changed", `${CITY[l.plot.city][1]} — ${districtName(l.plot, "en")}`],
+    ar: ["إسناد عرض اتغيّر", `${cityPair(l.plot.city)[0]} — ${districtName(l.plot, "ar")}`],
+    en: ["A listing assignment changed", `${cityPair(l.plot.city)[1]} — ${districtName(l.plot, "en")}`],
     link: `/broker?tab=queue`,
   });
   revalidatePath(`/${loc(locale)}/broker`);
+}
+
+/** PUB-02: الوسيط يستلم عرض غير مسند (بيتسجل) — إلا لو هو طرف فيه (تعارض مصالح) */
+export async function claimListing(locale: string, listingId: string) {
+  const user = await requireUser(loc(locale), back(locale), ["BROKER", "BROKER_LEAD"]);
+  const l = await db.listing.findUnique({ where: { id: listingId }, select: { assignedBrokerId: true, sellerId: true, submittedById: true } });
+  if (!l || l.assignedBrokerId || l.sellerId === user.id || l.submittedById === user.id) redirect(`${back(locale)}&scope=unassigned`);
+  await db.listing.update({ where: { id: listingId }, data: { assignedBrokerId: user.id } });
+  await audit(user.id, "listing.claim", "Listing", listingId, { before: null, after: user.id });
+  redirect(`${back(locale)}&scope=mine`);
+}
+
+/** PUB-01: مراجعة طلب شراء عميل أساسي قبل ما يظهر في المطابقة */
+export async function approveBuyRequest(locale: string, id: string) {
+  const user = await requireUser(loc(locale), back(locale), ["BROKER", "BROKER_LEAD"]);
+  await db.buyRequest.updateMany({ where: { id, approvedAt: null }, data: { approvedAt: new Date() } });
+  await audit(user.id, "buy_request.approved", "BuyRequest", id);
+  redirect(back(locale));
 }

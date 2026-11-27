@@ -31,7 +31,7 @@ export async function reviewDocument(locale: string, documentId: string, form: F
     user,
     "document.review",
     {
-      document: { type: doc.type, ownerId: doc.ownerId, uploadedById: doc.uploadedById, status: doc.status },
+      document: { type: doc.type, ownerId: doc.ownerId, uploadedById: doc.uploadedById, status: doc.status, visibility: doc.visibility },
       listing: doc.listing ? listingCtx(doc.listing) : doc.deal ? listingCtx({ ...doc.deal.listing, documents: [] }) : undefined,
       deal: doc.deal ? dealCtx(doc.deal) : undefined,
     },

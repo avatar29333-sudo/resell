@@ -59,11 +59,13 @@ describe("SEC-05 — الصفقة حسب الإسناد", () => {
 
 describe("SEC-03 — التوثيق بعد المحامي", () => {
   it("مستند واحد مش معتمد = ما ينفعش يتوثّق", () => {
-    expect(can(u("broker", "BROKER"), "listing.verify", { listing: listing({ requiredDocsApproved: false }) }).allowed).toBe(false);
-    expect(can(u("broker", "BROKER"), "listing.verify", { listing: listing() }).allowed).toBe(true);
+    // PUB-01: الاعتماد القانوني بقى للمحامي المسند
+    expect(can(u("lawyer", "LAWYER"), "listing.verify", { listing: listing({ requiredDocsApproved: false }) }).allowed).toBe(false);
+    expect(can(u("lawyer", "LAWYER"), "listing.verify", { listing: listing() }).allowed).toBe(true);
+    expect(can(u("broker", "BROKER"), "listing.verify", { listing: listing() }).allowed).toBe(false);
   });
   it("الوسيط مش المسند ما يوثّقش", () => {
-    expect(can(u("other", "BROKER"), "listing.verify", { listing: listing() }).allowed).toBe(false);
+    expect(can(u("other", "LAWYER"), "listing.verify", { listing: listing() }).allowed).toBe(false);
   });
 });
 
@@ -85,7 +87,9 @@ describe("القسم 4 — كشف البيانات حسب المرحلة", () =>
   const plotDoc = { type: "ALLOCATION_LETTER", ownerId: "seller", uploadedById: "seller", status: "APPROVED" };
   it("المشتري ما يفتحش ملفات القطعة قبل توقيع العقد المبدئي من الطرفين", () => {
     expect(can(u("buyer", "CLIENT"), "document.view", { document: plotDoc, deal: deal({ stage: "PRICE_AGREED", commissionSigned: true }) }).allowed).toBe(false);
-    expect(can(u("buyer", "CLIENT"), "document.view", { document: plotDoc, deal: deal({ stage: "PRELIMINARY_CONTRACT", prelimSigned: true }) }).allowed).toBe(true);
+    // PRIV-01: وبعد التوقيع كمان لازم موافقة البائع على كشف المستندات
+    expect(can(u("buyer", "CLIENT"), "document.view", { document: plotDoc, deal: deal({ stage: "PRELIMINARY_CONTRACT", prelimSigned: true }) }).allowed).toBe(false);
+    expect(can(u("buyer", "CLIENT"), "document.view", { document: plotDoc, deal: deal({ stage: "PRELIMINARY_CONTRACT", prelimSigned: true, sellerDisclosed: ["documents"] }) }).allowed).toBe(true);
   });
   it("لو الصفقة اتلغت المشتري يفقد الوصول فوراً", () => {
     expect(can(u("buyer", "CLIENT"), "document.view", { document: plotDoc, deal: deal({ status: "CANCELLED", prelimSigned: true }) }).allowed).toBe(false);
@@ -93,7 +97,8 @@ describe("القسم 4 — كشف البيانات حسب المرحلة", () =>
   });
   it("كود القطعة بعد توقيع اتفاق العمولة من الطرفين", () => {
     expect(can(u("buyer", "CLIENT"), "listing.view_code", { listing: listing(), deal: deal() }).allowed).toBe(false);
-    expect(can(u("buyer", "CLIENT"), "listing.view_code", { listing: listing(), deal: deal({ commissionSigned: true }) }).allowed).toBe(true);
+    expect(can(u("buyer", "CLIENT"), "listing.view_code", { listing: listing(), deal: deal({ commissionSigned: true }) }).allowed).toBe(false); // PRIV-01: من غير موافقة البائع
+    expect(can(u("buyer", "CLIENT"), "listing.view_code", { listing: listing(), deal: deal({ commissionSigned: true, sellerDisclosed: ["plotCode"] }) }).allowed).toBe(true);
     expect(can(u("fin", "FINANCE"), "listing.view_code", { listing: listing() }).allowed).toBe(false);
   });
 });
@@ -149,8 +154,9 @@ describe("قواعد ثابتة (5.9)", () => {
 });
 
 describe("حالة الحساب (القسم 6)", () => {
-  it("BASIC ما يعرضش قطعة ولا يبدي اهتمام", () => {
-    expect(can(u("c", "CLIENT", "BASIC"), "listing.create").allowed).toBe(false);
+  it("BASIC يعمل مسودة بس (ما يبعتهاش للمراجعة) وما يبديش اهتمام", () => {
+    expect(can(u("c", "CLIENT", "BASIC"), "listing.create").allowed).toBe(true);
+    expect(can(u("seller", "CLIENT", "BASIC"), "listing.submit", { listing: listing({ status: "DRAFT", form1Consented: true }) }).allowed).toBe(false);
     expect(can(u("c", "CLIENT", "BASIC"), "deal.create", { listing: listing({ status: "PUBLISHED" }) }).allowed).toBe(false);
     expect(can(u("c", "CLIENT"), "deal.create", { listing: listing({ status: "PUBLISHED" }) }).allowed).toBe(true);
     expect(can(u("seller", "CLIENT"), "deal.create", { listing: listing({ status: "PUBLISHED" }) }).allowed).toBe(false);

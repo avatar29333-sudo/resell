@@ -11,7 +11,7 @@ export const btn = {
   ghost: "inline-flex min-h-11 items-center justify-center gap-2 px-3 font-medium text-brand hover:bg-paper",
   danger:
     "inline-flex min-h-11 items-center justify-center gap-2 border border-red-700 bg-white px-5 font-semibold text-red-700 hover:bg-red-50",
-  small: "inline-flex min-h-9 items-center justify-center gap-1.5 px-3 text-sm font-semibold",
+  small: "inline-flex min-h-11 items-center justify-center gap-1.5 px-3 text-sm font-semibold",
 };
 
 export const field = "min-h-11 w-full border border-line bg-white px-3 text-ink focus:border-brand";
@@ -28,7 +28,7 @@ const TONES: Record<Tone, string> = {
 
 export function Badge({ tone = "gray", children }: { tone?: Tone; children: ReactNode }) {
   return (
-    <span className={`inline-flex items-center border px-2 py-0.5 text-xs font-semibold whitespace-nowrap ${TONES[tone]}`}>
+    <span className={`inline-flex items-center border px-2 py-0.5 text-[13px] font-semibold whitespace-nowrap ${TONES[tone]}`}>
       {children}
     </span>
   );
@@ -162,7 +162,7 @@ export function Tabs({ tabs, current }: { tabs: { key: string; label: string; hr
           }`}
         >
           {t.label}
-          {t.count !== undefined && <span className="bg-paper px-1.5 text-xs text-muted">{t.count}</span>}
+          {t.count !== undefined && <span className="bg-paper px-1.5 text-[13px] text-muted">{t.count}</span>}
         </Link>
       ))}
     </nav>

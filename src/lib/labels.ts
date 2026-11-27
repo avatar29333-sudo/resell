@@ -37,6 +37,8 @@ export const CITY: Map = {
   NEW_DAMIETTA: ["دمياط الجديدة", "New Damietta"],
 };
 export const CITY_KEYS = Object.keys(CITY) as (keyof typeof CITY)[];
+/** [عربي، إنجليزي] لمدينة — ما بيقعش لو المدينة جديدة ولسه خريطتها ما اتحملتش (بيرجع المفتاح) */
+export const cityPair = (k: string): readonly [string, string] => CITY[k] ?? [k, k];
 
 export const COUNTRY: Map = {
   EG: ["مصر", "Egypt"],
@@ -138,6 +140,12 @@ export const CONTRACT_TYPE: Map = {
   PRELIMINARY_CONTRACT: ["العقد المبدئي", "Preliminary contract"],
   DEPOSIT_RECEIPT: ["محضر العربون", "Deposit receipt"],
   POWER_OF_ATTORNEY: ["توكيل التقديم والمتابعة", "Filing power of attorney"],
+  BUYER_UNDERTAKING: ["تعهد المشتري", "Buyer undertaking"],
+  CLOSING: ["محضر الإغلاق", "Closing record"],
+  CANCELLATION: ["محضر الإلغاء", "Cancellation record"],
+  LISTING_AUTHORIZATION: ["تفويض عرض القطعة", "Listing authorization"],
+  RESCUE_SERVICE: ["اتفاق خدمة إنقاذ المهلة", "Deadline rescue service agreement"],
+  PARTNER_AGREEMENT: ["اتفاقية السمسار الشريك", "Partner broker agreement"],
 };
 
 export const CONTRACT_STATUS: Map = {
@@ -146,6 +154,8 @@ export const CONTRACT_STATUS: Map = {
   APPROVED: ["معتمد", "Approved"],
   SENT_FOR_SIGNATURE: ["مستني التوقيع", "Awaiting signatures"],
   SIGNED: ["متوقّع", "Signed"],
+  PARTIALLY_SIGNED: ["متوقّع من طرف", "Partially signed"],
+  VERIFIED: ["متوقّع ومتحقق منه", "Signed and verified"],
   VOID: ["ملغي", "Void"],
 };
 
@@ -220,6 +230,7 @@ export function toneOf(status: string): Tone {
     case "PENDING_LAWYER":
     case "AWAITING_TRANSFER":
     case "SENT_FOR_SIGNATURE":
+    case "PARTIALLY_SIGNED":
     case "CHANGES_REQUESTED":
     case "ON_HOLD":
     case "NEW":

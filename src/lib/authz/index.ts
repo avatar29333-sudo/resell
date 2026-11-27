@@ -10,7 +10,7 @@ export type { Action, Ctx } from "./policy";
 
 /** مستخدم قاعدة البيانات → الشكل اللي السياسة بتفهمه */
 export function subject(u: User | null): Subject {
-  return u ? { id: u.id, role: u.role, accountLevel: u.accountLevel, status: u.status } : null;
+  return u ? { id: u.id, role: u.role, accountLevel: u.accountLevel, status: u.status, clientEnabled: u.clientEnabled, partnerAgreed: !!u.partnerAgreedAt } : null;
 }
 
 const PLOT_REQUIRED = ["ALLOCATION_LETTER", "PAYMENT_RECEIPT", "AUTHORITY_STATEMENT"] as const;
@@ -26,6 +26,8 @@ export function listingCtx(l: {
   status: string;
   documents?: DocLite[];
   deals?: { stage: string; status: string }[];
+  authorizationConsentAt?: Date | null;
+  ownerConfirmedAt?: Date | null;
 }): NonNullable<Ctx["listing"]> {
   const current = (l.documents ?? []).filter((d) => d.status !== "SUPERSEDED");
   return {
@@ -35,11 +37,14 @@ export function listingCtx(l: {
     assignedLawyerId: l.assignedLawyerId,
     status: l.status,
     requiredDocsApproved: PLOT_REQUIRED.every((t) => current.some((d) => d.type === t && d.status === "APPROVED")),
+    // PUB-01: موافقة المالك على نموذج 1، وتأكيده لو حد عرض نيابة عنه
+    form1Consented: !!l.authorizationConsentAt,
+    ownerConfirmed: !l.submittedById || l.submittedById === l.sellerId || !!l.ownerConfirmedAt,
     maxActiveDealStage: Math.max(-1, ...(l.deals ?? []).filter((d) => d.status === "ACTIVE" || d.status === "ON_HOLD").map((d) => stageIndex(d.stage))),
   };
 }
 
-const signedByBoth = (cs: (ContractLite & { signatures?: unknown })[], type: string) => cs.some((c) => c.type === type && c.status === "SIGNED");
+const signedByBoth = (cs: (ContractLite & { signatures?: unknown })[], type: string) => cs.some((c) => c.type === type && (c.status === "SIGNED" || c.status === "VERIFIED"));
 
 /** سياق الصفقة من صفقة محمّلة */
 export function dealCtx(d: {
@@ -55,7 +60,10 @@ export function dealCtx(d: {
   contracts?: ContractLite[];
   documents?: DocLite[];
   events?: { type: string; data: Prisma.JsonValue }[];
+  /** PRIV-01: موافقات الكشف السارية */
+  disclosures?: { userId: string; fields: string[]; revokedAt: Date | null }[];
 }): NonNullable<Ctx["deal"]> {
+  const disclosed = (uid: string) => [...new Set((d.disclosures ?? []).filter((x) => x.userId === uid && !x.revokedAt).flatMap((x) => x.fields))];
   const cancelReason = d.events?.find((e) => e.type === "CANCELLED")?.data as { reason?: string } | undefined;
   return {
     buyerId: d.buyerId,
@@ -72,6 +80,8 @@ export function dealCtx(d: {
     approvalLetterApproved: (d.documents ?? []).some((x) => x.type === "AUTHORITY_STATEMENT" && x.status === "APPROVED"),
     filingReceiptUploaded: (d.documents ?? []).some((x) => x.type === "FILING_RECEIPT" && x.status !== "REJECTED"),
     refundable: ["authority_refused", "seller_withdrew", "documents_invalid"].includes(cancelReason?.reason ?? ""),
+    sellerDisclosed: disclosed(d.listing.sellerId),
+    buyerDisclosed: disclosed(d.buyerId),
   };
 }
 

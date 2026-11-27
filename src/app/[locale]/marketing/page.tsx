@@ -1,3 +1,6 @@
+import { redactCodes } from "@/lib/outbox";
+import { cityPair } from "@/lib/labels";
+import { allCities } from "@/lib/cities";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
@@ -17,6 +20,7 @@ type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ ok?:
 
 /** MKT-04 + MKT-12: لوحة التسويق للأدمن */
 export default async function MarketingPage({ params, searchParams }: Props) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw;
@@ -62,8 +66,8 @@ export default async function MarketingPage({ params, searchParams }: Props) {
                       <Badge tone={s.status === "PUBLISHED" ? "green" : s.status === "REJECTED" ? "red" : "amber"}>{s.status}</Badge>
                     </div>
                     <form action={reviewStory.bind(null, locale, s.id)} className="flex flex-col gap-2">
-                      <textarea name="textAr" defaultValue={s.textAr ?? storyText("ar", CITY[city][0], days, code)} rows={2} aria-label={L("النص بالعربي", "Arabic text")} className={`${field} py-2`} />
-                      <textarea name="textEn" defaultValue={s.textEn ?? storyText("en", CITY[city][1], days, code)} rows={2} dir="ltr" aria-label={L("النص بالإنجليزي", "English text")} className={`${field} py-2`} />
+                      <textarea name="textAr" defaultValue={s.textAr ?? storyText("ar", cityPair(city)[0], days, code)} rows={2} aria-label={L("النص بالعربي", "Arabic text")} className={`${field} py-2`} />
+                      <textarea name="textEn" defaultValue={s.textEn ?? storyText("en", cityPair(city)[1], days, code)} rows={2} dir="ltr" aria-label={L("النص بالإنجليزي", "English text")} className={`${field} py-2`} />
                       <div className="flex gap-2">
                         <button name="decision" value="publish" disabled={!ready} className={`${btn.small} bg-ok text-white disabled:opacity-40`} title={ready ? "" : L("مستني موافقة الطرفين", "Waiting for both parties")}>
                           {L("انشر", "Publish")}
@@ -108,7 +112,7 @@ export default async function MarketingPage({ params, searchParams }: Props) {
                 {L("الرسالة بالإنجليزي (اختياري)", "Message in English (optional)")}
                 <textarea name="textEn" rows={2} className={`${field} py-2`} dir="ltr" />
               </label>
-              <p className="text-xs text-muted">{L("رابط الإيقاف بيتضاف لوحده في آخر كل رسالة.", "The stop link is added automatically to every message.")}</p>
+              <p className="text-[13px] text-muted">{L("رابط الإيقاف بيتضاف لوحده في آخر كل رسالة.", "The stop link is added automatically to every message.")}</p>
               <ConfirmButton message={L("تبعت الرسالة لكل المشتركين في المدينة دي؟", "Send this to every subscriber in this city?")} className={`${btn.primary} self-start`}>
                 {L("ابعت للمشتركين", "Send to subscribers")}
               </ConfirmButton>
@@ -125,14 +129,15 @@ export default async function MarketingPage({ params, searchParams }: Props) {
               <Table head={[L("الوقت", "Time"), L("لمين", "To"), L("النوع", "Kind"), L("الحالة", "Status")]}>
                 {outbox.map((m) => (
                   <tr key={m.id}>
-                    <td className="text-xs">{dateTime(m.createdAt, locale)}</td>
-                    <td dir="ltr" className="text-start text-xs">
+                    <td className="text-[13px]">{dateTime(m.createdAt, locale)}</td>
+                    <td dir="ltr" className="text-start text-[13px]">
                       {m.to.slice(0, 5)}•••{m.to.slice(-3)}
                     </td>
-                    <td className="text-xs">
+                    <td className="text-[13px]">
                       {m.kind}
-                      <div className="max-w-xs truncate text-muted" title={m.body}>
-                        {m.body}
+                      {/* أكواد التحقق وكلمات السر ما بتتعرضش للفريق (ولا حتى الأدمن) */}
+                      <div className="max-w-xs truncate text-muted" title={redactCodes(m.body)}>
+                        {redactCodes(m.body)}
                       </div>
                     </td>
                     <td>

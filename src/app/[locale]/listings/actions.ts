@@ -9,6 +9,9 @@ import { leastLoaded } from "@/lib/assign";
 import { isLocale } from "@/i18n/config";
 import { notify } from "@/lib/notifications";
 import { readAttribution } from "@/lib/attribution";
+import { classifyIdentifier } from "@/lib/identifier";
+import { queueMessage } from "@/lib/outbox";
+import { siteUrl } from "@/lib/meta";
 
 /** المشتري بيبدي اهتمام → صفقة جديدة في مرحلة «اهتمام» مع وسيط العرض (5.4 + القسم 8) */
 export async function expressInterest(locale: string, listingId: string) {
@@ -24,11 +27,17 @@ export async function expressInterest(locale: string, listingId: string) {
   if (existing) redirect(`/${loc}/deals/${existing.id}`);
 
   // وسيط الصفقة = وسيط العرض افتراضياً، أو أقل وسيط عنده شغل (مش طرف)
-  const brokerId = listing!.assignedBrokerId ?? (await leastLoaded("BROKER", [user.id, listing!.sellerId]));
+  // REL-03: تعارض مصالح — وسيط العرض لو هو نفسه المشتري (موظف كعميل) ما يتسندش لصفقته، ويتسجل
+  const conflict = listing!.assignedBrokerId === user.id;
+  const brokerId = listing!.assignedBrokerId && !conflict ? listing!.assignedBrokerId : await leastLoaded("BROKER", [user.id, listing!.sellerId]);
+  if (conflict) await audit(user.id, "conflict.avoided", "Listing", listingId, { role: "BROKER", reassignedTo: brokerId });
   const source = await readAttribution(); // MKT-10
+  // PUB-03: لو شريك أحال المشتري ده على العرض ده → بيتسجل على الصفقة
+  const referral = await db.partnerReferral.findUnique({ where: { listingId_buyerId: { listingId, buyerId: user.id } } });
   const deal = await db.deal.create({
     data: {
       ...(source ? { source } : {}),
+      ...(referral ? { referredByPartnerId: referral.partnerId } : {}),
       listingId,
       buyerId: user.id,
       brokerId,
@@ -50,4 +59,31 @@ export async function expressInterest(locale: string, listingId: string) {
     link: `/account`,
   });
   redirect(`/${loc}/deals/${deal.id}?new=1`);
+}
+
+/**
+ * PUB-03: الشريك «يُحيل مشترٍ» على عرض — بيانات المشتري + موافقته.
+ * المشتري بيوصله رابط العرض؛ لما يبدي اهتمام الصفقة بتتسجل باسم الشريك (referredByPartnerId).
+ */
+export async function referBuyer(locale: string, listingId: string, form: FormData) {
+  const loc = isLocale(locale) ? locale : "ar";
+  const back = `/${loc}/listings/${listingId}`;
+  const user = await requireUser(loc, back, ["PARTNER_BROKER"]);
+  if (form.get("buyerConsent") !== "on") redirect(`${back}?err=refer_consent#refer`);
+  const name = String(form.get("buyerName") ?? "").trim().replace(/\s+/g, " ");
+  const id = classifyIdentifier(String(form.get("buyerPhone") ?? ""));
+  if (name.length < 3 || id.kind !== "phone") redirect(`${back}?err=refer_fields#refer`);
+  const listing = await db.listing.findUnique({ where: { id: listingId }, select: { status: true, sellerId: true } });
+  if (!listing || listing.status !== "PUBLISHED") redirect(back);
+  const phone = (id as { value: string }).value;
+  // حد يومي للإحالات، وما ينفعش تحيل حساب فريق
+  if ((await db.auditLog.count({ where: { actorId: user.id, action: "partner.refer_buyer", createdAt: { gt: new Date(Date.now() - 24 * 3600_000) } } })) >= 20) redirect(`${back}?err=refer_limit#refer`);
+  const existingBuyer = await db.user.findUnique({ where: { phone }, select: { role: true } });
+  if (existingBuyer && existingBuyer.role !== "CLIENT") redirect(`${back}?err=refer_self#refer`);
+  const buyer = (await db.user.findUnique({ where: { phone } })) ?? (await db.user.create({ data: { name, phone, role: "CLIENT", locale: loc } }));
+  if (buyer.id === listing!.sellerId || buyer.id === user.id) redirect(`${back}?err=refer_self#refer`);
+  await db.partnerReferral.upsert({ where: { listingId_buyerId: { listingId, buyerId: buyer.id } }, create: { partnerId: user.id, listingId, buyerId: buyer.id, buyerConsentAt: new Date() }, update: {} });
+  await audit(user.id, "partner.refer_buyer", "Listing", listingId, { buyerId: buyer.id });
+  await queueMessage("whatsapp", phone, "partner.referral", `Resell: ${user.name} رشّح لك قطعة على المنصة. شوفها هنا: ${siteUrl()}/${loc}/listings/${listingId}`);
+  redirect(`${back}?ok=referred#refer`);
 }

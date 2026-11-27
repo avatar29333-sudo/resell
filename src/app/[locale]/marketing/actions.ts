@@ -1,8 +1,10 @@
 "use server";
 
+import { allCities } from "@/lib/cities";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import type { City } from "@prisma/client";
+/** GEO-01: المدينة = مفتاح نصي من جدول المدن */
+type City = string;
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
@@ -14,6 +16,7 @@ const page = (l: string) => `/${isLocale(l) ? l : "ar"}/marketing`;
 
 /** MKT-04: الأدمن يبعت تنبيه «قرار تسهيلات جديد» لكل المشتركين في مدينة (كل رسالة فيها رابط إيقاف) */
 export async function broadcastRelief(locale: string, form: FormData) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const l = isLocale(locale) ? locale : "ar";
   const me = await requireUser(l, page(l), ["ADMIN"]);
   const city = String(form.get("city") ?? "");

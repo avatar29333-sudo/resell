@@ -5,18 +5,26 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { can, dealCtx, subject } from "@/lib/authz";
 import { errorText } from "@/lib/errors";
+import { PAYOUT_ERRORS, decryptIban } from "@/lib/bank";
+import { loadTx } from "@/lib/transactions-load";
+import { dealRef } from "@/lib/action-otp-core";
+import { audit } from "@/lib/audit";
 import { date, money, num, toNum, tr } from "@/lib/format";
 import { heldTotalAt, monthEnd, reconcileDiff } from "@/lib/reconcile";
 import { CITY, COMMISSION_STATUS, DEAL_STAGE, DEAL_STATUS, label, toneOf } from "@/lib/labels";
-import { Badge, Card, Container, Empty, Notice, PageHeader, Stat, Table, Tabs, btn, field, labelCls } from "@/components/ui";
+import { Badge, Card, Container, Empty, FileLink, Notice, PageHeader, Stat, Table, Tabs, btn, field, labelCls } from "@/components/ui";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { confirmDeposit, setCommissionStatus, settleDeposit } from "../deals/actions";
 import { pageMeta } from "@/lib/meta";
-import { payReferral, saveReconciliation } from "./actions";
+import { decideBankAccount, payReferral, saveReconciliation } from "./actions";
 
-type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string; ok?: string }> };
+type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string; ok?: string; overdue?: string }> };
 
 const FIN_ERRORS: Record<string, [string, string]> = {
+  self: ["ما ينفعش تتحقق من حسابك أنت.", "You can't verify your own account."],
+  reason: ["اكتب سبب الرفض.", "Write a rejection reason."],
+  name_check: ["الاسم مش مطابق — لازم تأكد إنك راجعته يدوياً.", "The name doesn't match — confirm you checked it manually."],
+  ...Object.fromEntries(Object.entries(PAYOUT_ERRORS).map(([k, v]) => [`payout_${k}`, v])),
   bank_ref: ["اكتب رقم مرجع البنك (4 حروف على الأقل).", "Enter the bank reference (at least 4 characters)."],
   reference: ["اكتب مرجع التحصيل (3 حروف على الأقل).", "Enter the collection reference (at least 3 characters)."],
   approval_pending: ["فيه طلب صرف مستني موافقة الأدمن.", "A payout request is already awaiting admin approval."],
@@ -24,6 +32,7 @@ const FIN_ERRORS: Record<string, [string, string]> = {
 };
 const FIN_OK: Record<string, [string, string]> = {
   settled: ["اتنفذ واتسجل في سجل التدقيق.", "Done and recorded in the audit log."],
+  bank: ["قرار الحساب البنكي اتسجل وصاحبه اتبلّغ.", "Bank account decision saved and the owner notified."],
   approval_requested: ["المبلغ فوق حد الأربع عيون — اتبعت طلب موافقة للأدمن.", "Above the four-eyes limit — an approval request was sent to the admin."],
   commission: ["حالة العمولة اتحدّثت.", "Commission status updated."],
   matched: ["المطابقة سليمة — رقم البنك = رقم النظام.", "Reconciled — the bank figure matches the system."],
@@ -41,9 +50,13 @@ export default async function FinancePage({ params, searchParams }: Props) {
   const L = tr(locale);
   const ar = locale === "ar";
   const me = await requireUser(locale, `/${locale}/finance`, ["FINANCE", "ADMIN"]);
-  const tab = ["deposits", "commissions", "referrals", "reconcile"].includes(sp.tab ?? "") ? sp.tab! : "deposits";
+  const tab = ["deposits", "commissions", "referrals", "reconcile", "banks", "transactions"].includes(sp.tab ?? "") ? sp.tab! : "deposits";
+  // TXN-02: الحركات + تنبيه المستحق اللي عدّى موعده
+  const allTx = await loadTx({}, null);
+  const overdueTx = allTx.filter((r) => r.overdue);
   const base = `/${locale}/finance`;
 
+  const pendingBanks = await db.bankAccount.count({ where: { status: "PENDING" } });
   const [awaiting, held, pendingApprovals, due] = await Promise.all([
     db.deposit.count({ where: { escrowStatus: "AWAITING_TRANSFER" } }),
     db.deposit.aggregate({ where: { escrowStatus: "HELD" }, _sum: { amount: true }, _count: true }),
@@ -58,6 +71,14 @@ export default async function FinancePage({ params, searchParams }: Props) {
       <Container className="flex flex-col gap-6">
         {sp.err && <Notice tone="red">{errorText(sp.err, ar, FIN_ERRORS)}</Notice>}
         {sp.ok && FIN_OK[sp.ok] && <Notice tone={sp.ok === "diff" || sp.ok === "approval_requested" ? "amber" : "green"}>{FIN_OK[sp.ok][ar ? 0 : 1]}</Notice>}
+        {overdueTx.length > 0 && (
+          <Notice tone="red">
+            {L(`${num(overdueTx.length, locale)} مبلغ مستحق عدّى موعده.`, `${overdueTx.length} due amounts are past their date.`)}{" "}
+            <Link href={`${base}?tab=transactions&overdue=1`} className="font-semibold underline">
+              {L("اعرضهم", "Show them")}
+            </Link>
+          </Notice>
+        )}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label={L("عرابين مستنية تأكيد البنك", "Deposits awaiting bank confirmation")} value={num(awaiting, locale)} href={`${base}?tab=deposits`} />
           <Stat label={L("محفوظ في البنك", "Held at the bank")} value={money(held._sum.amount ?? 0, "EGP", locale)} hint={L(`${num(held._count, locale)} عربون`, `${held._count} deposits`)} />
@@ -71,12 +92,16 @@ export default async function FinancePage({ params, searchParams }: Props) {
             { key: "commissions", label: L("العمولات", "Commissions"), href: `${base}?tab=commissions` },
             { key: "referrals", label: L("مكافآت الإحالة", "Referral rewards"), href: `${base}?tab=referrals` },
             { key: "reconcile", label: L("المطابقة الشهرية", "Monthly reconciliation"), href: `${base}?tab=reconcile` },
+            { key: "transactions", label: L("كل الحركات", "All transactions"), href: `${base}?tab=transactions`, count: overdueTx.length },
+            { key: "banks", label: L("حسابات بانتظار التحقق", "Accounts awaiting verification"), href: `${base}?tab=banks`, count: pendingBanks },
           ]}
         />
         {tab === "deposits" && <Deposits />}
         {tab === "referrals" && <Referrals />}
         {tab === "commissions" && <Commissions />}
         {tab === "reconcile" && <Reconcile />}
+        {tab === "banks" && <Banks />}
+        {tab === "transactions" && <Transactions />}
       </Container>
     </>
   );
@@ -107,7 +132,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
                 <Link href={`/${locale}/deals/${d.dealId}`} className="font-semibold text-brand">
                   #{d.dealId.slice(-6).toUpperCase()} · {label(CITY, d.deal.listing.plot.city, locale)}
                 </Link>
-                <div className="text-xs text-muted">
+                <div className="text-[13px] text-muted">
                   {label(DEAL_STAGE, d.deal.stage, locale)} · {label(DEAL_STATUS, d.deal.status, locale)}
                 </div>
               </td>
@@ -120,14 +145,14 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     {L("محفوظ في البنك", "Held at the bank")} {d.bankReference && <span dir="ltr">· {d.bankReference}</span>}
                   </Badge>
                 )}
-                {d.approvals.length > 0 && <div className="mt-1 text-xs text-[#8A5A00]">{L("طلب صرف مستني موافقة الأدمن", "Payout awaiting admin approval")}</div>}
+                {d.approvals.length > 0 && <div className="mt-1 text-[13px] text-[#8A5A00]">{L("طلب صرف مستني موافقة الأدمن", "Payout awaiting admin approval")}</div>}
               </td>
               <td>
                 {d.escrowStatus === "AWAITING_TRANSFER" && confirm.allowed && (
                   <form action={confirmDeposit.bind(null, locale, d.dealId, d.id)} className="flex flex-wrap items-center gap-1.5">
                     <input type="hidden" name="returnTo" value={ret} />
-                    <input aria-label={L("رقم مرجع البنك", "Bank reference")} name="bankReference" required minLength={4} placeholder={L("رقم مرجع البنك", "Bank reference")} dir="ltr" className={`${field} min-h-9 w-40`} />
-                    {confirm.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                    <input aria-label={L("رقم مرجع البنك", "Bank reference")} name="bankReference" required minLength={4} placeholder={L("رقم مرجع البنك", "Bank reference")} dir="ltr" className={`${field} min-h-11 w-40`} />
+                    {confirm.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-11 w-44`} />}
                     <ConfirmButton message={L(`تأكيد وصول ${amount} للبنك؟`, `Confirm ${amount} arrived at the bank?`)} className={`${btn.small} bg-ok text-white`}>
                       {L("أكّد الوصول", "Confirm arrival")}
                     </ConfirmButton>
@@ -138,7 +163,8 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     {release.allowed && (
                       <form action={settleDeposit.bind(null, locale, d.dealId, d.id, "RELEASED_TO_SELLER")} className="flex flex-wrap gap-1">
                         <input type="hidden" name="returnTo" value={ret} />
-                        {release.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                        <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-11 w-32`} />
+                        {release.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-11 w-44`} />}
                         <ConfirmButton message={L(`صرف ${amount} للبائع؟ الفعل ده مش بيترجع.`, `Release ${amount} to the seller? This can't be undone.`)} className={`${btn.small} bg-brand text-white`}>
                           {L("صرف للبائع", "Release to seller")}
                         </ConfirmButton>
@@ -147,7 +173,8 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     {refund.allowed && (
                       <form action={settleDeposit.bind(null, locale, d.dealId, d.id, "REFUNDED_TO_BUYER")} className="flex flex-wrap gap-1">
                         <input type="hidden" name="returnTo" value={ret} />
-                        {refund.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                        <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-11 w-32`} />
+                        {refund.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-11 w-44`} />}
                         <ConfirmButton message={L(`رد ${amount} للمشتري؟ الفعل ده مش بيترجع.`, `Refund ${amount} to the buyer? This can't be undone.`)} className={`${btn.small} border border-[#A32020] text-[#A32020]`}>
                           {L("رد للمشتري", "Refund to buyer")}
                         </ConfirmButton>
@@ -156,7 +183,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
                   </div>
                 )}
                 {d.escrowStatus === "HELD" && !release.allowed && !refund.allowed && d.approvals.length === 0 && (
-                  <span className="text-xs text-muted">{L("الصرف بعد قفل الصفقة واعتماد خطاب الجهاز، والرد لو اتلغت لسبب يستحق الرد.", "Release after closing with the approval letter; refund if cancelled for a refundable reason.")}</span>
+                  <span className="text-[13px] text-muted">{L("الصرف بعد قفل الصفقة واعتماد خطاب الجهاز، والرد لو اتلغت لسبب يستحق الرد.", "Release after closing with the approval letter; refund if cancelled for a refundable reason.")}</span>
                 )}
               </td>
             </tr>
@@ -187,7 +214,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
       >
         <nav className="flex flex-wrap gap-1.5">
           {[undefined, "PENDING", "INVOICED", "PAID", "WAIVED"].map((s) => (
-            <Link key={s ?? "all"} href={`${base}?tab=commissions${s ? `&status=${s}` : ""}`} className={`inline-flex min-h-9 items-center border px-2.5 text-sm ${s === status ? "border-navy bg-navy text-white" : "border-line"}`}>
+            <Link key={s ?? "all"} href={`${base}?tab=commissions${s ? `&status=${s}` : ""}`} className={`inline-flex min-h-11 items-center border px-2.5 text-sm ${s === status ? "border-navy bg-navy text-white" : "border-line"}`}>
               {s ? label(COMMISSION_STATUS, s, locale) : L("الكل", "All")}
             </Link>
           ))}
@@ -204,18 +231,18 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     <Link href={`/${locale}/deals/${r.dealId}`} className="font-semibold text-brand">
                       #{r.dealId.slice(-6).toUpperCase()} · {label(CITY, r.deal.listing.plot.city, locale)}
                     </Link>
-                    <div className="text-xs text-muted">{label(DEAL_STAGE, r.deal.stage, locale)}</div>
+                    <div className="text-[13px] text-muted">{label(DEAL_STAGE, r.deal.stage, locale)}</div>
                   </td>
                   <td>
                     {money(total, r.currency, locale)}
-                    <div className="text-xs text-muted">
+                    <div className="text-[13px] text-muted">
                       {L("بائع", "Seller")} {num(r.sellerRatePct, locale, 2)}% · {L("مشتري", "Buyer")} {num(r.buyerRatePct, locale, 2)}%
                     </div>
                   </td>
                   <td>
                     <Badge tone={toneOf(r.status)}>{label(COMMISSION_STATUS, r.status, locale)}</Badge>
                     {r.paidAt && (
-                      <div className="text-xs text-muted">
+                      <div className="text-[13px] text-muted">
                         {date(r.paidAt, locale)} {r.paymentRef && <span dir="ltr">· {r.paymentRef}</span>}
                       </div>
                     )}
@@ -224,9 +251,9 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     {(r.status === "PENDING" || r.status === "INVOICED") && total > 0 && (
                       <form action={setCommissionStatus.bind(null, locale, r.dealId, "PAID")} className="flex flex-wrap items-center gap-1.5">
                         <input type="hidden" name="returnTo" value={ret} />
-                        <input name="paidOn" type="date" defaultValue={today} max={today} required className={`${field} min-h-9 w-40`} aria-label={L("تاريخ التحصيل", "Collection date")} />
-                        <input aria-label={L("مرجع التحويل/الإيصال", "Transfer / receipt ref")} name="reference" required minLength={3} placeholder={L("مرجع التحويل/الإيصال", "Transfer / receipt ref")} dir="ltr" className={`${field} min-h-9 w-40`} />
-                        {me.role === "ADMIN" && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                        <input name="paidOn" type="date" defaultValue={today} max={today} required className={`${field} min-h-11 w-40`} aria-label={L("تاريخ التحصيل", "Collection date")} />
+                        <input aria-label={L("مرجع التحويل/الإيصال", "Transfer / receipt ref")} name="reference" required minLength={3} placeholder={L("مرجع التحويل/الإيصال", "Transfer / receipt ref")} dir="ltr" className={`${field} min-h-11 w-40`} />
+                        {me.role === "ADMIN" && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-11 w-44`} />}
                         <ConfirmButton message={L(`تسجيل تحصيل ${money(total, r.currency, locale)}؟`, `Record collection of ${money(total, r.currency, locale)}?`)} className={`${btn.small} bg-ok text-white`}>
                           {L("اتحصّلت", "Collected")}
                         </ConfirmButton>
@@ -252,7 +279,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
           <tr key={r.id}>
             <td>
               {r.referrer.name}
-              <div dir="ltr" className="text-xs text-muted">
+              <div dir="ltr" className="text-[13px] text-muted">
                 {r.referrer.phone}
               </div>
             </td>
@@ -270,7 +297,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
                 </Badge>
               ) : (
                 <form action={payReferral.bind(null, locale, r.id)} className="flex flex-wrap items-center gap-1.5">
-                  <input name="reference" required minLength={3} dir="ltr" placeholder={L("مرجع التحويل", "Transfer ref")} aria-label={L("مرجع التحويل", "Transfer ref")} className={`${field} min-h-9 w-36`} />
+                  <input name="reference" required minLength={3} dir="ltr" placeholder={L("مرجع التحويل", "Transfer ref")} aria-label={L("مرجع التحويل", "Transfer ref")} className={`${field} min-h-11 w-36`} />
                   <ConfirmButton message={L(`صرف ${money(r.amount, "EGP", locale)} لـ ${r.referrer.name}؟`, `Pay ${money(r.amount, "EGP", locale)} to ${r.referrer.name}?`)} className={`${btn.small} bg-ok text-white`}>
                     {L("اتصرفت", "Mark paid")}
                   </ConfirmButton>
@@ -280,6 +307,89 @@ export default async function FinancePage({ params, searchParams }: Props) {
           </tr>
         ))}
       </Table>
+    );
+  }
+
+  /** BANK-01: الرقم كامل للمالية بس، وكل عرض بيتسجل في سجل التدقيق */
+  /** TXN-02: كل الحركات لكل المنصة — فلاتر + CSV */
+  function Transactions() {
+    const status = sp.status && ["DUE", "PAID", "HELD", "RELEASED", "REFUNDED"].includes(sp.status) ? sp.status : "";
+    const rows = allTx.filter((r) => (!status || r.status === status) && (sp.overdue !== "1" || r.overdue));
+    const q = `${status ? `&status=${status}` : ""}${sp.overdue === "1" ? "&overdue=1" : ""}`;
+    return (
+      <Card title={L("كل الحركات المالية", "All money movements")} actions={<a href={`/api/finance/transactions?${q.slice(1)}`} className={`${btn.small} border border-brand text-brand`}>{L("تصدير CSV", "Export CSV")}</a>}>
+        <form className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="tab" value="transactions" />
+          <select name="status" defaultValue={status} aria-label={L("الحالة", "Status")} className={`${field} w-44`}>
+            <option value="">{L("كل الحالات", "All statuses")}</option>
+            <option value="DUE">{L("مستحق", "Due")}</option>
+            <option value="PAID">{L("مدفوع", "Paid")}</option>
+            <option value="HELD">{L("محجوز", "Held")}</option>
+            <option value="RELEASED">{L("مُفرج عنه", "Released")}</option>
+            <option value="REFUNDED">{L("مرتجع", "Refunded")}</option>
+          </select>
+          <label className="flex min-h-11 items-center gap-2">
+            <input type="checkbox" name="overdue" value="1" defaultChecked={sp.overdue === "1"} className="size-5" /> {L("المتأخر بس", "Overdue only")}
+          </label>
+          <button className={btn.secondary}>{L("فلتر", "Filter")}</button>
+        </form>
+        <Table head={[L("التاريخ", "Date"), L("الصفقة", "Deal"), L("البند", "Item"), L("المبلغ", "Amount"), L("الحالة", "Status"), L("المرجع", "Ref")]}>
+          {rows.slice(0, 300).map((r, i) => (
+            <tr key={i} className={r.overdue ? "bg-[#FBECEC]" : ""}>
+              <td>{date(r.date, locale)}</td>
+              <td>
+                <Link href={`/${locale}/deals/${r.dealId}`} dir="ltr" className="text-brand underline">
+                  {dealRef(r.dealId)}
+                </Link>
+              </td>
+              <td>{r.item}{r.overdue && <Badge tone="red">{L("متأخر", "Overdue")}</Badge>}</td>
+              <td className="tabular-nums">{money(r.amount, r.currency, locale)}</td>
+              <td>{r.status}</td>
+              <td dir="ltr">{r.ref ?? "—"}</td>
+            </tr>
+          ))}
+        </Table>
+      </Card>
+    );
+  }
+
+  async function Banks() {
+    const rows = await db.bankAccount.findMany({ where: { status: "PENDING" }, orderBy: { createdAt: "asc" }, include: { user: { select: { name: true, phone: true } }, proofDocument: { select: { id: true } } } });
+    for (const r of rows) await audit(me.id, "bank.view_full", "BankAccount", r.id);
+    return (
+      <Card title={L("حسابات بانتظار التحقق", "Accounts awaiting verification")}>
+        {rows.length === 0 ? (
+          <p className="text-muted">{L("مفيش حسابات مستنية.", "Nothing waiting.")}</p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-line">
+            {rows.map((r) => (
+              <li key={r.id} className="flex flex-col gap-2 py-3 text-sm">
+                <span className="font-semibold">
+                  {r.user.name} — {r.bankName} · {r.currency}
+                </span>
+                <span dir="ltr" className="text-start tabular-nums">
+                  {decryptIban(r.ibanEnc).replace(/(.{4})/g, "$1 ")} {r.swiftBic ? `· ${r.swiftBic}` : ""}
+                </span>
+                <span>
+                  {L("صاحب الحساب", "Holder")}: {r.holderName}{" "}
+                  {r.nameMatches ? <Badge tone="green">{L("مطابق للاسم الموثّق", "Matches verified name")}</Badge> : <Badge tone="red">{L("مش مطابق — راجع يدوياً", "Mismatch — review manually")}</Badge>}
+                </span>
+                <span>{r.proofDocument ? <FileLink id={r.proofDocument.id}>{L("إثبات الملكية", "Proof of ownership")}</FileLink> : <span className="text-[#A32020]">{L("مفيش إثبات ملكية", "No proof uploaded")}</span>}</span>
+                <form action={decideBankAccount.bind(null, locale, r.id)} className="flex flex-wrap items-end gap-2">
+                  {!r.nameMatches && (
+                    <label className="flex min-h-11 items-center gap-2">
+                      <input type="checkbox" name="nameChecked" className="size-5" /> {L("راجعت الاسم يدوياً مع إثبات الملكية", "I checked the name against the proof")}
+                    </label>
+                  )}
+                  <input name="reason" placeholder={L("سبب الرفض", "Rejection reason")} aria-label={L("سبب الرفض", "Rejection reason")} className={`${field} min-h-11 w-56`} />
+                  <button name="decision" value="VERIFIED" className={`${btn.small} bg-ok text-white`}>{L("تحقق", "Verify")}</button>
+                  <button name="decision" value="REJECTED" className={`${btn.small} border border-[#A32020] text-[#A32020]`}>{L("ارفض", "Reject")}</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     );
   }
 
@@ -336,9 +446,9 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     <td>{money(h.bankTotal, "EGP", locale)}</td>
                     <td>
                       <Badge tone={matched ? "green" : "red"}>{matched ? L("مطابق", "Matched") : money(diff, "EGP", locale)}</Badge>
-                      {h.note && <div className="text-xs text-muted">{h.note}</div>}
+                      {h.note && <div className="text-[13px] text-muted">{h.note}</div>}
                     </td>
-                    <td className="text-xs">
+                    <td className="text-[13px]">
                       {h.enteredBy.name}
                       <div className="text-muted">{date(h.createdAt, locale)}</div>
                     </td>

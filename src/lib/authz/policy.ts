@@ -4,7 +4,7 @@
 import { stageIndex } from "../deal-machine";
 
 export type Role = "CLIENT" | "PARTNER_BROKER" | "BROKER" | "BROKER_LEAD" | "LAWYER" | "AGENT" | "FINANCE" | "ADMIN";
-export type Subject = { id: string; role: Role; accountLevel: "BASIC" | "VERIFIED"; status?: "ACTIVE" | "SUSPENDED" } | null;
+export type Subject = { id: string; role: Role; accountLevel: "BASIC" | "VERIFIED"; status?: "ACTIVE" | "SUSPENDED"; clientEnabled?: boolean; partnerAgreed?: boolean } | null;
 
 export type Ctx = {
   listing?: {
@@ -17,6 +17,10 @@ export type Ctx = {
     maxActiveDealStage?: number;
     /** كل المستندات المطلوبة (تخصيص، إيصالات، إفادة) معتمدة */
     requiredDocsApproved?: boolean;
+    /** PUB-01: المالك وافق على تفويض العرض (نموذج 1) */
+    form1Consented?: boolean;
+    /** PUB-03: المالك أكّد بالكود (لو العرض اتعمل نيابة عنه) */
+    ownerConfirmed?: boolean;
   };
   deal?: {
     buyerId: string;
@@ -39,12 +43,17 @@ export type Ctx = {
     filingReceiptUploaded?: boolean;
     /** سبب الإلغاء يستحق رد العربون */
     refundable?: boolean;
+    /** PRIV-01: اللي وافق البائع/المشتري يتكشف للطرف الآخر (name | plotCode | documents) */
+    sellerDisclosed?: string[];
+    buyerDisclosed?: string[];
   };
   document?: {
     type: string;
     ownerId: string;
     uploadedById: string;
     status: string;
+    /** PRIV-01: PRIVATE | STAFF | SHARED_WITH_COUNTERPARTY */
+    visibility?: string;
   };
   /** المستخدم اللي الفعل عليه (توثيق، دور، إيقاف…) */
   target?: { id: string; role?: Role; kycPending?: boolean };
@@ -85,7 +94,25 @@ const or = (...cs: Check[]): Check => (u, c) => cs.some((f) => f(u, c));
 const not = (f: Check): Check => (u, c) => !f(u, c);
 
 const KYC_TYPES = ["NATIONAL_ID", "PASSPORT", "SELFIE"];
+/** PUB-01 */
+const draftish = (c: Ctx) => ["DRAFT", "WITHDRAWN"].includes(c.listing!.status);
+const publishable = (_: Subject, c: Ctx) => c.listing!.status === "VERIFIED" && !!c.listing!.form1Consented && !!c.listing!.ownerConfirmed;
+
 const PLOT_TYPES = ["ALLOCATION_LETTER", "PAYMENT_RECEIPT", "AUTHORITY_STATEMENT"];
+/** سجلات الصفقة المشتركة بطبيعتها (نسخ العقود الموقّعة) */
+const DEAL_RECORDS = ["CONTRACT_PDF"];
+/**
+ * PRIV-01: مستند رفعه الطرف الآخر (أو بيخصّه) يظهر لي بس لو اتشارك (SHARED_WITH_COUNTERPARTY) أو سجل صفقة مشترك.
+ * مستند رفعه الفريق جوه الصفقة بيظهر للطرفين لو متعلّم «مشترك».
+ */
+function counterpartyMay(c: Ctx, otherSide: "BUYER" | "SELLER") {
+  const d = c.document!;
+  // نسخ العقود سجل مشترك — إلا النسخة الشخصية من موافقة طرف (خاصة بيه)
+  if (DEAL_RECORDS.includes(d.type) && d.visibility !== "PRIVATE") return true;
+  const otherId = otherSide === "BUYER" ? c.deal?.buyerId : c.deal?.sellerId;
+  const fromOther = d.ownerId === otherId || d.uploadedById === otherId;
+  return fromOther ? d.visibility === "SHARED_WITH_COUNTERPARTY" : d.visibility !== "PRIVATE" && d.visibility !== "STAFF";
+}
 const TEAM: Role[] = ["BROKER", "BROKER_LEAD", "LAWYER", "AGENT", "FINANCE"];
 
 /** قائمة الأفعال الثابتة */
@@ -151,6 +178,9 @@ export const ACTIONS = [
   "service.assign",
   "service.update",
   "buy_request.manage",
+  // PUB-01: نشر طلب شراء / طلب خدمة
+  "buy_request.create",
+  "service.create",
   // شغل المندوب (OPS-02)
   "service.site_report",
   "deal.authority_update",
@@ -162,6 +192,9 @@ export const ACTIONS = [
   "audit.view",
   "audit.view_money",
   "storage.manage",
+  // ADM-EXP-03: صلاحيات التصدير منفصلة
+  "export.deal",
+  "export.user",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -178,28 +211,42 @@ const RULES: Record<Action, Rule[]> = {
   "user.suspend": [],
   "user.delete_self": [{ roles: ["CLIENT", "PARTNER_BROKER"], when: isSelf }],
 
+  // PUB-01 — جدول صلاحيات النشر النهائي (اختبار لكل خلية في publishing.test.ts)
+  // إنشاء مسودة: العميل (قطعته، حتى لو أساسي)، الشريك الموثّق (لعميله + تفويض)، الوسيط (نيابة عن عميل)، قائد الوسطاء
   "listing.create": [
-    { roles: ["CLIENT"], when: verified },
+    { roles: ["CLIENT"] },
     { roles: ["PARTNER_BROKER"], when: verified },
+    { roles: ["BROKER", "BROKER_LEAD"] },
   ],
   "listing.edit_draft": [{ roles: ["CLIENT", "PARTNER_BROKER"], when: or(isListingOwner, isListingSubmitter) }],
-  "listing.submit": [{ roles: ["CLIENT", "PARTNER_BROKER"], when: and(or(isListingOwner, isListingSubmitter), (_, c) => ["DRAFT", "WITHDRAWN"].includes(c.listing!.status)) }],
+  // الإرسال للمراجعة: العميل الموثّق + موافقة نموذج 1؛ الشريك + نموذج 10 + تأكيد المالك؛ الوسيط المسؤول؛ القائد
+  "listing.submit": [
+    { roles: ["CLIENT"], when: and(isListingOwner, verified, (_, c) => draftish(c) && !!c.listing!.form1Consented) },
+    { roles: ["PARTNER_BROKER"], when: and(isListingSubmitter, verified, (u, c) => draftish(c) && !!u?.partnerAgreed && !!c.listing!.ownerConfirmed && !!c.listing!.form1Consented) },
+    { roles: ["BROKER"], when: and(isListingBroker, (_, c) => draftish(c) && !!c.listing!.ownerConfirmed && !!c.listing!.form1Consented) },
+    { roles: ["BROKER_LEAD"], when: (_, c) => draftish(c) && !!c.listing!.ownerConfirmed && !!c.listing!.form1Consented },
+  ],
   "listing.edit_price": [{ roles: ["CLIENT", "PARTNER_BROKER"], when: or(isListingOwner, isListingSubmitter) }],
+  // سحب العرض: صاحب العرض بس (الشريك لأ)
   "listing.withdraw": [
     {
-      roles: ["CLIENT", "PARTNER_BROKER"],
-      when: and(or(isListingOwner, isListingSubmitter), (_, c) => (c.listing!.maxActiveDealStage ?? -1) < stageIndex("PRELIMINARY_CONTRACT")),
+      roles: ["CLIENT"],
+      when: and(isListingOwner, (_, c) => (c.listing!.maxActiveDealStage ?? -1) < stageIndex("PRELIMINARY_CONTRACT")),
     },
   ],
   "listing.send_to_lawyer": [{ roles: ["BROKER", "BROKER_LEAD"], when: isListingBroker }],
-  "listing.verify": [{ roles: ["BROKER", "BROKER_LEAD"], when: and(isListingBroker, (_, c) => c.listing!.status === "IN_REVIEW" && !!c.listing!.requiredDocsApproved) }],
-  "listing.publish": [{ roles: ["BROKER", "BROKER_LEAD"], when: and(isListingBroker, (_, c) => c.listing!.status === "VERIFIED") }],
-  "listing.pause": [
-    { roles: ["BROKER", "BROKER_LEAD"], when: isListingBroker },
-    { roles: ["LAWYER"], when: isListingLawyer },
+  // الاعتماد القانوني: المحامي المسند بس (الأدمن بتدخّل + سبب)
+  "listing.verify": [{ roles: ["LAWYER"], when: and(isListingLawyer, (_, c) => c.listing!.status === "IN_REVIEW" && !!c.listing!.requiredDocsApproved) }],
+  // النشر: الوسيط المسؤول بعد اعتماد المحامي وموافقة المالك؛ القائد على أي عرض
+  "listing.publish": [
+    { roles: ["BROKER"], when: and(isListingBroker, publishable) },
+    { roles: ["BROKER_LEAD"], when: publishable },
   ],
+  // إيقاف/إخفاء عرض منشور: الوسيط المسؤول، والقائد
+  "listing.pause": [{ roles: ["BROKER"], when: isListingBroker }, { roles: ["BROKER_LEAD"] }],
   "listing.view_code": [
-    { roles: ["CLIENT", "PARTNER_BROKER"], when: or(isListingOwner, isListingSubmitter, and(isBuyer, (_, c) => !!c.deal?.commissionSigned && isOpen(c))) },
+    // PRIV-01: كود القطعة للمشتري بعد اتفاق العمولة + موافقة البائع على كشفه
+    { roles: ["CLIENT", "PARTNER_BROKER"], when: or(isListingOwner, isListingSubmitter, and(isBuyer, (_, c) => !!c.deal?.commissionSigned && !!c.deal?.sellerDisclosed?.includes("plotCode") && isOpen(c))) },
     // كود القطعة للفريق المسند بس (PERM-03)
     { roles: ["BROKER"], when: or(isListingBroker, isDealBroker) },
     { roles: ["BROKER_LEAD"] },
@@ -232,12 +279,14 @@ const RULES: Record<Action, Rule[]> = {
         !KYC_TYPES.includes(c.document!.type) &&
         (c.document!.ownerId === u.id ||
           c.document!.uploadedById === u.id ||
-          isListingOwner(u, c) ||
-          isListingSubmitter(u, c) ||
-          isDealSubmitter(u, c) ||
-          (isSeller(u, c) && !!c.deal) ||
-          // المشتري: ملفات القطعة من مرحلة ٤ بعد توقيع العقد المبدئي من الطرفين، والصفقة مش ملغية
-          (isBuyer(u, c) && isOpen(c) && (!PLOT_TYPES.includes(c.document!.type) || !!c.deal?.prelimSigned))),
+          // صاحب العرض/الشريك: مستندات العرض والصفقة — إلا خاص المشتري اللي ما شاركهوش (PRIV-01)
+          ((isListingOwner(u, c) || isListingSubmitter(u, c) || isDealSubmitter(u, c)) && !(c.deal && !counterpartyMay(c, "BUYER"))) ||
+          // البائع: مستندات الصفقة — اللي رفعها المشتري بتظهر بس لو شاركها (PRIV-01)
+          (isSeller(u, c) && !!c.deal && counterpartyMay(c, "BUYER")) ||
+          // المشتري: ملفات القطعة بعد توقيع العقد المبدئي + موافقة البائع على كشف المستندات (PRIV-01)
+          (isBuyer(u, c) &&
+            isOpen(c) &&
+            (PLOT_TYPES.includes(c.document!.type) ? !!c.deal?.prelimSigned && !!c.deal?.sellerDisclosed?.includes("documents") : counterpartyMay(c, "SELLER")))),
     },
     { roles: ["BROKER", "BROKER_LEAD"], when: (u, c) => !KYC_TYPES.includes(c.document!.type) && (isListingBroker(u, c) || isDealBroker(u, c)) },
     {
@@ -337,6 +386,10 @@ const RULES: Record<Action, Rule[]> = {
     { roles: ["CLIENT", "PARTNER_BROKER"], when: (u, c) => c.serviceRequest?.requesterId === u.id },
   ],
   "buy_request.manage": [{ roles: ["CLIENT", "PARTNER_BROKER"], when: isSelf }],
+  // طلب شراء: العميل (الأساسي بيظهر بعد مراجعة)، الشريك لعميله، الوسيط، القائد — المحامي لأ
+  "buy_request.create": [{ roles: ["CLIENT", "PARTNER_BROKER", "BROKER", "BROKER_LEAD"] }],
+  // طلب خدمة (إنقاذ مهلة، مراجعة مستندات): نفس الناس
+  "service.create": [{ roles: ["CLIENT", "PARTNER_BROKER", "BROKER", "BROKER_LEAD"] }],
 
   "reports.view": [{ roles: ["BROKER", "BROKER_LEAD", "LAWYER", "FINANCE"] }],
   "fx.manual": [{ roles: ["FINANCE"] }],
@@ -355,6 +408,9 @@ const RULES: Record<Action, Rule[]> = {
   "settings.fees": [],
   "audit.view": [],
   "audit.view_money": [{ roles: ["FINANCE"] }],
+  // ADM-EXP-03: المحامي ينزّل ملف صفقته المسندة له بس (من غير البيانات البنكية الكاملة)؛ ملف المستخدم للأدمن بس
+  "export.deal": [{ roles: ["LAWYER"], when: isDealLawyer }],
+  "export.user": [],
   "storage.manage": [],
 };
 
@@ -377,6 +433,10 @@ const NATIVE_ADMIN: Action[] = [
   "audit.view",
   "audit.view_money",
   "storage.manage",
+  "buy_request.create",
+  "service.create",
+  "export.deal",
+  "export.user",
   "service.view_queue",
   "service.assign",
   "service.update",
@@ -414,6 +474,10 @@ export function can(user: Subject, action: Action, ctx: Ctx = {}): Decision {
   }
   for (const r of RULES[action]) {
     if (r.roles.includes(user.role) && (!r.when || r.when(user, ctx))) return { allowed: true };
+  }
+  // REL-03: موظف مفعّل كعميل → قواعد العميل (كلها مربوطة بعلاقته بالعرض/الصفقة، فما بتفتحش حاجة تانية)
+  if (user.clientEnabled && user.role !== "CLIENT") {
+    for (const r of RULES[action]) if (r.roles.includes("CLIENT") && (!r.when || r.when({ ...user, role: "CLIENT" }, ctx))) return { allowed: true };
   }
   return { allowed: false, reason: "forbidden" };
 }

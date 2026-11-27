@@ -11,7 +11,8 @@ import { factsOf, loadDealFor, type LoadedDeal } from "@/lib/access";
 import { authorize, dealCtx, overrideReason, type Action } from "@/lib/authz";
 import { allowedDealUploads, type UploadSide } from "@/lib/authz/policy";
 import { blockersToAdvance, nextStage, requiredSigners, STAGES, stageIndex, type Stage } from "@/lib/deal-machine";
-import { fileFromForm, saveFile } from "@/lib/storage";
+import { fileFromForm, readFile, saveFile } from "@/lib/storage";
+import { imagesToPdf, pdfPageCount } from "@/lib/pdf-ar";
 import { getSetting, templateVersion } from "@/lib/settings";
 import { makePdf } from "@/lib/pdf";
 import { toNum } from "@/lib/format";
@@ -20,8 +21,17 @@ import { idsByRole, notify } from "@/lib/notifications";
 import { CONTRACT_TYPE, DEAL_STAGE } from "@/lib/labels";
 import { leastLoaded } from "@/lib/assign";
 import { lockRateAt } from "@/lib/fx-lock";
+import { fxLockUpdate } from "@/lib/fx-lock-rule";
 import { referralReward } from "@/lib/referral-rules";
 import { isDemoMode } from "@/lib/demo";
+import { requireActionCode } from "@/lib/action-otp";
+import { contractActionKey } from "@/lib/action-otp-core";
+import { cleanTitle } from "@/lib/upload-rules";
+import { payoutTarget } from "@/lib/bank";
+import { dealVars, publishedFor } from "@/lib/contract-vars";
+import { recordClickwrap } from "@/lib/clickwrap";
+import { renderTemplate } from "@/lib/templates";
+import { netAfterFees } from "@/lib/bank-rules";
 
 const loc = (l: string): Locale => (isLocale(l) ? l : "ar");
 
@@ -119,7 +129,7 @@ export async function advanceStage(locale: string, dealId: string, form?: FormDa
     for (const o of others) {
       await db.deal.update({ where: { id: o.id }, data: { status: "CANCELLED" } });
       await db.dealEvent.create({ data: { dealId: o.id, type: "CANCELLED", actorId: user.id, data: { reason: "sold_to_other" } } });
-      await db.contract.updateMany({ where: { dealId: o.id, status: { not: "SIGNED" } }, data: { status: "VOID" } });
+      await db.contract.updateMany({ where: { dealId: o.id, status: { notIn: ["SIGNED", "VERIFIED"] } }, data: { status: "VOID" } });
       await notify([o.buyerId], {
         kind: "deal.sold_to_other",
         ar: ["القطعة اللي كنت مهتم بيها اتباعت لمشتري تاني", "تقدر تدوّر على قطع شبهها في السجل."],
@@ -176,10 +186,12 @@ export async function proposePrice(locale: string, dealId: string, form: FormDat
   done(l, dealId);
 }
 
-export async function confirmPrice(locale: string, dealId: string) {
+export async function confirmPrice(locale: string, dealId: string, form?: FormData) {
   const { l, user, deal, back } = await ctx(locale, dealId);
   await guard(user, deal, "deal.confirm_price", back);
   if (!deal.proposedPrice) done(l, dealId);
+  // DEAL-03: كود مربوط بالسعر ده بالذات
+  await requireActionCode(user, "price.accept", dealId, { price: String(toNum(deal.proposedPrice)) }, form, back);
   const side = user.id === deal.buyerId ? "buyerPriceOkAt" : "sellerPriceOkAt";
   const updated = await db.deal.update({ where: { id: dealId }, data: { [side]: new Date() } });
   await event(deal, user, "NOTE", { priceConfirmed: toNum(deal.proposedPrice), by: side === "buyerPriceOkAt" ? "BUYER" : "SELLER" });
@@ -225,7 +237,9 @@ export async function createContract(locale: string, dealId: string, type: Contr
   } else if (!deal.lawyerId) {
     await db.deal.update({ where: { id: dealId }, data: { lawyerId } });
   }
-  const c = await db.contract.create({ data: { dealId, type, templateVersion: await templateVersion(type), status: "PENDING_LAWYER" } });
+  // CON-02: العقد بيترتبط بالنسخة المنشورة بالظبط (templateVersionId)
+  const tv = await publishedFor({ contractType: type });
+  const c = await db.contract.create({ data: { dealId, type, templateVersion: tv ? `v${tv.version}` : await templateVersion(type), templateVersionId: tv?.id, status: "PENDING_LAWYER" } });
   await event(deal, user, "CONTRACT_UPDATED", { contractId: c.id, type, status: "PENDING_LAWYER" });
   await notify([lawyerId], {
     kind: "contract.review_needed",
@@ -303,18 +317,43 @@ export async function sendForSignature(locale: string, dealId: string, contractI
   done(l, dealId);
 }
 
+/** اكتمال توقيع عقد (إلكتروني أو ورقي): DEAL-01 قفل سعر الصرف + BANK-01 تثبيت الحسابات — مع العقد الابتدائي بس */
+async function onFullySigned(user: User, deal: LoadedDeal, type: string) {
+  if (type !== "PRELIMINARY_CONTRACT") return;
+  if (!deal.rateLockedAt) {
+    const locked = await lockRateAt(new Date());
+    const upd = fxLockUpdate({ contractType: type, signingComplete: true, alreadyLockedAt: deal.rateLockedAt, rate: locked ? { id: locked.id, sell: toNum(locked.sell), source: locked.source } : null, now: new Date() });
+    if (upd && locked) {
+      await db.deal.update({ where: { id: deal.id }, data: upd });
+      await audit(user.id, "deal.rate_locked", "Deal", deal.id, { rateId: locked.id, sell: toNum(locked.sell), rateDate: locked.date.toISOString(), source: locked.source });
+    }
+  }
+  if (!deal.bankLockedAt) await db.deal.update({ where: { id: deal.id }, data: { bankLockedAt: new Date() } });
+}
+
 type Signature = { userId: string; role: "BUYER" | "SELLER"; signedAt: string; providerRef: string };
 
 /** التوقيع للطرفين بس + حساب موثّق (5.5) — في التجربة زرار؛ على الإنتاج بيروح لمزوّد التوقيع المرخّص */
-export async function signContract(locale: string, dealId: string, contractId: string) {
+export async function signContract(locale: string, dealId: string, contractId: string, form?: FormData) {
   const { l, user, deal, back } = await ctx(locale, dealId);
   await guard(user, deal, "contract.sign", back);
   const contract = deal.contracts.find((c) => c.id === contractId);
-  if (!contract || contract.status !== "SENT_FOR_SIGNATURE") done(l, dealId);
+  if (!contract || (contract.status !== "SENT_FOR_SIGNATURE" && contract.status !== "PARTIALLY_SIGNED")) done(l, dealId);
   const side = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
   if (!side || !requiredSigners(contract!.type).includes(side)) done(l, dealId, "?err=forbidden");
   const sigs = (contract!.signatures as Signature[]) ?? [];
   if (sigs.some((s) => s.role === side)) done(l, dealId);
+  // CON-03: اتفاق العمولة بالموافقة الإلكترونية — المربع لازم يتعلّم
+  if (contract!.type === "COMMISSION_AGREEMENT" && form?.get("agree") !== "on") done(l, dealId, `?err=agree#contract-${contractId}`);
+  // DEAL-03: كود مربوط بالعقد ده (نوع الإجراء حسب النموذج)
+  await requireActionCode(user, contractActionKey(contract!.type), dealId, { contractId }, form, back);
+  if (contract!.type === "COMMISSION_AGREEMENT" && contract!.templateVersionId) {
+    const tv = await db.templateVersion.findUnique({ where: { id: contract!.templateVersionId }, include: { template: true } });
+    const rendered = tv ? renderTemplate(tv.bodyMarkdown, await dealVars(deal, tv.version, user.id)) : null;
+    // ما بيتسجلش موافقة على نص ناقص بيانات
+    if (!rendered?.ok) done(l, dealId, `?err=missing_data#contract-${contractId}`);
+    await recordClickwrap(user, { kind: tv!.template.key, versionId: tv!.id, title: tv!.template.titleAr, version: tv!.version, text: rendered!.text, dealId });
+  }
   const all = [...sigs, { userId: user.id, role: side!, signedAt: new Date().toISOString(), providerRef: `DEMO-SIG-${Date.now()}` }];
   const complete = requiredSigners(contract!.type).every((r) => all.some((s) => s.role === r));
 
@@ -346,22 +385,17 @@ export async function signContract(locale: string, dealId: string, contractId: s
         fileName: `${contract!.type.toLowerCase()}-${contract!.id.slice(-6)}.pdf`,
         mimeType: "application/pdf",
         status: "APPROVED",
+        // نسخة العقد الموقّعة سجل مشترك للطرفين
+        visibility: "SHARED_WITH_COUNTERPARTY",
       },
     });
     pdfDocumentId = doc.id;
   }
   await db.contract.update({
     where: { id: contractId },
-    data: { signatures: all, ...(complete ? { status: "SIGNED", signedAt: new Date(), pdfDocumentId } : {}) },
+    data: { signatures: all, ...(complete ? { status: "SIGNED", signedAt: new Date(), pdfDocumentId } : { status: "PARTIALLY_SIGNED" }) },
   });
-  // DATA-01: سعر الصرف بيتثبت مرة واحدة لحظة اكتمال توقيع العقد المبدئي
-  if (complete && contract!.type === "PRELIMINARY_CONTRACT" && !deal.rateLockedAt) {
-    const locked = await lockRateAt(new Date());
-    if (locked) {
-      await db.deal.update({ where: { id: dealId }, data: { lockedUsdEgpRate: locked.sell, exchangeRateId: locked.id, rateLockedAt: new Date() } });
-      await audit(user.id, "deal.rate_locked", "Deal", dealId, { rateId: locked.id, sell: toNum(locked.sell), rateDate: locked.date.toISOString() });
-    }
-  }
+  if (complete) await onFullySigned(user, deal, contract!.type);
   await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, signedBy: side, complete });
   if (complete) {
     await notify([deal.buyerId, deal.listing.sellerId, deal.brokerId], {
@@ -373,6 +407,106 @@ export async function signContract(locale: string, dealId: string, contractId: s
   }
   // MKT-11: حدث «commission_signed» لما اتفاق العمولة يكمل
   done(l, dealId, complete && contract!.type === "COMMISSION_AGREEMENT" ? "?ev=commission_signed" : "");
+}
+
+/**
+ * CON-04: المحامي بيتحقق من النسخة الموقّعة قبل ما المرحلة الجاية تتفتح (SIGNED → VERIFIED).
+ * قائمة مطابقة إجبارية + مكان الأصل الورقي. شهادة مزوّد التوقيع (لما يتربط) بتعمل نفس الحاجة آلياً.
+ */
+// CON-06: التوقيعات موجودة، الأحرف الأولى على كل صفحة، مفيش شطب أو إضافة بخط اليد، التاريخ
+const VERIFY_CHECKS = ["signatures", "initials", "no_handwriting", "date"] as const;
+export async function verifyContract(locale: string, dealId: string, contractId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  await guard(user, deal, "contract.approve", back, form);
+  const contract = deal.contracts.find((c) => c.id === contractId);
+  if (!contract || contract.status !== "SIGNED") done(l, dealId);
+  // الأحرف الأولى والكتابة بخط اليد بتخص النسخة الورقية بس
+  const checks = contract!.signedVia === "PAPER" ? VERIFY_CHECKS : (["signatures", "date"] as const);
+  const checklist = checks.map((k) => ({ key: k, passed: form.get(`chk_${k}`) === "on" }));
+  if (checklist.some((c) => !c.passed)) done(l, dealId, "?err=verify_checklist");
+  // CON-05: التوكيل لازم يكون «تقديم ومتابعة» مش «بيع» — لو فيه صلاحية بيع بيترفض
+  if (contract!.type === "POWER_OF_ATTORNEY" && form.get("chk_filing_only") !== "on") done(l, dealId, "?err=poa_sale");
+  // CON-06: مكان الأصل الورقي (مع العميل / في المكتب / اتشحن + رقم البوليصة)
+  const where = String(form.get("paperWhere") ?? "");
+  const extra = String(form.get("paperOriginalLocation") ?? "").trim().slice(0, 160);
+  const paper = where ? `${{ client: "مع العميل", office: "في المكتب", shipped: "اتشحن" }[where] ?? where}${extra ? ` — ${extra}` : ""}` : extra || null;
+  await db.contract.update({
+    where: { id: contractId },
+    data: { status: "VERIFIED", verifiedAt: new Date(), verifiedById: user.id, verificationMethod: "LAWYER", verificationChecklist: checklist, paperOriginalLocation: paper },
+  });
+  await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, status: "VERIFIED", paperOriginalLocation: paper });
+  await notify([deal.brokerId, ...partiesOf(deal)], {
+    kind: "contract.verified",
+    ar: [`${CONTRACT_TYPE[contract!.type][0]} اتحقق منه`],
+    en: [`The ${CONTRACT_TYPE[contract!.type][1]} was verified`],
+    link: `/deals/${dealId}`,
+  });
+  done(l, dealId);
+}
+
+/** DEAL-03: رد الطرف على السعر المقترح — رفض أو عرض مقابل (بكود) */
+export async function respondPrice(locale: string, dealId: string, kind: "reject" | "counter", form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  await guard(user, deal, "deal.confirm_price", back);
+  if (!deal.proposedPrice || deal.agreedPrice) done(l, dealId);
+  const side = user.id === deal.buyerId ? "BUYER" : "SELLER";
+  if (kind === "reject") {
+    await requireActionCode(user, "price.reject", dealId, { price: String(form.get("price") ?? "") }, form, back);
+    if (String(form.get("price")) !== String(toNum(deal.proposedPrice))) done(l, dealId, "?err=otp_mismatch");
+    await db.deal.update({ where: { id: dealId }, data: { buyerPriceOkAt: null, sellerPriceOkAt: null } });
+    await event(deal, user, "NOTE", { priceRejected: toNum(deal.proposedPrice), by: side });
+  } else {
+    const price = Number(form.get("price"));
+    if (!(price > 0)) done(l, dealId, "?err=price");
+    await requireActionCode(user, "price.counter", dealId, { price: String(form.get("price")) }, form, back);
+    await event(deal, user, "NOTE", { counterPrice: price, by: side });
+  }
+  await notify([deal.brokerId], {
+    kind: "deal.price_response",
+    ar: [kind === "reject" ? "طرف رفض السعر المقترح" : `طرف قدّم عرض مقابل: ${Number(form.get("price")).toLocaleString("en-US")} ج.م`],
+    en: [kind === "reject" ? "A party rejected the proposed price" : `A party made a counter-offer: EGP ${Number(form.get("price")).toLocaleString("en-US")}`],
+    link: `/deals/${dealId}`,
+  });
+  done(l, dealId, "?ok=price_response");
+}
+
+/** DEAL-03: المشتري «حوّلت العربون» / البائع «استلمت المبلغ» — تأكيدات الطرف (بكود) */
+export async function partyDepositConfirm(locale: string, dealId: string, depositId: string, kind: "sent" | "received", form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  const dep = deal.deposits.find((x) => x.id === depositId);
+  if (!dep) done(l, dealId);
+  if (kind === "sent" && (user.id !== deal.buyerId || dep!.escrowStatus !== "AWAITING_TRANSFER" || dep!.buyerSentAt)) done(l, dealId, "?err=forbidden");
+  if (kind === "received" && (user.id !== deal.listing.sellerId || dep!.escrowStatus !== "RELEASED_TO_SELLER" || dep!.sellerReceivedAt)) done(l, dealId, "?err=forbidden");
+  await requireActionCode(user, kind === "sent" ? "deposit.sent" : "deposit.received", dealId, { depositId }, form, back);
+  await db.deposit.update({ where: { id: depositId }, data: kind === "sent" ? { buyerSentAt: new Date() } : { sellerReceivedAt: new Date() } });
+  await event(deal, user, "DEPOSIT_UPDATED", { depositId, [kind === "sent" ? "buyerSent" : "sellerReceived"]: true });
+  if (kind === "sent") {
+    await notify(await idsByRole("FINANCE"), {
+      kind: "deposit.buyer_sent",
+      ar: ["المشتري أكّد إنه حوّل العربون", "راجع البنك وأكّد الاستلام برقم المرجع."],
+      en: ["The buyer confirmed they transferred the deposit", "Check the bank and confirm with the reference."],
+      link: `/deals/${dealId}`,
+    });
+  }
+  done(l, dealId);
+}
+
+/** DEAL-03: طلب إلغاء من طرف — بيروح للوسيط والأدمن (والإلغاء الفعلي بمحضر) */
+export async function requestCancellation(locale: string, dealId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  if (user.id !== deal.buyerId && user.id !== deal.listing.sellerId) done(l, dealId, "?err=forbidden");
+  if (deal.status !== "ACTIVE" && deal.status !== "ON_HOLD") done(l, dealId);
+  const note = String(form.get("note") ?? "").trim().slice(0, 500);
+  if (note.length < 10) done(l, dealId, "?err=note_required");
+  await requireActionCode(user, "deal.cancel_request", dealId, {}, form, back);
+  await event(deal, user, "NOTE", { cancelRequested: true, by: user.id === deal.buyerId ? "BUYER" : "SELLER", note });
+  await notify([deal.brokerId, ...(await idsByRole("ADMIN"))], {
+    kind: "deal.cancel_requested",
+    ar: ["طرف طلب إلغاء الصفقة", note],
+    en: ["A party requested to cancel the deal", note],
+    link: `/deals/${dealId}`,
+  });
+  done(l, dealId, "?ok=cancel_requested");
 }
 
 // ─── العربون: المالي بس (الوسيط ما يلمسش الفلوس — 7.4) ───
@@ -417,6 +551,14 @@ export async function settleDeposit(locale: string, dealId: string, depositId: s
   await requireRecentAuth(user, l, back);
   const dep = deal.deposits.find((x) => x.id === depositId);
   if (!dep || dep.escrowStatus !== "HELD") finish(l, dealId, form);
+  // BANK-01: الصرف على حساب VERIFIED بتاع المستلم بس (في السيرفر، مش الواجهة بس)
+  const target = await payoutTarget(deal, to);
+  if (target.block) {
+    await audit(user.id, "payment.blocked", "Deposit", depositId, { to, reason: target.block });
+    finish(l, dealId, form, `?err=payout_${target.block}`);
+  }
+  // FEE-01: مصاريف التحويل الفعلية على المستلم
+  const fee = Math.max(0, Number(form?.get("payoutFeeEgp") ?? 0) || 0);
   if (dep!.approvals.length) finish(l, dealId, form, "?err=approval_pending");
   const limit = (await getSetting("payments.fourEyes")).limitEgp;
   if (user.role !== "ADMIN" && toNum(dep!.amount) > limit) {
@@ -430,13 +572,20 @@ export async function settleDeposit(locale: string, dealId: string, depositId: s
     });
     finish(l, dealId, form, "?ok=approval_requested");
   }
-  await executeSettlement(user, deal, depositId, to);
+  await executeSettlement(user, deal, depositId, to, fee);
   finish(l, dealId, form, "?ok=settled");
 }
 
-async function executeSettlement(user: User, deal: LoadedDeal, depositId: string, to: "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER") {
-  await db.deposit.update({ where: { id: depositId }, data: { escrowStatus: to, settledAt: new Date() } });
-  await event(deal, user, "DEPOSIT_UPDATED", { depositId, status: to });
+async function executeSettlement(user: User, deal: LoadedDeal, depositId: string, to: "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER", fee = 0) {
+  // BANK-01: دفاع تاني جوه التنفيذ نفسه (طريق الموافقة كمان)
+  const target = await payoutTarget(deal, to);
+  if (target.block) throw new Error(`payout blocked: ${target.block}`);
+  const dep = deal.deposits.find((x) => x.id === depositId);
+  const n = netAfterFees(toNum(dep?.amount), fee);
+  // مرة واحدة بس: الصرف/الرد بيتم لو العربون لسه «محفوظ» لحظة التنفيذ (طلبين في نفس الوقت → واحد يعدّي)
+  const moved = await db.deposit.updateMany({ where: { id: depositId, escrowStatus: "HELD" }, data: { escrowStatus: to, settledAt: new Date(), payoutBankAccountId: target.acc!.id, payoutFeeEgp: n.fee, payoutNetEgp: n.net } });
+  if (moved.count !== 1) throw new Error("deposit already settled");
+  await event(deal, user, "DEPOSIT_UPDATED", { depositId, status: to, amount: n.amount, fee: n.fee, net: n.net, account: `•••• ${target.acc!.ibanLast4}` });
   await notify([to === "RELEASED_TO_SELLER" ? deal.listing.sellerId : deal.buyerId], {
     kind: `deposit.${to.toLowerCase()}`,
     ar: [to === "RELEASED_TO_SELLER" ? "العربون اتصرف لك" : "العربون اترد لك بالكامل"],
@@ -454,12 +603,17 @@ export async function decidePayment(locale: string, dealId: string, approvalId: 
   if (!a || a.status !== "PENDING") done(l, dealId);
   if (a!.requestedById === user.id) done(l, dealId, "?err=forbidden");
   const approve = form.get("decision") === "APPROVED";
-  await db.paymentApproval.update({
-    where: { id: approvalId },
+  const decided = await db.paymentApproval.updateMany({
+    where: { id: approvalId, status: "PENDING" },
     data: { status: approve ? "APPROVED" : "REJECTED", decidedById: user.id, decidedAt: new Date(), note: String(form.get("note") ?? "") || null },
   });
+  if (decided.count !== 1) done(l, dealId); // اتقرر بالفعل (ضغطتين)
   await audit(user.id, `payment.${approve ? "approved" : "rejected"}`, "PaymentApproval", approvalId, { depositId: a!.depositId, action: a!.action });
-  if (approve) await executeSettlement(user, deal, a!.depositId, a!.action as "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER");
+  if (approve) {
+    const target = await payoutTarget(deal, a!.action as "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER");
+    if (target.block) done(l, dealId, `?err=payout_${target.block}`);
+    await executeSettlement(user, deal, a!.depositId, a!.action as "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER", Math.max(0, Number(form.get("payoutFeeEgp") ?? 0) || 0));
+  }
   await notify([a!.requestedById], {
     kind: "payment.decided",
     ar: [approve ? "الأدمن وافق على طلب الصرف واتنفذ" : "الأدمن رفض طلب الصرف"],
@@ -522,6 +676,8 @@ export async function uploadDealDocument(locale: string, dealId: string, form: F
       mimeType: f.file!.type,
       // خطاب الجهاز بيتعمد من المحامي المسند قبل ما الصفقة تتقفل
       status: type === "AUTHORITY_STATEMENT" ? "IN_REVIEW" : "UPLOADED",
+      // PRIV-01: رفع الطرف خاص لحد ما يشاركه؛ رفع الفريق (إيصال التقديم، خطاب الجهاز) للطرفين
+      visibility: side === "BUYER" || side === "SELLER" ? "PRIVATE" : "SHARED_WITH_COUNTERPARTY",
     },
   });
   if (type === "TRANSFER_RECEIPT") {
@@ -595,7 +751,7 @@ export async function setDealStatus(locale: string, dealId: string, status: "ACT
   if (status === "CANCELLED" && reason === "other" && !note) done(l, dealId, "?err=note_required");
   await db.deal.update({ where: { id: dealId }, data: { status } });
   if (status === "CANCELLED") {
-    await db.contract.updateMany({ where: { dealId, status: { not: "SIGNED" } }, data: { status: "VOID" } });
+    await db.contract.updateMany({ where: { dealId, status: { notIn: ["SIGNED", "VERIFIED"] } }, data: { status: "VOID" } });
     if (deal.commission) await db.commission.update({ where: { id: deal.commission.id }, data: { status: "WAIVED" } });
     if (deal.listing.status === "IN_DEAL") await db.listing.update({ where: { id: deal.listingId }, data: { status: "PUBLISHED" } });
   }
@@ -635,4 +791,265 @@ export async function addNote(locale: string, dealId: string, form: FormData) {
   const note = String(form.get("note") ?? "").trim().slice(0, 1000);
   if (note) await event(deal, user, "NOTE", { note, ...(internal ? { internal: true } : {}) });
   done(l, dealId);
+}
+
+// ─── DOC-01: «مستندات أخرى» — رفع متعدد بعنوان، استبدال بنسخة أحدث (ممنوع الحذف)، وطلب مستند ───
+
+/** مسودات رفعها المستخدم بنفسه ولسه مش مربوطة بحاجة */
+async function myDrafts(userId: string, ids: string[]) {
+  return db.document.findMany({ where: { id: { in: ids }, ownerId: userId, uploadedById: userId, type: "OTHER", dealId: null, listingId: null, plotId: null, serviceRequestId: null } });
+}
+
+export async function attachDealDocuments(locale: string, dealId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  await guard(user, deal, "deal.upload_doc", back, form);
+  const ids = form.getAll("docIds").map(String).slice(0, 20);
+  const drafts = await myDrafts(user.id, ids);
+  if (!drafts.length) done(l, dealId, "?err=file#other-docs");
+  const titles = drafts.map((d) => cleanTitle(form.get(`title_${d.id}`)));
+  if (titles.some((t) => !t)) done(l, dealId, "?err=title#other-docs");
+  const requestId = String(form.get("requestId") ?? "");
+  const side = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
+  const req = requestId ? await db.documentRequest.findFirst({ where: { id: requestId, dealId, status: "OPEN", side: side ?? "-" } }) : null;
+  for (const [i, d] of drafts.entries()) {
+    await db.document.update({ where: { id: d.id }, data: { dealId, title: titles[i], visibility: side ? "PRIVATE" : "SHARED_WITH_COUNTERPARTY" } });
+    await event(deal, user, "DOCUMENT_ADDED", { documentId: d.id, type: "OTHER", title: titles[i] });
+  }
+  if (req) {
+    await db.documentRequest.update({ where: { id: req.id }, data: { status: "FULFILLED", documentId: drafts[0].id, fulfilledAt: new Date() } });
+    await notify([req.requestedById], {
+      kind: "document.request_fulfilled",
+      ar: [`المستند المطلوب اترفع: ${req.title}`],
+      en: [`The requested document was uploaded: ${req.title}`],
+      link: `/deals/${dealId}#other-docs`,
+    });
+  }
+  await notify([deal.brokerId, deal.lawyerId].filter((x): x is string => !!x && x !== user.id), {
+    kind: "document.added",
+    ar: [`${drafts.length} مستند جديد في الصفقة`, titles.join("، ")],
+    en: [`${drafts.length} new document(s) in the deal`, titles.join(", ")],
+    link: `/deals/${dealId}#other-docs`,
+  });
+  done(l, dealId, "#other-docs");
+}
+
+/** استبدال بنسخة أحدث — القديم بيفضل في السجل (SUPERSEDED)، مفيش حذف */
+export async function replaceDealDocument(locale: string, dealId: string, documentId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  await guard(user, deal, "deal.upload_doc", back, form);
+  const old = deal.documents.find((d) => d.id === documentId && d.status !== "SUPERSEDED");
+  const staff = !!user && [deal.brokerId, deal.lawyerId, deal.agentId].includes(user.id);
+  // بس «مستندات أخرى» — نسخ العقود والإيصالات ما بتتبدلش من هنا (وبتفضل مرتبطة بالعقد)
+  if (!old || old.type !== "OTHER" || (old.uploadedById !== user.id && !staff && user.role !== "ADMIN")) done(l, dealId, "?err=forbidden#other-docs");
+  const [draft] = await myDrafts(user.id, form.getAll("docIds").map(String).slice(0, 1));
+  if (!draft) done(l, dealId, "?err=file#other-docs");
+  const title = cleanTitle(form.get(`title_${draft.id}`)) ?? old!.title;
+  const last = await db.document.findFirst({ where: { groupId: old!.groupId }, orderBy: { version: "desc" }, select: { version: true } });
+  await db.$transaction([
+    db.document.update({ where: { id: old!.id }, data: { status: "SUPERSEDED" } }),
+    db.document.update({ where: { id: draft.id }, data: { dealId, type: old!.type, title, groupId: old!.groupId, version: (last?.version ?? old!.version) + 1, ownerId: old!.ownerId } }),
+  ]);
+  await event(deal, user, "DOCUMENT_ADDED", { documentId: draft.id, type: old!.type, title, replaces: old!.id, version: (last?.version ?? old!.version) + 1 });
+  done(l, dealId, "#other-docs");
+}
+
+/** المحامي (أو الوسيط) يطلب مستند محدد من طرف → بيظهر له «مطلوب منك رفع: …» */
+export async function requestDocument(locale: string, dealId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  if (![deal.lawyerId, deal.brokerId].includes(user.id) && user.role !== "ADMIN") done(l, dealId, "?err=forbidden");
+  if (user.role === "ADMIN") await guard(user, deal, "deal.upload_doc", back, form);
+  const side = form.get("side") === "SELLER" ? "SELLER" : "BUYER";
+  const title = cleanTitle(form.get("title"));
+  if (!title) done(l, dealId, "?err=title#other-docs");
+  const note = String(form.get("note") ?? "").trim().slice(0, 500) || null;
+  const r = await db.documentRequest.create({ data: { dealId, requestedById: user.id, side, title: title!, note } });
+  await event(deal, user, "NOTE", { documentRequested: title, side, requestId: r.id });
+  await notify([side === "BUYER" ? deal.buyerId : deal.listing.sellerId], {
+    kind: "document.requested",
+    ar: [`مطلوب منك رفع: ${title}`, note ?? undefined],
+    en: [`Please upload: ${title}`, note ?? undefined],
+    link: `/deals/${dealId}#other-docs`,
+  });
+  done(l, dealId, "#other-docs");
+}
+
+// ─── PRIV-01: الكشف بالموافقة ومشاركة مستند ───
+
+const DISCLOSABLE = { SELLER: ["name", "plotCode", "documents"], BUYER: ["name"] } as const;
+
+/** «هيتعرض للطرف الآخر: … — موافق؟» بكود تأكيد */
+export async function grantDisclosure(locale: string, dealId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  const side = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
+  if (!side) done(l, dealId, "?err=forbidden");
+  const allowed: readonly string[] = DISCLOSABLE[side!];
+  const fields = form.getAll("field").map(String).filter((f) => allowed.includes(f)).sort();
+  if (!fields.length) done(l, dealId, "#disclosure");
+  await requireActionCode(user, "disclosure.consent", dealId, { fields: fields.join(",") }, form, back);
+  await db.disclosureConsent.create({ data: { userId: user.id, dealId, fields } });
+  await event(deal, user, "NOTE", { disclosureGranted: fields, by: side });
+  await notify([deal.brokerId, side === "SELLER" ? deal.buyerId : deal.listing.sellerId], {
+    kind: "deal.disclosure",
+    ar: [side === "SELLER" ? "البائع وافق على كشف بيانات للطرف الآخر" : "المشتري وافق على كشف اسمه"],
+    en: [side === "SELLER" ? "The seller agreed to disclose details to the other party" : "The buyer agreed to disclose their name"],
+    link: `/deals/${dealId}`,
+  });
+  done(l, dealId, "#disclosure");
+}
+
+/** سحب الموافقة — بيوقف الكشف من دلوقتي (العقود الموقّعة بتفضل محفوظة للمدة القانونية) */
+export async function revokeDisclosure(locale: string, dealId: string) {
+  const { l, user, deal } = await ctx(locale, dealId);
+  const n = await db.disclosureConsent.updateMany({ where: { dealId, userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } });
+  if (n.count) await event(deal, user, "NOTE", { disclosureRevoked: true });
+  done(l, dealId, "#disclosure");
+}
+
+/** «شارك مع الطرف الآخر» — بكود تأكيد */
+export async function shareDocument(locale: string, dealId: string, documentId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  const d = deal.documents.find((x) => x.id === documentId);
+  if (!d || (d.ownerId !== user.id && d.uploadedById !== user.id)) done(l, dealId, "?err=forbidden#other-docs");
+  await requireActionCode(user, "document.share", dealId, { documentId }, form, back);
+  await db.document.update({ where: { id: documentId }, data: { visibility: "SHARED_WITH_COUNTERPARTY" } });
+  await event(deal, user, "NOTE", { documentShared: d!.title ?? d!.type });
+  done(l, dealId, "#other-docs");
+}
+
+/** BANK-01: كل طرف يختار الحساب اللي هيستلم عليه (أو يترد له عليه) — بكود؛ بعد توقيع نموذج 3 التغيير محتاج المالية */
+export async function selectDealBank(locale: string, dealId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  const side = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
+  if (!side) done(l, dealId, "?err=forbidden");
+  if (deal.bankLockedAt) done(l, dealId, "?err=bank_locked#bank");
+  const accountId = String(form.get("accountId") ?? "");
+  const acc = await db.bankAccount.findFirst({ where: { id: accountId, userId: user.id, status: { in: ["PENDING", "VERIFIED"] } } });
+  if (!acc) done(l, dealId, "?err=forbidden#bank");
+  await requireActionCode(user, "bank.select", dealId, { accountId }, form, back);
+  await db.deal.update({ where: { id: dealId }, data: side === "BUYER" ? { buyerBankAccountId: accountId } : { sellerBankAccountId: accountId } });
+  await event(deal, user, "NOTE", { bankSelected: `•••• ${acc!.ibanLast4}`, by: side });
+  done(l, dealId, "#bank");
+}
+
+// ─── CON-04/05/06: رفع النسخة الموقّعة (ورقي) + تحقق المحامي ───
+
+/**
+ * «ارفع النسخة الموقّعة»: PDF أو صور (بتتجمع PDF واحد بالترتيب). فحص قبل القبول:
+ * عدد الصفحات = صفحات النسخة المتولّدة، كود المستند = آخر نسخة (مش ملغاة)، وضوح كل صفحة.
+ * الأصل بيتحفظ زي ما هو مع البصمة، وأي رفع جديد نسخة إضافية — مفيش حذف.
+ */
+export async function uploadSignedContract(locale: string, dealId: string, contractId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  const contract = deal.contracts.find((c) => c.id === contractId);
+  const anchor = `#contract-${contractId}`;
+  if (!contract || !["SENT_FOR_SIGNATURE", "PARTIALLY_SIGNED"].includes(contract.status)) done(l, dealId, `?err=forbidden${anchor}`);
+  const mySide = user.id === deal.buyerId ? "BUYER" : user.id === deal.listing.sellerId ? "SELLER" : null;
+  const onBehalf = user.id === deal.brokerId || user.role === "ADMIN";
+  if (user.role === "ADMIN") await guard(user, deal, "deal.upload_doc", back, form);
+  const sideRaw = mySide ?? (onBehalf ? String(form.get("side") ?? "") : "");
+  const side = sideRaw === "BUYER" || sideRaw === "SELLER" ? sideRaw : null;
+  if (!side || !requiredSigners(contract!.type).includes(side)) done(l, dealId, `?err=forbidden${anchor}`);
+  // الطرف نفسه: نفس صلاحية التوقيع (حساب موثّق، صفقة شغالة)
+  if (mySide) await guard(user, deal, "contract.sign", back, form);
+  // CON-05: التوكيل — رقمه ومكتب التوثيق إجباري
+  const poaNumber = String(form.get("poaNumber") ?? "").trim().slice(0, 60);
+  const poaNotary = String(form.get("poaNotary") ?? "").trim().slice(0, 120);
+  const isPoa = contract!.type === "POWER_OF_ATTORNEY";
+  if (isPoa && (poaNumber.length < 2 || poaNotary.length < 3)) done(l, dealId, `?err=poa_fields${anchor}`);
+  // الكود: النسخة الحالية بس (مش ملغاة) — الكود المطبوع في التذييل أو المقروء من الـ QR
+  const code = String(form.get("code") ?? "").trim().toUpperCase();
+  if (!isPoa) {
+    if (!contract!.draftCode) done(l, dealId, `?err=no_draft${anchor}`);
+    // الكود فيه «v» صغيرة — المقارنة من غير حساسية لحالة الحروف
+    if (code !== contract!.draftCode!.toUpperCase()) {
+      const old = code ? await db.issuedDocument.findFirst({ where: { code: { equals: code, mode: "insensitive" } } }) : null;
+      done(l, dealId, `?err=${old && old.contractId === contractId ? "code_old" : "code_wrong"}${anchor}`);
+    }
+  }
+  const ids = form.getAll("docIds").map(String).slice(0, 40);
+  const files = await db.document.findMany({ where: { id: { in: ids }, ownerId: user.id, uploadedById: user.id, type: "OTHER", dealId: null, listingId: null } });
+  if (!files.length) done(l, dealId, `?err=file${anchor}`);
+  files.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+  const blobs = [];
+  for (const f of files) {
+    const r = await readFile(f.storageKey, f.fileName, f.mimeType);
+    const data = r?.kind === "bytes" ? r.data : r?.kind === "url" ? new Uint8Array(await (await fetch(r.url)).arrayBuffer()) : null;
+    if (!data) done(l, dealId, `?err=file${anchor}`);
+    blobs.push({ doc: f, data: data! });
+  }
+  let pdfBytes: Buffer;
+  let pages: number;
+  if (blobs.length === 1 && blobs[0].doc.mimeType === "application/pdf") {
+    pdfBytes = Buffer.from(blobs[0].data);
+    pages = (await pdfPageCount(pdfBytes)) ?? 0;
+  } else {
+    if (blobs.some((b) => !["image/jpeg", "image/png"].includes(b.doc.mimeType))) done(l, dealId, `?err=mix${anchor}`);
+    const merged = await imagesToPdf(blobs.map((b) => ({ data: b.data, mime: b.doc.mimeType })));
+    if (merged.lowQualityPage) done(l, dealId, `?err=page_quality&page=${merged.lowQualityPage}${anchor}`);
+    pdfBytes = merged.bytes;
+    pages = merged.pages;
+  }
+  if (!isPoa && contract!.draftPages && pages !== contract!.draftPages) done(l, dealId, `?err=pages&got=${pages}&want=${contract!.draftPages}${anchor}`);
+  const saved = await saveFile(pdfBytes, "application/pdf", "contracts");
+  const name = CONTRACT_TYPE[contract!.type]?.[0] ?? contract!.type;
+  const signedDoc = await db.document.create({
+    data: {
+      type: isPoa ? "POWER_OF_ATTORNEY" : "CONTRACT_PDF",
+      title: isPoa ? `التوكيل الموثق رقم ${poaNumber} — ${poaNotary}` : `النسخة الموقّعة — ${name} (${side === "BUYER" ? "المشتري" : "البائع"})`,
+      ownerId: side === "BUYER" ? deal.buyerId : deal.listing.sellerId,
+      uploadedById: user.id,
+      dealId,
+      storageKey: saved.key,
+      sha256: saved.sha256,
+      sizeBytes: saved.sizeBytes,
+      fileName: `${contract!.draftCode ?? contractId}-signed.pdf`,
+      mimeType: "application/pdf",
+      status: "IN_REVIEW",
+      visibility: "SHARED_WITH_COUNTERPARTY",
+    },
+  });
+  // الأصل المرفوع بيتحفظ زي ما هو
+  for (const [i, b] of blobs.entries()) await db.document.update({ where: { id: b.doc.id }, data: { dealId, title: `أصل مرفوع ${i + 1}/${blobs.length} — ${name}`, visibility: "PRIVATE" } });
+  // «النسخة عليها توقيع الطرفين» للوسيط/الأدمن بس — الطرف بيسجّل توقيعه هو (المحامي بيتحقق بعدها)
+  const both = isPoa || (!mySide && onBehalf && form.get("both") === "on");
+  const roles = both ? requiredSigners(contract!.type) : [side!];
+  const all = [...((contract!.signatures as Signature[]) ?? []).filter((s) => !roles.includes(s.role)), ...roles.map((r) => ({ userId: user.id, role: r, signedAt: new Date().toISOString(), providerRef: `PAPER-${signedDoc.id.slice(-6)}` }))];
+  const complete = requiredSigners(contract!.type).every((r) => all.some((s) => s.role === r));
+  await db.contract.update({
+    where: { id: contractId },
+    data: { signatures: all, status: complete ? "SIGNED" : "PARTIALLY_SIGNED", signedAt: complete ? new Date() : null, signedVia: "PAPER", signedUploadDocumentId: signedDoc.id, rejectReason: null, ...(isPoa ? { poaNumber, poaNotary } : {}) },
+  });
+  if (complete) await onFullySigned(user, deal, contract!.type);
+  await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, signedBy: roles.join("+"), complete, via: "PAPER", onBehalf: !mySide || undefined, sha256: saved.sha256, pages });
+  if (complete && deal.lawyerId) {
+    await notify([deal.lawyerId], {
+      kind: "contract.verify_needed",
+      ar: [`نسخة موقّعة من ${name} محتاجة مراجعتك`, "قارنها بالنسخة المتولّدة صفحة بصفحة."],
+      en: [`A signed ${name} needs your review`, "Compare it page by page with the generated copy."],
+      link: `/deals/${dealId}${anchor}`,
+    });
+  }
+  done(l, dealId, `?ok=signed_uploaded${anchor}`);
+}
+
+/** المحامي: «مرفوض + السبب» → يرجع للطرف بمهمة «أعد الرفع» */
+export async function rejectSignedContract(locale: string, dealId: string, contractId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  await guard(user, deal, "contract.approve", back, form);
+  const contract = deal.contracts.find((c) => c.id === contractId);
+  if (!contract || contract.status !== "SIGNED" || contract.signedVia !== "PAPER") done(l, dealId);
+  const reason = String(form.get("reason") ?? "").trim().slice(0, 300);
+  if (reason.length < 5) done(l, dealId, `?err=note_required#contract-${contractId}`);
+  await db.contract.update({ where: { id: contractId }, data: { status: "SENT_FOR_SIGNATURE", signatures: [], signedAt: null, rejectReason: reason } });
+  for (const side of requiredSigners(contract!.type)) {
+    await db.documentRequest.create({ data: { dealId, requestedById: user.id, side, title: `أعد رفع النسخة الموقّعة من ${CONTRACT_TYPE[contract!.type]?.[0]}`, note: reason } });
+  }
+  await event(deal, user, "CONTRACT_UPDATED", { contractId, type: contract!.type, decision: "CHANGES_REQUESTED", notes: reason });
+  await notify(requiredSigners(contract!.type).map((s) => (s === "BUYER" ? deal.buyerId : deal.listing.sellerId)), {
+    kind: "contract.reupload",
+    ar: [`أعد رفع النسخة الموقّعة من ${CONTRACT_TYPE[contract!.type]?.[0]}`, reason],
+    en: [`Please re-upload the signed ${CONTRACT_TYPE[contract!.type]?.[1]}`, reason],
+    link: `/deals/${dealId}#contract-${contractId}`,
+  });
+  done(l, dealId, `#contract-${contractId}`);
 }

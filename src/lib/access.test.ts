@@ -34,6 +34,8 @@ const buyerDeal = (stage: string, prelim: boolean, status = "ACTIVE") => ({
   contracts: prelim ? [{ type: "PRELIMINARY_CONTRACT", status: "SIGNED" }] : [{ type: "COMMISSION_AGREEMENT", status: "SIGNED" }],
   documents: [],
   events: [],
+  // PRIV-01: البائع وافق على كشف المستندات لما العقد المبدئي اتوقّع
+  disclosures: prelim ? [{ userId: "seller", fields: ["name", "plotCode", "documents"], revokedAt: null }] : [],
 });
 
 describe("مين يفتح المستندات", () => {
@@ -65,6 +67,9 @@ describe("مين يفتح المستندات", () => {
     deals = [buyerDeal("PRELIMINARY_CONTRACT", true)];
     expect(await canViewDocument(user("buyer"), "d1")).toBeTruthy();
     deals = [buyerDeal("PRELIMINARY_CONTRACT", true, "CANCELLED")];
+    expect(await canViewDocument(user("buyer"), "d1")).toBeNull();
+    // PRIV-01: من غير موافقة البائع على الكشف → مرفوض حتى بعد التوقيع
+    deals = [{ ...buyerDeal("PRELIMINARY_CONTRACT", true), disclosures: [] }];
     expect(await canViewDocument(user("buyer"), "d1")).toBeNull();
   });
   it("SEC-04: ملف هوية بحساب مندوب → مرفوض، والوسيط وهو بيراجع → مسموح", async () => {

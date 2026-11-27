@@ -1,9 +1,12 @@
 "use server";
 
-import type { City } from "@prisma/client";
+/** GEO-01: المدينة = مفتاح نصي من جدول المدن */
+type City = string;
+import { allCities } from "@/lib/cities";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
+import { can, subject } from "@/lib/authz";
 import { isValidPhone, normalizePhone } from "@/lib/format";
 import { CITY_KEYS } from "@/lib/labels";
 import { idsByRole, notify } from "@/lib/notifications";
@@ -13,6 +16,7 @@ export type ValuationState = { ok?: boolean; ref?: string; error?: string; field
 
 /** MKT-03: «اعرف قيمة قطعتك» → طلب خدمة نوع VALUATION في طابور الوسيط */
 export async function submitValuation(locale: string, _prev: ValuationState, form: FormData): Promise<ValuationState> {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const ar = locale !== "en";
   const s = (k: string) => String(form.get(k) ?? "").trim();
   const name = s("name");
@@ -31,6 +35,8 @@ export async function submitValuation(locale: string, _prev: ValuationState, for
   if (Object.keys(fe).length) return { error: ar ? "راجع الخانات المعلّمة" : "Please check the highlighted fields", fieldErrors: fe };
 
   const user = await getCurrentUser();
+  // PUB-01: طلب خدمة — للعملاء والشركاء والوسطاء (المحامي والفريق التاني لأ)
+  if (user && !can(subject(user), "service.create").allowed) return { error: ar ? "حسابك ما يقدرش يطلب خدمة." : "Your account can't request a service." };
   const source = await readAttribution();
   const req = await db.serviceRequest.create({
     data: {

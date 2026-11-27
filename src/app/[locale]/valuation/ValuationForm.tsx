@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { track } from "@/components/Analytics";
 import type { Locale } from "@/i18n/config";
 import { money, tr } from "@/lib/format";
-import { CITY, CITY_KEYS, label } from "@/lib/labels";
+import type { CityOption } from "@/lib/cities";
 import { Notice, btn, field, labelCls } from "@/components/ui";
 import { useKeptAction } from "@/components/useKeptAction";
 import { submitValuation, type ValuationState } from "./actions";
@@ -12,9 +12,9 @@ import { submitValuation, type ValuationState } from "./actions";
 type District = { id: string; city: string; nameAr: string; nameEn: string };
 
 /** MKT-03: «اعرف قيمة قطعتك» — فورم قصير + تقدير فوري من المؤشر الحقيقي لو متاح */
-export function ValuationForm({ locale, districts, perSqm }: { locale: Locale; districts: District[]; perSqm: Record<string, number | null> }) {
+export function ValuationForm({ locale, districts, perSqm, cities }: { locale: Locale; cities: CityOption[]; districts: District[]; perSqm: Record<string, number | null> }) {
   const L = tr(locale);
-  const [city, setCity] = useState<string>(CITY_KEYS[0]);
+  const [city, setCity] = useState<string>(cities[0]?.id ?? "");
   const [area, setArea] = useState("");
   const [state, onSubmit, pending] = useKeptAction((p: ValuationState, f: FormData) => submitValuation(locale, p, f), {} as ValuationState);
   const fe = state.fieldErrors ?? {};
@@ -42,9 +42,9 @@ export function ValuationForm({ locale, districts, perSqm }: { locale: Locale; d
         <label className={labelCls}>
           {L("المدينة", "City")}
           <select name="city" value={city} onChange={(e) => setCity(e.target.value)} className={field}>
-            {CITY_KEYS.map((k) => (
-              <option key={k} value={k}>
-                {label(CITY, k, locale)}
+            {cities.map((c) => (
+              <option key={c.id} value={c.id}>
+                {locale === "ar" ? c.nameAr : c.nameEn}
               </option>
             ))}
           </select>

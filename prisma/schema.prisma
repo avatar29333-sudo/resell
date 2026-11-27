@@ -61,13 +61,6 @@ enum Currency {
 }
 
 /// نفس المدن اللي في src/i18n/messages
-enum City {
-  NEW_CAIRO
-  SHEIKH_ZAYED
-  OCTOBER
-  NEW_OCTOBER
-  NEW_DAMIETTA
-}
 
 enum VerificationStatus {
   PENDING
@@ -164,6 +157,12 @@ enum ContractType {
   PRELIMINARY_CONTRACT // عقد مبدئي
   DEPOSIT_RECEIPT // محضر عربون
   POWER_OF_ATTORNEY // توكيل (للتقديم والمتابعة بس)
+  BUYER_UNDERTAKING // نموذج 6: تعهد المشتري
+  CLOSING // نموذج 7: محضر الإغلاق
+  CANCELLATION // نموذج 8: محضر الإلغاء
+  LISTING_AUTHORIZATION // نموذج 1: تفويض عرض
+  RESCUE_SERVICE // نموذج 9: خدمة إنقاذ المهلة
+  PARTNER_AGREEMENT // نموذج 10: اتفاقية الشريك
 }
 
 enum ContractStatus {
@@ -173,6 +172,8 @@ enum ContractStatus {
   SENT_FOR_SIGNATURE
   SIGNED
   VOID
+  PARTIALLY_SIGNED // CON-04: طرف وقّع والتاني لسه
+  VERIFIED // CON-04: النسخة الموقّعة اتحقق منها (مزوّد أو المحامي)
 }
 
 enum CommissionStatus {
@@ -219,72 +220,96 @@ enum ServiceRequestStatus {
 // ───────────────────────── الجداول ─────────────────────────
 
 model User {
-  id               String       @id @default(cuid())
-  name             String
-  phone            String       @unique //بصيغة دولية E.164 زي +201001234567
-  email            String?      @unique
-  countryOfResidence String?    @db.Char(2) //كود الدولة ISO، مثلاً EG أو SA
-  locale           Locale       @default(ar)
-  role             Role         @default(CLIENT)
-  accountLevel     AccountLevel @default(BASIC)
-  twoFactorEnabled Boolean      @default(false) //إجباري للفريق
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  /// PUB-03: موافقة الشريك على نموذج 10 (مرة واحدة قبل أول عرض)
+  partnerAgreedAt    DateTime?
+  referredDeals      Deal[]              @relation("DealPartnerReferral")
+  partnerReferrals   PartnerReferral[]   @relation("ReferralPartner")
+  referredAsBuyer    PartnerReferral[]   @relation("ReferralBuyer")
+  /// REL-03: موظف مسموح له يتعامل كعميل (قاعدة تعارض المصالح بتمنع إسناده لصفقته)
+  clientEnabled      Boolean             @default(false)
+  exportJobs         ExportJob[]
+  approvedTemplates  TemplateVersion[]   @relation("TemplateLawyer")
+  bankAccounts       BankAccount[]
+  verifiedBanks      BankAccount[]       @relation("BankVerifier")
+  disclosures        DisclosureConsent[]
+  officialRequests   OfficialRequest[]   @relation("OfficialRequestUser")
+  officialFiled      OfficialRequest[]   @relation("OfficialRequestBy")
+  /// PRIV-01: سحب الموافقة التسويقية
+  marketingOptOutAt  DateTime?
+  uploadSessions     UploadSession[]
+  documentRequests   DocumentRequest[]
+  id                 String              @id @default(cuid())
+  name               String
+  phone              String              @unique //بصيغة دولية E.164 زي +201001234567
+  email              String?             @unique
+  countryOfResidence String?             @db.Char(2) //كود الدولة ISO، مثلاً EG أو SA
+  locale             Locale              @default(ar)
+  role               Role                @default(CLIENT)
+  accountLevel       AccountLevel        @default(BASIC)
+  twoFactorEnabled   Boolean             @default(false) //إجباري للفريق
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
   //حذف بالطلب (قانون 151): البيانات الشخصية بتتمسح والسجل يفضل
-  anonymizedAt     DateTime?
+  anonymizedAt       DateTime?
   /// MKT-10: مصدر التسجيل (first/last touch: utm + referrer + كود الإحالة)
-  source           Json?
+  source             Json?
   /// MKT-06: كود الإحالة بتاع المستخدم + مين أحاله
-  referralCode     String?   @unique
-  referredById     String?
-  referredBy       User?     @relation("Referral", fields: [referredById], references: [id])
-  referrals        User[]    @relation("Referral")
-  rewardsEarned    ReferralReward[] @relation("RewardReferrer")
-  rewardsAsReferred ReferralReward[] @relation("RewardReferred")
+  referralCode       String?             @unique
+  referredById       String?
+  referredBy         User?               @relation("Referral", fields: [referredById], references: [id])
+  referrals          User[]              @relation("Referral")
+  rewardsEarned      ReferralReward[]    @relation("RewardReferrer")
+  rewardsAsReferred  ReferralReward[]    @relation("RewardReferred")
+  /// DEAL-03: قناة كود التحقق الافتراضية (whatsapp | sms | email | totp)
+  otpChannel         String              @default("whatsapp")
+  actionCodes        ActionCode[]
+  consentRecords     ConsentRecord[]
   /// MKT-07: نصيب السمسار الشريك من العمولة (%)
-  partnerSharePct  Decimal?  @db.Decimal(5, 2)
+  partnerSharePct    Decimal?            @db.Decimal(5, 2)
   // التحقق الثنائي (تطبيق Authenticator) — السر متشفّر بـ AES-GCM
-  totpSecret       String?
-  totpEnabledAt    DateTime?
+  totpSecret         String?
+  totpEnabledAt      DateTime?
   // موافقة صريحة على الشروط وسياسة الخصوصية (قانون 151)
-  termsAcceptedAt  DateTime?
+  termsAcceptedAt    DateTime?
   // PERM-07: إيقاف الحساب
-  status           AccountStatus @default(ACTIVE)
-  suspendedAt      DateTime?
-  suspendReason    String?
+  status             AccountStatus       @default(ACTIVE)
+  suspendedAt        DateTime?
+  suspendReason      String?
   // PERM-08: بيزيد مع تغيير الدور أو الإيقاف → كل الجلسات القديمة بتتقفل
-  sessionVersion   Int          @default(0)
+  sessionVersion     Int                 @default(0)
   // PERM-05: السمسار الشريك — رقم القيد بيتراجع من الأدمن قبل التفعيل
-  brokerRegNo      String?
-  partnerApprovedAt DateTime?
+  brokerRegNo        String?
+  partnerApprovedAt  DateTime?
   // عدد مرات رفض التوثيق (بعد 3 = مراجعة أدمن)
-  kycRejections    Int          @default(0)
+  kycRejections      Int                 @default(0)
 
-  notifications       Notification[]
-  reconciliations        Reconciliation[] @relation("ReconciliationBy")
-  assignedListingsBroker Listing[] @relation("ListingBroker")
-  assignedListingsLawyer Listing[] @relation("ListingLawyer")
-  submittedListings      Listing[] @relation("ListingSubmitter")
+  notifications          Notification[]
+  reconciliations        Reconciliation[]  @relation("ReconciliationBy")
+  assignedListingsBroker Listing[]         @relation("ListingBroker")
+  assignedListingsLawyer Listing[]         @relation("ListingLawyer")
+  submittedListings      Listing[]         @relation("ListingSubmitter")
   paymentRequests        PaymentApproval[] @relation("ApprovalRequester")
   paymentDecisions       PaymentApproval[] @relation("ApprovalDecider")
-  kycProfile          KycProfile?      @relation("KycUser")
-  kycReviews          KycProfile[]     @relation("KycReviewer")
-  listings            Listing[]        @relation("Seller")
-  ownedDocuments      Document[]       @relation("DocumentOwner")
-  uploadedDocuments   Document[]       @relation("DocumentUploader")
-  reviews             Review[]
-  dealsAsBuyer        Deal[]           @relation("DealBuyer")
-  dealsAsBroker       Deal[]           @relation("DealBroker")
-  dealsAsLawyer       Deal[]           @relation("DealLawyer")
-  dealsAsAgent        Deal[]           @relation("DealAgent")
-  dealEvents          DealEvent[]
-  approvedContracts   Contract[]       @relation("ContractApprover")
-  enteredRates        ExchangeRate[]
-  buyRequests         BuyRequest[]
-  serviceRequests     ServiceRequest[] @relation("ServiceRequester")
-  assignedServices    ServiceRequest[] @relation("ServiceAssignee")
-  auditLogs           AuditLog[]
-  createdPlots        Plot[]
+  kycProfile             KycProfile?       @relation("KycUser")
+  kycReviews             KycProfile[]      @relation("KycReviewer")
+  listings               Listing[]         @relation("Seller")
+  ownedDocuments         Document[]        @relation("DocumentOwner")
+  uploadedDocuments      Document[]        @relation("DocumentUploader")
+  reviews                Review[]
+  dealsAsBuyer           Deal[]            @relation("DealBuyer")
+  dealsAsBroker          Deal[]            @relation("DealBroker")
+  dealsAsLawyer          Deal[]            @relation("DealLawyer")
+  dealsAsAgent           Deal[]            @relation("DealAgent")
+  dealEvents             DealEvent[]
+  approvedContracts      Contract[]        @relation("ContractApprover")
+  verifiedContracts      Contract[]        @relation("ContractVerifier")
+  issuedDocuments        IssuedDocument[]
+  enteredRates           ExchangeRate[]
+  buyRequests            BuyRequest[]
+  serviceRequests        ServiceRequest[]  @relation("ServiceRequester")
+  assignedServices       ServiceRequest[]  @relation("ServiceAssignee")
+  auditLogs              AuditLog[]
+  createdPlots           Plot[]
 
   @@index([role])
   @@index([referredById])
@@ -313,22 +338,28 @@ model KycProfile {
 
 /// القطعة: ثابتة بكودها. الكود مخفي عن المشتري لحد اتفاق العمولة (بيتفحص في الخادم).
 model Plot {
-  id                 String            @id @default(cuid())
-  city               City
-  district           String //المرحلة / الحي
+  // GEO-02: الحي (المكان) والطرح (مرحلة بيت الوطن) منفصلين
+  districtId          String?
+  districtRef         District?                                    @relation(fields: [districtId], references: [id])
+  offeringRoundId     String?
+  offeringRound       OfferingRound?                               @relation(fields: [offeringRoundId], references: [id])
+  id                  String                                       @id @default(cuid())
+  city                String
+  cityRef             City                                         @relation(fields: [city], references: [id])
+  district            String //المرحلة / الحي
   /// DATA-07: الاسم الإنجليزي للحي (من جدول District)
-  districtEn         String?
-  code               String //كود القطعة
-  areaSqm            Decimal           @db.Decimal(10, 2)
+  districtEn          String?
+  code                String //كود القطعة
+  areaSqm             Decimal                                      @db.Decimal(10, 2)
   //حدود القطعة (PostGIS). Prisma ما بيقراهاش مباشرة — بنكتب ونقرا بـ SQL.
-  boundary           Unsupported("geometry(MultiPolygon, 4326)")?
-  paymentStatus      PlotPaymentStatus @default(INSTALLMENTS)
-  buildDeadline      DateTime?         @db.Date //نهاية مهلة البناء
-  constructionPercent Int              @default(0) //نسبة التنفيذ 0–100
-  createdById        String?
-  createdBy          User?             @relation(fields: [createdById], references: [id])
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  boundary            Unsupported("geometry(MultiPolygon, 4326)")?
+  paymentStatus       PlotPaymentStatus                            @default(INSTALLMENTS)
+  buildDeadline       DateTime?                                    @db.Date //نهاية مهلة البناء
+  constructionPercent Int                                          @default(0) //نسبة التنفيذ 0–100
+  createdById         String?
+  createdBy           User?                                        @relation(fields: [createdById], references: [id])
+  createdAt           DateTime                                     @default(now())
+  updatedAt           DateTime                                     @updatedAt
 
   listings        Listing[]
   documents       Document[]
@@ -337,12 +368,16 @@ model Plot {
   //نفس القطعة ما تتسجلش مرتين — ده أساس كشف العروض المكررة
   @@unique([city, district, code])
   @@index([buildDeadline])
+  @@index([districtId])
+  @@index([offeringRoundId])
 }
 
 /// DATA-07: قايمة الأحياء/المراحل لكل مدينة — الـ wizard بيختار منها بدل النص الحر
 model District {
+  plots     Plot[]
   id        String   @id @default(cuid())
-  city      City
+  city      String
+  cityRef   City     @relation(fields: [city], references: [id])
   nameAr    String
   nameEn    String
   sort      Int      @default(0)
@@ -353,34 +388,41 @@ model District {
 }
 
 model Listing {
-  id            String        @id @default(cuid())
-  plotId        String
-  plot          Plot          @relation(fields: [plotId], references: [id])
-  sellerId      String
-  seller        User          @relation("Seller", fields: [sellerId], references: [id])
-  priceType     PriceType
+  /// PUB-01/03: موافقة المالك على تفويض العرض (نموذج 1) + تأكيده بكود لما شريك/وسيط يعرض نيابة عنه
+  authorizationConsentAt DateTime?
+  ownerConfirmedAt       DateTime?
+  ownerConfirmCodeHash   String?
+  ownerConfirmExpiresAt  DateTime?
+  ownerConfirmAttempts   Int               @default(0)
+  partnerReferrals       PartnerReferral[]
+  id                     String            @id @default(cuid())
+  plotId                 String
+  plot                   Plot              @relation(fields: [plotId], references: [id])
+  sellerId               String
+  seller                 User              @relation("Seller", fields: [sellerId], references: [id])
+  priceType              PriceType
   //شامل: السعر الكلي. مدفوع + أوفر: قيمة الأوفر بس.
-  price         Decimal       @db.Decimal(14, 2)
-  currency      Currency      @default(EGP)
+  price                  Decimal           @db.Decimal(14, 2)
+  currency               Currency          @default(EGP)
   //في حالة «مدفوع بالدولار + أوفر»: المبلغ اللي اتدفع للجهاز بالدولار
-  paidAmountUsd Decimal?      @db.Decimal(14, 2)
-  status        ListingStatus @default(DRAFT)
-  publishedAt   DateTime?
+  paidAmountUsd          Decimal?          @db.Decimal(14, 2)
+  status                 ListingStatus     @default(DRAFT)
+  publishedAt            DateTime?
   // PERM-04: الإسناد — الوسيط والمحامي المسؤولين عن العرض
-  assignedBrokerId String?
-  assignedBroker   User?      @relation("ListingBroker", fields: [assignedBrokerId], references: [id])
-  assignedLawyerId String?
-  assignedLawyer   User?      @relation("ListingLawyer", fields: [assignedLawyerId], references: [id])
+  assignedBrokerId       String?
+  assignedBroker         User?             @relation("ListingBroker", fields: [assignedBrokerId], references: [id])
+  assignedLawyerId       String?
+  assignedLawyer         User?             @relation("ListingLawyer", fields: [assignedLawyerId], references: [id])
   // PERM-05: السمسار الشريك اللي رفع العرض نيابة عن عميله + موافقة العميل
   /// MKT-02: الأقساط الباقية للجهاز بالدولار (المشتري بيكمّلها)
-  remainingUsd     Decimal?   @db.Decimal(14, 2)
+  remainingUsd           Decimal?          @db.Decimal(14, 2)
   /// DATA-03: إفادة الجهاز انتهت والعرض «محتاج تحديث»
-  statementExpiredAt DateTime?
-  submittedById    String?
-  submittedBy      User?      @relation("ListingSubmitter", fields: [submittedById], references: [id])
-  clientConsentAt  DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  statementExpiredAt     DateTime?
+  submittedById          String?
+  submittedBy            User?             @relation("ListingSubmitter", fields: [submittedById], references: [id])
+  clientConsentAt        DateTime?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
 
   documents Document[]
   deals     Deal[]
@@ -413,42 +455,50 @@ model PaymentApproval {
 /// المستندات: كل إصدار بيتحفظ، ومفيش حذف.
 /// الملف نفسه في خزنة S3 المشفرة، وهنا المفتاح بس.
 model Document {
-  id           String         @id @default(cuid())
-  type         DocumentType
+  id                String          @id @default(cuid())
+  type              DocumentType
   //كل إصدارات نفس المستند ليها نفس groupId
-  groupId      String         @default(cuid())
-  version      Int            @default(1)
-  status       DocumentStatus @default(UPLOADED)
-  ownerId      String
-  owner        User           @relation("DocumentOwner", fields: [ownerId], references: [id])
-  uploadedById String
-  uploadedBy   User           @relation("DocumentUploader", fields: [uploadedById], references: [id])
-  plotId       String?
-  plot         Plot?          @relation(fields: [plotId], references: [id])
-  listingId    String?
-  listing      Listing?       @relation(fields: [listingId], references: [id])
-  dealId       String?
-  deal         Deal?          @relation(fields: [dealId], references: [id])
-  serviceRequestId String?
-  serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
-  storageKey   String         @unique
-  fileName     String
-  mimeType     String
-  sizeBytes    Int
-  sha256       String         @db.Char(64)
-  expiresAt    DateTime?      @db.Date //تاريخ انتهاء المستند (لو له)
+  groupId           String          @default(cuid())
+  version           Int             @default(1)
+  status            DocumentStatus  @default(UPLOADED)
+  ownerId           String
+  owner             User            @relation("DocumentOwner", fields: [ownerId], references: [id])
+  uploadedById      String
+  uploadedBy        User            @relation("DocumentUploader", fields: [uploadedById], references: [id])
+  plotId            String?
+  plot              Plot?           @relation(fields: [plotId], references: [id])
+  listingId         String?
+  listing           Listing?        @relation(fields: [listingId], references: [id])
+  dealId            String?
+  deal              Deal?           @relation(fields: [dealId], references: [id])
+  serviceRequestId  String?
+  serviceRequest    ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+  storageKey        String          @unique
+  fileName          String
+  /// DOC-01: عنوان «مستند آخر» (إجباري للنوع OTHER)
+  title             String?
+  /// PRIV-01: PRIVATE | STAFF | SHARED_WITH_COUNTERPARTY
+  visibility        String          @default("PRIVATE")
+  bankProofFor      BankAccount[]
+  signedContractFor Contract[]      @relation("ContractSignedUpload")
+  draftContractFor  Contract[]      @relation("ContractDraft")
+  mimeType          String
+  sizeBytes         Int
+  sha256            String          @db.Char(64)
+  expiresAt         DateTime?       @db.Date //تاريخ انتهاء المستند (لو له)
   /// OPS-02: مكان ووقت تصوير صورة الموقع
-  geoLat       Float?
-  geoLng       Float?
-  geoAccuracyM Float?
-  takenAt      DateTime?
-  createdAt    DateTime       @default(now())
+  geoLat            Float?
+  geoLng            Float?
+  geoAccuracyM      Float?
+  takenAt           DateTime?
+  createdAt         DateTime        @default(now())
 
-  reviews          Review[]
-  kycIdFor         KycProfile?  @relation("KycIdDocument")
-  kycSelfieFor     KycProfile?  @relation("KycSelfie")
-  contractPdfFor   Contract?
+  reviews           Review[]
+  kycIdFor          KycProfile?       @relation("KycIdDocument")
+  kycSelfieFor      KycProfile?       @relation("KycSelfie")
+  contractPdfFor    Contract?
   depositReceiptFor Deposit?
+  requestsFulfilled DocumentRequest[]
 
   @@unique([groupId, version])
   @@index([ownerId])
@@ -479,49 +529,63 @@ model Review {
 
 /// الصفقة: الانتقال بين المراحل له شروط مبرمجة (state machine في الخادم)
 model Deal {
-  id              String     @id @default(cuid())
-  listingId       String
-  listing         Listing    @relation(fields: [listingId], references: [id])
-  buyerId         String
-  buyer           User       @relation("DealBuyer", fields: [buyerId], references: [id])
-  stage           DealStage  @default(INTEREST)
-  status          DealStatus @default(ACTIVE)
-  agreedPrice     Decimal?   @db.Decimal(14, 2)
-  agreedCurrency  Currency?
+  /// PUB-03: الشريك اللي أحال المشتري
+  referredByPartnerId String?
+  referredByPartner   User?               @relation("DealPartnerReferral", fields: [referredByPartnerId], references: [id])
+  /// BANK-01: حساب كل طرف للاستلام/الرد — بيتثبت عند توقيع نموذج 3
+  buyerBankAccountId  String?
+  buyerBankAccount    BankAccount?        @relation("DealBuyerBank", fields: [buyerBankAccountId], references: [id])
+  sellerBankAccountId String?
+  sellerBankAccount   BankAccount?        @relation("DealSellerBank", fields: [sellerBankAccountId], references: [id])
+  bankLockedAt        DateTime?
+  disclosures         DisclosureConsent[]
+  documentRequests    DocumentRequest[]
+  issuedDocuments     IssuedDocument[]
+  id                  String              @id @default(cuid())
+  listingId           String
+  listing             Listing             @relation(fields: [listingId], references: [id])
+  buyerId             String
+  buyer               User                @relation("DealBuyer", fields: [buyerId], references: [id])
+  stage               DealStage           @default(INTEREST)
+  status              DealStatus          @default(ACTIVE)
+  agreedPrice         Decimal?            @db.Decimal(14, 2)
+  agreedCurrency      Currency?
   // السعر المقترح من الوسيط — بيتسجل «متفق» بعد ما الطرفين يوافقوا جوه الغرفة
-  proposedPrice   Decimal?   @db.Decimal(14, 2)
-  buyerPriceOkAt  DateTime?
-  sellerPriceOkAt DateTime?
+  proposedPrice       Decimal?            @db.Decimal(14, 2)
+  buyerPriceOkAt      DateTime?
+  sellerPriceOkAt     DateTime?
   // DATA-01: سعر الصرف بيتثبت مرة واحدة لحظة توقيع العقد المبدئي
-  rateLockedAt    DateTime?
+  rateLockedAt        DateTime?
   //سعر الصرف المثبّت وقت اتفاق السعر (نسخة من القيمة + المرجع)
-  lockedUsdEgpRate Decimal?  @db.Decimal(12, 4)
-  exchangeRateId  String?
-  exchangeRate    ExchangeRate? @relation(fields: [exchangeRateId], references: [id])
+  lockedUsdEgpRate    Decimal?            @db.Decimal(12, 4)
+  exchangeRateId      String?
+  exchangeRate        ExchangeRate?       @relation(fields: [exchangeRateId], references: [id])
   // الفريق
-  brokerId        String?
-  broker          User?      @relation("DealBroker", fields: [brokerId], references: [id])
-  lawyerId        String?
-  lawyer          User?      @relation("DealLawyer", fields: [lawyerId], references: [id])
-  agentId         String?
-  agent           User?      @relation("DealAgent", fields: [agentId], references: [id])
-  stageChangedAt  DateTime   @default(now())
-  closedAt        DateTime?
+  brokerId            String?
+  broker              User?               @relation("DealBroker", fields: [brokerId], references: [id])
+  lawyerId            String?
+  lawyer              User?               @relation("DealLawyer", fields: [lawyerId], references: [id])
+  agentId             String?
+  agent               User?               @relation("DealAgent", fields: [agentId], references: [id])
+  stageChangedAt      DateTime            @default(now())
+  closedAt            DateTime?
   /// OPS-02: حالة ملف التنازل في الجهاز (SUBMITTED / NEEDS_INFO / APPROVED / REJECTED)
-  authorityStatus    String?
-  authorityUpdatedAt DateTime?
+  authorityStatus     String?
+  authorityUpdatedAt  DateTime?
+  /// DEAL-01: مصدر سعر الصرف المثبّت
+  fxSource            String?
   /// MKT-10: مصدر المشتري لما أبدى اهتمام
-  source          Json?
+  source              Json?
   /// DATA-04: صفقة من بيانات التجربة — ما تدخلش في المؤشر ولا العدادات لما DEMO_MODE مقفول
-  isDemo          Boolean    @default(false)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  isDemo              Boolean             @default(false)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
-  events     DealEvent[]
-  contracts  Contract[]
-  documents  Document[]
-  commission Commission?
-  deposits   Deposit[]
+  events         DealEvent[]
+  contracts      Contract[]
+  documents      Document[]
+  commission     Commission?
+  deposits       Deposit[]
   referralReward ReferralReward?
   story          DealStory?
 
@@ -549,63 +613,96 @@ model DealEvent {
 }
 
 model Contract {
-  id                String         @id @default(cuid())
-  dealId            String
-  deal              Deal           @relation(fields: [dealId], references: [id])
-  type              ContractType
-  templateVersion   String //نسخة النموذج، مثلاً v3
-  status            ContractStatus @default(DRAFT)
+  /// CON-02: النسخة بالظبط (مش رقم نصي)
+  templateVersionId      String?
+  templateVersionRef     TemplateVersion? @relation(fields: [templateVersionId], references: [id])
+  /// CON-06: آخر نسخة للتوقيع اتولدت (كود + بصمة + صفحات)
+  draftCode              String?
+  draftSha256            String?
+  draftPages             Int?
+  draftDocumentId        String?
+  draftDocument          Document?        @relation("ContractDraft", fields: [draftDocumentId], references: [id])
+  /// CON-04: النسخة الموقّعة المرفوعة (توقيع ورقي) أو مزود التوقيع
+  signedUploadDocumentId String?
+  signedUploadDocument   Document?        @relation("ContractSignedUpload", fields: [signedUploadDocumentId], references: [id])
+  signedVia              String? // ESIGN | PAPER
+  rejectReason           String?
+  /// CON-05: التوكيل الموثق
+  poaNumber              String?
+  poaNotary              String?
+  id                     String           @id @default(cuid())
+  dealId                 String
+  deal                   Deal             @relation(fields: [dealId], references: [id])
+  type                   ContractType
+  templateVersion        String //نسخة النموذج، مثلاً v3
+  status                 ContractStatus   @default(DRAFT)
   //التوقيعات من مزود التوقيع المرخّص: [{ userId, role, signedAt, providerRef }]
-  signatures        Json           @default("[]")
-  providerEnvelopeId String?       @unique
-  pdfDocumentId     String?        @unique
-  pdfDocument       Document?      @relation(fields: [pdfDocumentId], references: [id])
-  approvedById      String?
-  approvedBy        User?          @relation("ContractApprover", fields: [approvedById], references: [id])
-  approvedAt        DateTime?
-  signedAt          DateTime?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  signatures             Json             @default("[]")
+  providerEnvelopeId     String?          @unique
+  pdfDocumentId          String?          @unique
+  pdfDocument            Document?        @relation(fields: [pdfDocumentId], references: [id])
+  approvedById           String?
+  approvedBy             User?            @relation("ContractApprover", fields: [approvedById], references: [id])
+  approvedAt             DateTime?
+  signedAt               DateTime?
+  // CON-04: التحقق من النسخة الموقّعة (المحامي أو شهادة مزوّد التوقيع) + مكان الأصل الورقي
+  verifiedAt             DateTime?
+  verifiedById           String?
+  verifiedBy             User?            @relation("ContractVerifier", fields: [verifiedById], references: [id])
+  verificationMethod     String?
+  verificationChecklist  Json?
+  paperOriginalLocation  String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
 
   reviews Review[]
 
   @@index([dealId, type])
+  @@index([templateVersionId])
 }
 
 /// النسب بتتنسخ في الصفقة وقت إنشائها — تغيير النسبة في الإعدادات بيسري على الجديد بس
 model Commission {
-  id               String           @id @default(cuid())
-  dealId           String           @unique
-  deal             Deal             @relation(fields: [dealId], references: [id])
-  sellerRatePct    Decimal          @db.Decimal(5, 2)
-  buyerRatePct     Decimal          @db.Decimal(5, 2)
-  sellerAmount     Decimal?         @db.Decimal(14, 2)
-  buyerAmount      Decimal?         @db.Decimal(14, 2)
-  currency         Currency         @default(EGP)
-  status           CommissionStatus @default(PENDING)
-  paidAt           DateTime?
+  id            String           @id @default(cuid())
+  dealId        String           @unique
+  deal          Deal             @relation(fields: [dealId], references: [id])
+  sellerRatePct Decimal          @db.Decimal(5, 2)
+  buyerRatePct  Decimal          @db.Decimal(5, 2)
+  sellerAmount  Decimal?         @db.Decimal(14, 2)
+  buyerAmount   Decimal?         @db.Decimal(14, 2)
+  currency      Currency         @default(EGP)
+  status        CommissionStatus @default(PENDING)
+  paidAt        DateTime?
   /// OPS-01: مرجع التحصيل (تحويل بنكي/إيصال)
-  paymentRef       String?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  paymentRef    String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 }
 
 /// العربون: الفلوس نفسها عند البنك، النظام بيتابع الحالة بس
 model Deposit {
-  id                String       @id @default(cuid())
-  dealId            String
-  deal              Deal         @relation(fields: [dealId], references: [id])
-  amount            Decimal      @db.Decimal(14, 2)
-  currency          Currency     @default(EGP)
-  receiptDocumentId String?      @unique
-  receiptDocument   Document?    @relation(fields: [receiptDocumentId], references: [id])
-  approvals         PaymentApproval[]
-  escrowStatus      EscrowStatus @default(AWAITING_TRANSFER)
-  bankReference     String?
-  heldAt            DateTime?
-  settledAt         DateTime?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  /// FEE-01: المصاريف الفعلية على المستلم + الصافي، والحساب اللي اتصرف عليه
+  payoutBankAccountId String?
+  payoutBankAccount   BankAccount?      @relation(fields: [payoutBankAccountId], references: [id])
+  payoutFeeEgp        Decimal?          @db.Decimal(14, 2)
+  payoutNetEgp        Decimal?          @db.Decimal(14, 2)
+  id                  String            @id @default(cuid())
+  dealId              String
+  deal                Deal              @relation(fields: [dealId], references: [id])
+  amount              Decimal           @db.Decimal(14, 2)
+  currency            Currency          @default(EGP)
+  receiptDocumentId   String?           @unique
+  receiptDocument     Document?         @relation(fields: [receiptDocumentId], references: [id])
+  approvals           PaymentApproval[]
+  escrowStatus        EscrowStatus      @default(AWAITING_TRANSFER)
+  bankReference       String?
+  /// DEAL-03 بند 7: المشتري أكد «حوّلت العربون» والبائع أكد «استلمت المبلغ» (بكود تحقق)
+  buyerSentAt         DateTime?
+  sellerReceivedAt    DateTime?
+  heldAt              DateTime?
+  settledAt           DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
 
   @@index([dealId])
 }
@@ -646,7 +743,8 @@ model ExchangeRate {
 /// مؤشر الأسعار — من الصفقات المقفولة بس
 model PriceIndex {
   id             String   @id @default(cuid())
-  city           City
+  city           String
+  cityRef        City     @relation(fields: [city], references: [id])
   district       String   @default("") //فاضي = المدينة كلها
   periodStart    DateTime @db.Date
   periodEnd      DateTime @db.Date
@@ -660,21 +758,23 @@ model PriceIndex {
 
 /// طلبات الشراء — للمطابقة الآلية مع العروض
 model BuyRequest {
-  id        String           @id @default(cuid())
-  buyerId   String
-  buyer     User             @relation(fields: [buyerId], references: [id])
-  cities    City[]
-  minAreaSqm Decimal?        @db.Decimal(10, 2)
-  maxAreaSqm Decimal?        @db.Decimal(10, 2)
-  budgetMax Decimal?         @db.Decimal(14, 2)
-  currency  Currency         @default(EGP)
-  status    BuyRequestStatus @default(ACTIVE)
+  /// PUB-01: طلب العميل الأساسي بيظهر بعد مراجعة؛ الموثّق مباشر
+  approvedAt     DateTime?
+  id             String           @id @default(cuid())
+  buyerId        String
+  buyer          User             @relation(fields: [buyerId], references: [id])
+  cities         String[]
+  minAreaSqm     Decimal?         @db.Decimal(10, 2)
+  maxAreaSqm     Decimal?         @db.Decimal(10, 2)
+  budgetMax      Decimal?         @db.Decimal(14, 2)
+  currency       Currency         @default(EGP)
+  status         BuyRequestStatus @default(ACTIVE)
   /// MKT-13: موافقة صريحة على تنبيهات واتساب/إيميل + رابط إيقاف + آخر تنبيه (رسالة واحدة في اليوم)
   alertConsentAt DateTime?
-  unsubToken     String?   @unique
+  unsubToken     String?          @unique
   lastAlertAt    DateTime?
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@index([status])
 }
@@ -683,7 +783,8 @@ model BuyRequest {
 model DeadlineReminder {
   id             String    @id @default(cuid())
   phone          String
-  city           City
+  city           String
+  cityRef        City      @relation(fields: [city], references: [id])
   deadline       DateTime  @db.Date
   plotCode       String?
   locale         String    @default("ar")
@@ -767,30 +868,31 @@ model DealStory {
 /// أول جدول هيشتغل: فورم صفحة «إنقاذ المهلة».
 /// الطلب ممكن يوصل قبل ما يبقى فيه حساب أو قطعة مسجلة، فبيانات التواصل والقطعة نص حر.
 model ServiceRequest {
-  id           String               @id @default(cuid())
-  type         ServiceType
-  status       ServiceRequestStatus @default(NEW)
-  contactName  String
-  contactPhone String
-  requesterId  String?
-  requester    User?                @relation("ServiceRequester", fields: [requesterId], references: [id])
-  plotId       String?
-  plot         Plot?                @relation(fields: [plotId], references: [id])
-  city         City?
-  district     String?
-  plotCode     String?
-  message      String?
-  fee          Decimal?             @db.Decimal(14, 2)
-  feeCurrency  Currency?
+  id                   String               @id @default(cuid())
+  type                 ServiceType
+  status               ServiceRequestStatus @default(NEW)
+  contactName          String
+  contactPhone         String
+  requesterId          String?
+  requester            User?                @relation("ServiceRequester", fields: [requesterId], references: [id])
+  plotId               String?
+  plot                 Plot?                @relation(fields: [plotId], references: [id])
+  city                 String?
+  cityRef              City?                @relation(fields: [city], references: [id], onDelete: Restrict)
+  district             String?
+  plotCode             String?
+  message              String?
+  fee                  Decimal?             @db.Decimal(14, 2)
+  feeCurrency          Currency?
   /// OPS-02: تقدير المندوب لنسبة التنفيذ من المعاينة
   constructionEstimate Int?
   /// MKT-10: مصدر الطلب
-  source       Json?
-  assignedToId String?
-  assignedTo   User?                @relation("ServiceAssignee", fields: [assignedToId], references: [id])
-  documents    Document[]
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
+  source               Json?
+  assignedToId         String?
+  assignedTo           User?                @relation("ServiceAssignee", fields: [assignedToId], references: [id])
+  documents            Document[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
 
   @@index([status, createdAt])
 }
@@ -860,4 +962,315 @@ model AppSetting {
   value       Json
   updatedById String?
   updatedAt   DateTime @updatedAt
+}
+
+/// DEAL-03: كود تحقق مربوط بإجراء واحد (المستخدم + الإجراء + الصفقة + القيم) — 6 أرقام، 5 دقايق، مرة واحدة
+model ActionCode {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  action     String
+  dealId     String?
+  paramsHash String
+  summary    String
+  codeHash   String
+  channel    String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  attempts   Int       @default(0)
+  ip         String?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, action, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// DEAL-03: بعد 5 محاولات غلط الإجراء بيتقفل 15 دقيقة
+model ActionLock {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String
+  lockedUntil DateTime
+
+  @@unique([userId, action])
+}
+
+/// CON-03 + DEAL-03: سجل الموافقات — إضافة بس (trigger في قاعدة البيانات بيمنع التعديل والحذف)
+model ConsentRecord {
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  kind              String
+  action            String?
+  templateVersionId String?
+  dealId            String?
+  listingId         String?
+  summary           String
+  renderedText      String?
+  sha256            String
+  channel           String
+  phoneLast4        String?
+  acceptedAt        DateTime  @default(now())
+  otpVerifiedAt     DateTime?
+  ip                String?
+  userAgent         String?
+
+  @@index([userId, acceptedAt])
+  @@index([dealId])
+}
+
+/// TXN-01 / CON-06: سجل مرقّم لكل PDF بيطلع من المنصة — صفحة التحقق (QR) بتقرا منه. إضافة بس (append-only).
+model IssuedDocument {
+  id              String    @id @default(cuid())
+  seq             Int       @unique @default(autoincrement())
+  code            String    @unique
+  kind            String // STATEMENT | CONTRACT_DRAFT | EXPORT
+  dealId          String?
+  deal            Deal?     @relation(fields: [dealId], references: [id])
+  contractId      String?
+  templateVersion String?
+  issuedToId      String?
+  issuedTo        User?     @relation(fields: [issuedToId], references: [id])
+  copyFor         String? // BUYER | SELLER | STAFF
+  /// CON-06: نسخة أحدث اتولدت → دي ملغاة
+  supersededAt    DateTime?
+  sha256          String
+  pages           Int
+  createdAt       DateTime  @default(now())
+
+  @@index([dealId])
+  @@index([contractId])
+}
+
+/// GEO-01: المدن جدول (الأدمن بيضيف/يعدّل/يوقف — ممنوع الحذف لو عليها قطع). الـ id نص ثابت (NEW_CAIRO…)
+model City {
+  id              String   @id
+  nameAr          String
+  nameEn          String
+  slug            String   @unique
+  codePrefix      String   @unique
+  /// GEO-04: مثلاً {prefix}-{block}-{number}
+  plotCodePattern String   @default("{prefix}-{block}-{number}")
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  plots           Plot[]
+  districts       District[]
+  priceIndex      PriceIndex[]
+  reminders       DeadlineReminder[]
+  serviceRequests ServiceRequest[]
+  rounds          OfferingRound[]
+
+  @@map("Cities")
+}
+
+/// GEO-02: الطرح (رقمه، سنته، شروطه، مهلة البناء الافتراضية)
+model OfferingRound {
+  id                         String   @id @default(cuid())
+  cityId                     String?
+  city                       City?    @relation(fields: [cityId], references: [id])
+  nameAr                     String
+  nameEn                     String
+  number                     Int
+  year                       Int?
+  terms                      String?
+  defaultBuildDeadlineMonths Int?
+  installmentCurrency        String   @default("USD")
+  isActive                   Boolean  @default(true)
+  createdAt                  DateTime @default(now())
+
+  plots Plot[]
+
+  @@index([cityId])
+}
+
+/// DOC-01: رفع ملف كبير (لحد 20MB) على أجزاء — كل جزء أقل من حد الطلب في Vercel
+model UploadSession {
+  id         String        @id @default(cuid())
+  userId     String
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  chunkCount Int
+  documentId String?
+  createdAt  DateTime      @default(now())
+  chunks     UploadChunk[]
+
+  @@index([userId, createdAt])
+}
+
+model UploadChunk {
+  sessionId String
+  session   UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  idx       Int
+  data      Bytes
+
+  @@id([sessionId, idx])
+}
+
+/// DOC-01: المحامي «اطلب مستند» → مهمة للطرف «مطلوب منك رفع: …»
+model DocumentRequest {
+  id            String    @id @default(cuid())
+  dealId        String
+  deal          Deal      @relation(fields: [dealId], references: [id])
+  requestedById String
+  requestedBy   User      @relation(fields: [requestedById], references: [id])
+  side          String // BUYER | SELLER
+  title         String
+  note          String?
+  status        String    @default("OPEN") // OPEN | FULFILLED | CANCELLED
+  documentId    String?
+  document      Document? @relation(fields: [documentId], references: [id])
+  createdAt     DateTime  @default(now())
+  fulfilledAt   DateTime?
+
+  @@index([dealId, status])
+}
+
+/// BANK-01: «حساباتي البنكية» — IBAN مشفّر، العرض مخفي، تحقق المالية، 48 ساعة قبل أي صرف، ممنوع الحذف
+model BankAccount {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id])
+  holderName       String
+  bankName         String
+  country          String
+  currency         String
+  ibanEnc          String
+  ibanLast4        String
+  ibanHash         String
+  accountNumberEnc String?
+  swiftBic         String?
+  branch           String?
+  isDefault        Boolean   @default(false)
+  status           String    @default("PENDING") // PENDING | VERIFIED | REJECTED | DISABLED
+  nameMatches      Boolean   @default(false)
+  verifiedById     String?
+  verifiedBy       User?     @relation("BankVerifier", fields: [verifiedById], references: [id])
+  verifiedAt       DateTime?
+  rejectReason     String?
+  proofDocumentId  String?
+  proofDocument    Document? @relation(fields: [proofDocumentId], references: [id])
+  usableAfter      DateTime
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  dealsAsBuyer  Deal[]    @relation("DealBuyerBank")
+  dealsAsSeller Deal[]    @relation("DealSellerBank")
+  payouts       Deposit[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([ibanHash])
+}
+
+/// PRIV-01: الكشف للطرف الآخر بالموافقة (name | plotCode | documents)
+model DisclosureConsent {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  dealId    String
+  deal      Deal      @relation(fields: [dealId], references: [id])
+  fields    String[]
+  source    String    @default("USER")
+  grantedAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  @@index([dealId, userId])
+}
+
+/// PRIV-01: طلب من جهة رسمية — بيتسجل ومش بيتعدّل
+model OfficialRequest {
+  id          String    @id @default(cuid())
+  authority   String
+  referenceNo String
+  userId      String?
+  user        User?     @relation("OfficialRequestUser", fields: [userId], references: [id])
+  dealId      String?
+  delivered   String
+  gagged      Boolean   @default(false)
+  notifiedAt  DateTime?
+  createdById String
+  createdBy   User      @relation("OfficialRequestBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+}
+
+/// CON-01: النماذج العشرة (مفتاح ثابت + رقم النموذج + طريقة التوقيع)
+model ContractTemplate {
+  id           String            @id @default(cuid())
+  key          String            @unique
+  formNo       Int
+  titleAr      String
+  titleEn      String
+  contractType String?
+  signing      String // CLICKWRAP | SIGNED | NOTARIAL
+  createdAt    DateTime          @default(now())
+  versions     TemplateVersion[]
+}
+
+/// CON-01: نسخة نص — DRAFT → LAWYER_APPROVED → PUBLISHED → RETIRED. المعتمدة/المنشورة ما بتتعدّلش (DB trigger)
+model TemplateVersion {
+  id                 String           @id @default(cuid())
+  templateId         String
+  template           ContractTemplate @relation(fields: [templateId], references: [id])
+  version            Int
+  bodyMarkdown       String
+  variables          String[]
+  status             String           @default("DRAFT")
+  changeNote         String?
+  sha256             String
+  createdById        String?
+  approvedByLawyerId String?
+  approvedByLawyer   User?            @relation("TemplateLawyer", fields: [approvedByLawyerId], references: [id])
+  approvedAt         DateTime?
+  publishedById      String?
+  publishedAt        DateTime?
+  createdAt          DateTime         @default(now())
+  contracts          Contract[]
+
+  @@unique([templateId, version])
+}
+
+/// ADM-EXP: تصدير ملف صفقة/مستخدم — في الخلفية، ZIP مشفّر، رابط لمرة واحدة لمدة ساعة، والملف المؤقت بيتشال بعدها
+model ExportJob {
+  id            String    @id @default(cuid())
+  kind          String // DEAL | USER | DEALS_MONTH
+  subjectId     String
+  reason        String
+  reasonNote    String?
+  requestedById String
+  requestedBy   User      @relation(fields: [requestedById], references: [id])
+  status        String    @default("PENDING") // PENDING | READY | DOWNLOADED | EXPIRED | FAILED
+  storageKey    String?
+  fileName      String?
+  sha256        String?
+  sizeBytes     Int?
+  fileCount     Int?
+  tokenHash     String?
+  error         String?
+  readyAt       DateTime?
+  expiresAt     DateTime?
+  downloadedAt  DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([kind, subjectId])
+  @@index([requestedById])
+}
+
+/// PUB-03: الشريك بيحيل مشتري على عرض (بموافقة المشتري) — بيتسجل على الصفقة لما المشتري يبدأها
+model PartnerReferral {
+  id             String   @id @default(cuid())
+  partnerId      String
+  partner        User     @relation("ReferralPartner", fields: [partnerId], references: [id])
+  listingId      String
+  listing        Listing  @relation(fields: [listingId], references: [id])
+  buyerId        String
+  buyer          User     @relation("ReferralBuyer", fields: [buyerId], references: [id])
+  buyerConsentAt DateTime
+  dealId         String?
+  createdAt      DateTime @default(now())
+
+  @@unique([listingId, buyerId])
 }

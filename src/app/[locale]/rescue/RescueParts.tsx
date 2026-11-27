@@ -5,7 +5,7 @@ import { useKeptAction } from "@/components/useKeptAction";
 import { track } from "@/components/Analytics";
 import type { Locale } from "@/i18n/config";
 import { money, num, tr } from "@/lib/format";
-import { CITY, CITY_KEYS, label } from "@/lib/labels";
+import type { CityOption } from "@/lib/cities";
 import { rescueFee, suggestedPrice, type Tier } from "@/lib/rescue-calc";
 import { btn, field, labelCls, Notice } from "@/components/ui";
 import { submitRescue, type RescueState } from "./actions";
@@ -17,10 +17,10 @@ const PREFILL_EVENT = "resell:rescue-prefill";
  * MKT-01: حاسبة إنقاذ المهلة — الشريحة + سعر القطعة الحالي (أو المساحة والمدينة ونقترح السعر من المؤشر الحقيقي)
  * → المبلغ بالدولار والجنيه، و«ابدأ الطلب» بيملا الفورم تحت بالقيم دي.
  */
-export function RescueCalculator({ locale, usdRate, perSqm, feePct }: { locale: Locale; usdRate: number; perSqm: Record<string, number | null>; feePct: number }) {
+export function RescueCalculator({ locale, usdRate, perSqm, feePct, cities }: { locale: Locale; cities: CityOption[]; usdRate: number; perSqm: Record<string, number | null>; feePct: number }) {
   const L = tr(locale);
   const [tier, setTier] = useState<Tier>("b");
-  const [city, setCity] = useState<string>(CITY_KEYS[0]);
+  const [city, setCity] = useState<string>(cities[0]?.id ?? "");
   const [area, setArea] = useState("");
   const [price, setPrice] = useState("");
   const suggestion = suggestedPrice(Number(area), perSqm[city]);
@@ -64,9 +64,9 @@ export function RescueCalculator({ locale, usdRate, perSqm, feePct }: { locale: 
             <label className={labelCls}>
               {L("المدينة", "City")}
               <select value={city} onChange={(e) => setCity(e.target.value)} className={field}>
-                {CITY_KEYS.map((k) => (
-                  <option key={k} value={k}>
-                    {label(CITY, k, locale)}
+                {cities.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {locale === "ar" ? c.nameAr : c.nameEn}
                   </option>
                 ))}
               </select>
@@ -78,7 +78,7 @@ export function RescueCalculator({ locale, usdRate, perSqm, feePct }: { locale: 
             <label className={`${labelCls} sm:col-span-2`}>
               {L("سعر القطعة الحالي (ج.م)", "Current plot price (EGP)")}
               <input type="number" min={0} inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder={suggestion ? String(suggestion) : ""} aria-label={L("سعر القطعة الحالي (ج.م)", "Current plot price (EGP)")} className={field} />
-              <span className="text-xs">
+              <span className="text-[13px]">
                 {suggestion
                   ? L(`مقترح من مؤشر الأسعار الحقيقي: ${money(suggestion, "EGP", locale)} — اكتب سعرك لو تعرفه.`, `Suggested from the real price index: ${money(suggestion, "EGP", locale)} — enter your own if you know it.`)
                   : L("مفيش بيانات صفقات كفاية للمدينة دي عشان نقترح سعر — اكتب السعر اللي تعرفه.", "Not enough deal data in this city to suggest a price — enter the price you know.")}
@@ -133,13 +133,13 @@ export function RescueCalculator({ locale, usdRate, perSqm, feePct }: { locale: 
   );
 }
 
-export function RescueForm({ locale }: { locale: Locale }) {
+export function RescueForm({ locale, cities }: { locale: Locale; cities: CityOption[]; }) {
   const L = tr(locale);
   // UX-01: الفورم ما يتمسحش لو السيرفر رجّع خطأ
   const [state, onSubmit, pending] = useKeptAction((p: RescueState, f: FormData) => submitRescue(locale, p, f), {} as RescueState);
   // MKT-01: القيم جاية من الحاسبة
   const [pre, setPre] = useState<Prefill | null>(null);
-  const [city, setCity] = useState<string>(CITY_KEYS[0]);
+  const [city, setCity] = useState<string>(cities[0]?.id ?? "");
   const [area, setArea] = useState("");
   useEffect(() => {
     const on = (e: Event) => {
@@ -198,9 +198,9 @@ export function RescueForm({ locale }: { locale: Locale }) {
         <label className={labelCls}>
           {L("المدينة", "City")}
           <select name="city" value={city} onChange={(e) => setCity(e.target.value)} className={field}>
-            {CITY_KEYS.map((k) => (
-              <option key={k} value={k}>
-                {label(CITY, k, locale)}
+            {cities.map((c) => (
+              <option key={c.id} value={c.id}>
+                {locale === "ar" ? c.nameAr : c.nameEn}
               </option>
             ))}
           </select>

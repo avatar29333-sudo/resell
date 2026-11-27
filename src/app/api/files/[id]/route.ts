@@ -15,7 +15,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   if (user) await audit(user.id, "document.view", "Document", doc.id, { type: doc.type, version: doc.version });
 
-  // في S3: تحويل لرابط مؤقت بيخلص بعد 5 دقايق
+  // في S3: تحويل لرابط مؤقت بيخلص بعد 10 دقايق
   if (file.kind === "url") {
     return new Response(null, { status: 302, headers: { Location: file.url, "Cache-Control": "private, no-store" } });
   }

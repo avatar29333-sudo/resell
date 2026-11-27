@@ -1,3 +1,4 @@
+import { allCities } from "@/lib/cities";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Prisma } from "@prisma/client";
@@ -14,6 +15,8 @@ import { date, dateTime, money, num, tr } from "@/lib/format";
 import { ACCOUNT_LEVEL, ACCOUNT_STATUS, CITY, CITY_KEYS, CONTRACT_TYPE, RATE_SOURCE, ROLE, label } from "@/lib/labels";
 import { Badge, Card, Container, DL, Notice, PageHeader, Table, Tabs, btn, field, labelCls } from "@/components/ui";
 import { saveMarketing, setPartnerShare } from "./actions";
+import { recordOfficialRequest, saveCity, saveRound, toggleCity, toggleRound } from "./actions";
+import { codeHint } from "@/lib/plot-code";
 import { addDistrict, addManualRate, bumpTemplate, fetchRateNow, moveFilesToS3, saveCommission, saveFees, saveOps, setUserRole, suspendUser, toggleDistrict, unsuspendUser } from "./actions";
 import { RoleForm } from "./RoleForm";
 import { pageMeta } from "@/lib/meta";
@@ -21,14 +24,19 @@ import { storageMode } from "@/lib/storage";
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ tab?: string; q?: string; page?: string; role?: string; city?: string; from?: string; to?: string; actor?: string; group?: string; entity?: string; fx?: string; moved?: string; failed?: string; err?: string; ok?: string; buy?: string; sell?: string }>;
+  searchParams: Promise<{ tab?: string; q?: string; page?: string; role?: string; city?: string; from?: string; to?: string; actor?: string; group?: string; entity?: string; fx?: string; moved?: string; failed?: string; err?: string; ok?: string; buy?: string; sell?: string; has?: string }>;
 };
 
 const PAGE = 50;
 const SETTINGS_ERRORS: Record<string, [string, string]> = {
   reg_no: ["السمسار الشريك لازم يكون ليه رقم قيد في سجل الوسطاء.", "A partner broker needs a broker registry number."],
   confirm: ["لازم تأكد تغيير الدور من رسالة التأكيد.", "Please confirm the role change in the dialog."],
-  district: ["اكتب اسم الحي بالعربي والإنجليزي.", "Enter the district name in Arabic and English."],
+  district: ["اكتب اسم الحي بالعربي، والاسم الإنجليزي بحروف لاتيني بس (مثلاً District 9).", "Enter the district name in Arabic, and the English name in Latin letters only (e.g. District 9)."],
+  city: ["راجع بيانات المدينة: الاسم الإنجليزي لاتيني، البادئة 2–4 حروف كبيرة، والصيغة فيها {prefix} و{number} وفواصلها شرطة.", "Check the city: Latin English name, a 2–4 capital-letter prefix, and a pattern with {prefix} and {number} separated by dashes."],
+  city_prefix: ["البادئة دي مستخدمة لمدينة تانية.", "That prefix is used by another city."],
+  city_exists: ["المدينة دي موجودة بالفعل.", "That city already exists."],
+  official: ["اكتب الجهة ورقم الطلب واللي اتسلّم.", "Enter the authority, request number and what was delivered."],
+  round: ["اكتب اسم الطرح بالعربي والإنجليزي (لاتيني) ورقمه.", "Enter the round's Arabic and Latin English names and its number."],
   rate_invalid: ["سعر البيع لازم يكون أكبر من أو يساوي سعر الشراء.", "The sell rate must be greater than or equal to the buy rate."],
   rate_deviation: ["السعر بعيد عن آخر سعر آلي أكتر من الحد المسموح — علّم على «متأكد» لو ده مقصود.", "The rate is further from the last automatic rate than allowed — tick “I'm sure” if intended."],
 };
@@ -36,6 +44,7 @@ const SETTINGS_ERRORS: Record<string, [string, string]> = {
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "الإعدادات", "Settings", { noindex: true });
 
 export default async function SettingsPage({ params, searchParams }: Props) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const sp = await searchParams;
@@ -48,6 +57,8 @@ export default async function SettingsPage({ params, searchParams }: Props) {
     fx: can(s, "fx.manual").allowed,
     commission: can(s, "commission.rates").allowed,
     templates: can(s, "template.edit").allowed,
+    cities: can(s, "settings.fees").allowed,
+    official: me.role === "ADMIN",
     districts: can(s, "settings.fees").allowed,
     storage: can(s, "storage.manage").allowed,
     audit: can(s, "audit.view").allowed || can(s, "audit.view_money").allowed,
@@ -60,6 +71,8 @@ export default async function SettingsPage({ params, searchParams }: Props) {
     role: ["الدور اتغيّر، وجلسات المستخدم القديمة اتقفلت.", "Role changed; the user's old sessions were signed out."],
     suspended: ["الحساب اتوقف، وصفقاته الشغالة اتعلّقت.", "Account suspended; its active deals were put on hold."],
     unsuspended: ["الحساب اتفعّل تاني.", "Account reactivated."],
+    city: ["المدينة اتحفظت وظهرت في المعالج والفلاتر.", "City saved; it now shows in the wizard and filters."],
+    official: ["الطلب اتسجل (ومش بيتعدّل).", "The request was recorded (it can't be edited)."],
   };
 
   return (
@@ -87,8 +100,10 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             { key: "fx", label: L("سعر الصرف", "Exchange rate"), href: `${base}?tab=fx` },
             { key: "commission", label: L("العمولة والرسوم", "Commission and fees"), href: `${base}?tab=commission` },
             { key: "templates", label: L("نماذج العقود", "Contract templates"), href: `${base}?tab=templates` },
-            { key: "districts", label: L("الأحياء والمراحل", "Districts"), href: `${base}?tab=districts` },
+            { key: "cities", label: L("المدن", "Cities"), href: `${base}?tab=cities` },
+            { key: "districts", label: L("الأحياء والطروحات", "Districts & rounds"), href: `${base}?tab=districts` },
             { key: "storage", label: L("خزنة الملفات", "File vault"), href: `${base}?tab=storage` },
+            { key: "official", label: L("طلبات الجهات الرسمية", "Official requests"), href: `${base}?tab=official` },
             { key: "audit", label: L("سجل التدقيق", "Audit log"), href: `${base}?tab=audit` },
           ].filter((t) => tabs.includes(t.key as never))}
         />
@@ -96,8 +111,10 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         {tab === "fx" && <Fx locale={locale} />}
         {tab === "commission" && <Commission locale={locale} />}
         {tab === "templates" && <Templates locale={locale} />}
+        {tab === "cities" && <Cities locale={locale} />}
         {tab === "districts" && <Districts locale={locale} />}
         {tab === "storage" && <Storage locale={locale} />}
+        {tab === "official" && <Official locale={locale} />}
         {tab === "audit" && <Audit locale={locale} entity={sp.entity} />}
       </Container>
     </>
@@ -112,16 +129,22 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         scopeUsersFor(me),
         { anonymizedAt: null },
         roleFilter ? { role: roleFilter as never } : {},
+        // REL-02: «عنده عروض» / «عنده صفقات شراء» / «الاتنين»
+        sp.has === "listings" ? { listings: { some: {} } } : sp.has === "buys" ? { dealsAsBuyer: { some: {} } } : sp.has === "both" ? { listings: { some: {} }, dealsAsBuyer: { some: {} } } : {},
         q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { phone: { contains: q } }, { email: { contains: q, mode: "insensitive" } }] } : {},
       ],
     };
     const [users, total] = await Promise.all([
-      db.user.findMany({ where, orderBy: [{ role: "desc" }, { name: "asc" }], skip: (page - 1) * PAGE, take: PAGE }),
+      db.user.findMany({ where, orderBy: [{ role: "desc" }, { name: "asc" }], skip: (page - 1) * PAGE, take: PAGE, include: { _count: { select: { listings: true, dealsAsBuyer: true, buyRequests: true } } } }),
       db.user.count({ where }),
     ]);
     const pages = Math.max(1, Math.ceil(total / PAGE));
     const roleOptions = Object.keys(ROLE).map((k) => ({ key: k, label: label(ROLE, k, locale) }));
-    const qs = (p: number) => `${base}?tab=users${q ? `&q=${encodeURIComponent(q)}` : ""}${roleFilter ? `&role=${roleFilter}` : ""}&page=${p}`;
+    const qs = (p: number) => `${base}?tab=users${q ? `&q=${encodeURIComponent(q)}` : ""}${roleFilter ? `&role=${roleFilter}` : ""}${sp.has ? `&has=${sp.has}` : ""}&page=${p}`;
+    // REL-02: صفقات كبائع لكل مستخدم في الصفحة دي
+    const sellerDeals = await db.deal.groupBy({ by: ["listingId"], where: { listing: { sellerId: { in: users.map((u) => u.id) } } }, _count: true });
+    const listingOwner = new Map((await db.listing.findMany({ where: { id: { in: sellerDeals.map((s) => s.listingId) } }, select: { id: true, sellerId: true } })).map((x) => [x.id, x.sellerId]));
+    const sellCount = (uid: string) => sellerDeals.filter((s) => listingOwner.get(s.listingId) === uid).reduce((a, s) => a + s._count, 0);
     return (
       <Card title={L(`المستخدمين (${num(total, locale)})`, `Users (${total})`)}>
         <form className="flex flex-wrap gap-2">
@@ -135,15 +158,23 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               </option>
             ))}
           </select>
+          <select name="has" defaultValue={sp.has ?? ""} className={`${field} w-48`} aria-label={L("النشاط", "Activity")}>
+            <option value="">{L("كل النشاط", "Any activity")}</option>
+            <option value="listings">{L("عنده عروض", "Has listings")}</option>
+            <option value="buys">{L("عنده صفقات شراء", "Has purchases")}</option>
+            <option value="both">{L("الاتنين", "Both")}</option>
+          </select>
           <button className={btn.secondary}>{L("بحث", "Search")}</button>
         </form>
-        <Table head={[L("الاسم", "Name"), L("الموبايل", "Mobile"), L("المستوى", "Level"), L("الحالة", "Status"), L("الدور", "Role")]}>
+        <Table head={[L("الاسم", "Name"), L("الموبايل", "Mobile"), L("عروض / بيع / شراء / طلبات", "Listings / sell / buy / requests"), L("المستوى", "Level"), L("الحالة", "Status"), L("الدور", "Role")]}>
           {users.map((u) => (
             <tr key={u.id}>
               <td className="font-semibold">
-                {u.name}
+                <Link href={`/${locale}/settings/users/${u.id}`} className="text-brand underline">
+                  {u.name}
+                </Link>
                 {u.brokerRegNo && (
-                  <div className="text-xs font-normal text-muted" dir="ltr">
+                  <div className="text-[13px] font-normal text-muted" dir="ltr">
                     #{u.brokerRegNo}
                   </div>
                 )}
@@ -159,6 +190,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               <td dir="ltr" className="text-start">
                 {u.phone}
               </td>
+              <td className="tabular-nums">{num(u._count.listings, locale)} / {num(sellCount(u.id), locale)} / {num(u._count.dealsAsBuyer, locale)} / {num(u._count.buyRequests, locale)}</td>
               <td>
                 <Badge tone={u.accountLevel === "VERIFIED" ? "green" : "gray"}>{label(ACCOUNT_LEVEL, u.accountLevel, locale)}</Badge>
               </td>
@@ -167,14 +199,14 @@ export default async function SettingsPage({ params, searchParams }: Props) {
                 {u.id !== meId &&
                   (u.status === "SUSPENDED" ? (
                     <form action={unsuspendUser.bind(null, locale, u.id)} className="mt-1">
-                      {u.suspendReason && <div className="text-xs text-muted">{u.suspendReason}</div>}
+                      {u.suspendReason && <div className="text-[13px] text-muted">{u.suspendReason}</div>}
                       <button className={`${btn.small} border border-line`}>{L("فعّل الحساب", "Reactivate")}</button>
                     </form>
                   ) : (
                     <details className="mt-1">
-                      <summary className="cursor-pointer text-xs text-[#A32020]">{L("إيقاف…", "Suspend…")}</summary>
+                      <summary className="cursor-pointer text-[13px] text-[#A32020]">{L("إيقاف…", "Suspend…")}</summary>
                       <form action={suspendUser.bind(null, locale, u.id)} className="mt-1 flex flex-col gap-1">
-                        <input aria-label={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} name="reason" required minLength={10} placeholder={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} className={`${field} min-h-9 w-56`} />
+                        <input aria-label={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} name="reason" required minLength={10} placeholder={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} className={`${field} min-h-11 w-56`} />
                         <button className={`${btn.small} self-start border border-[#A32020] text-[#A32020]`}>{L("أوقف الحساب", "Suspend account")}</button>
                       </form>
                     </details>
@@ -235,7 +267,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             </label>
           )}
           <button className={btn.primary}>{L("سجّل سعر يدوي", "Add manual rate")}</button>
-          <p className="w-full text-xs text-muted">{L("هيطلب منك تأكيد هويتك قبل الحفظ.", "You'll be asked to confirm your identity before saving.")}</p>
+          <p className="w-full text-[13px] text-muted">{L("هيطلب منك تأكيد هويتك قبل الحفظ.", "You'll be asked to confirm your identity before saving.")}</p>
         </form>
         <Table head={[L("التاريخ", "Date"), L("شراء", "Buy"), L("بيع", "Sell"), L("المصدر", "Source"), L("بواسطة", "By")]}>
           {rates.map((r) => (
@@ -256,6 +288,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
 
   async function Commission({ locale }: { locale: "ar" | "en" }) {
     const [rescue, regNo, reward] = await Promise.all([getSetting("rescue"), getSetting("brokerRegistrationNumber"), getSetting("referral.reward")]);
+    const dealFees = await getSetting("deal.fees");
     const [rates, fees, fourEyes, fxCfg, brokersCfg, validity] = await Promise.all([
       getSetting("commission.rates"),
       getSetting("service.fees"),
@@ -342,7 +375,15 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             <label className={labelCls}>
               {L("حد الأربع عيون للصرف (ج.م)", "Four-eyes payout limit (EGP)")}
               <input name="fourEyesLimit" type="number" min={0} step={1000} defaultValue={fourEyes.limitEgp} className={`${field} w-44`} />
-              <span className="text-xs text-muted">{money(fourEyes.limitEgp, "EGP", locale)}</span>
+              <span className="text-[13px] text-muted">{money(fourEyes.limitEgp, "EGP", locale)}</span>
+            </label>
+            <label className={labelCls}>
+              {L("رسوم التنازل التقديرية على المشتري (ج.م، 0 = بتتحدد من الجهاز)", "Estimated buyer transfer fee (EGP, 0 = set by the authority)")}
+              <input name="transferFeeEgp" type="number" min={0} step={500} defaultValue={dealFees.transferFeeEgp} className={`${field} w-44`} />
+            </label>
+            <label className={labelCls}>
+              {L("رسوم التوثيق التقديرية (ج.م)", "Estimated notary fee (EGP)")}
+              <input name="notaryFeeEgp" type="number" min={0} step={100} defaultValue={dealFees.notaryFeeEgp} className={`${field} w-44`} />
             </label>
             <label className={labelCls}>
               {L("أقصى فرق للسعر اليدوي عن الآلي (%)", "Max manual rate gap from automatic (%)")}
@@ -377,28 +418,18 @@ export default async function SettingsPage({ params, searchParams }: Props) {
     );
   }
 
+  /** CON-01: النماذج بقت جداول بنسخ — الشاشة الكاملة في /templates */
   async function Templates({ locale }: { locale: "ar" | "en" }) {
-    const list = await getSetting("contract.templates");
+    const list = await db.contractTemplate.findMany({ orderBy: { formNo: "asc" }, include: { versions: { where: { status: "PUBLISHED" }, include: { _count: { select: { contracts: true } } } } } });
     return (
-      <Card title={L("نماذج العقود", "Contract templates")}>
-        <p className="text-muted">{L("نص النماذج بيراجعه المحامي. كل عقد بيتعمل بيحتفظ برقم النسخة اللي اتعمل بيها.", "Template text is reviewed by the lawyer. Each contract keeps the version it was created with.")}</p>
-        <Table head={[L("النموذج", "Template"), L("النسخة", "Version"), L("آخر تحديث", "Updated"), L("نسخة جديدة", "New version")]}>
+      <Card title={L("نماذج العقود", "Contract templates")} actions={<Link href={`/${locale}/templates`} className={`${btn.small} bg-brand text-white`}>{L("افتح محرر النماذج", "Open the template editor")}</Link>}>
+        <p className="text-muted">{L("كل عقد مربوط بالنسخة اللي اتعمل بيها بالظبط. التعديل بيعمل نسخة جديدة، المحامي يعتمدها والأدمن ينشرها.", "Each contract is linked to the exact version it was made with. Edits create a new version that the lawyer approves and the admin publishes.")}</p>
+        <Table head={[L("النموذج", "Template"), L("النسخة المنشورة", "Published version"), L("مستخدمة في", "Used in")]}>
           {list.map((t) => (
-            <tr key={t.type}>
-              <td className="font-semibold">{label(CONTRACT_TYPE, t.type, locale)}</td>
-              <td>
-                <Badge tone="blue">{t.version}</Badge>
-              </td>
-              <td>
-                {date(t.updatedAt, locale)}
-                {t.note && <div className="text-xs text-muted">{t.note}</div>}
-              </td>
-              <td>
-                <form action={bumpTemplate.bind(null, locale, t.type)} className="flex gap-1.5">
-                  <input aria-label={L("إيه اللي اتغير؟", "What changed?")} name="note" required placeholder={L("إيه اللي اتغير؟", "What changed?")} className={`${field} min-h-9`} />
-                  <button className={`${btn.small} border border-brand text-brand`}>{L("انشر", "Publish")}</button>
-                </form>
-              </td>
+            <tr key={t.id}>
+              <td>{num(t.formNo, locale)}. {locale === "ar" ? t.titleAr : t.titleEn}</td>
+              <td className="tabular-nums">{t.versions[0] ? `v${t.versions[0].version}` : "—"}</td>
+              <td className="tabular-nums">{t.versions[0] ? num(t.versions[0]._count.contracts, locale) : "—"}</td>
             </tr>
           ))}
         </Table>
@@ -406,15 +437,24 @@ export default async function SettingsPage({ params, searchParams }: Props) {
     );
   }
 
+
   async function Districts({ locale }: { locale: "ar" | "en" }) {
     const city = (CITY_KEYS as string[]).includes(sp.city ?? "") ? sp.city! : CITY_KEYS[0];
     const rows = await db.district.findMany({ where: { city: city as never }, orderBy: [{ sort: "asc" }, { nameAr: "asc" }] });
-    const counts = await db.plot.groupBy({ by: ["district"], where: { city: city as never }, _count: true });
+    // GEO-03: عدد القطع على كل حي (بالربط الجديد، ولو قديم بالاسم)
+    const [byId, byName, rounds, roundCounts] = await Promise.all([
+      db.plot.groupBy({ by: ["districtId"], where: { city }, _count: true }),
+      db.plot.groupBy({ by: ["district"], where: { city, districtId: null }, _count: true }),
+      db.offeringRound.findMany({ where: { OR: [{ cityId: city }, { cityId: null }] }, orderBy: { number: "asc" } }),
+      db.plot.groupBy({ by: ["offeringRoundId"], where: { city }, _count: true }),
+    ]);
+    const plotsOf = (d: { id: string; nameAr: string }) => (byId.find((c) => c.districtId === d.id)?._count ?? 0) + (byName.find((c) => c.district === d.nameAr)?._count ?? 0);
     return (
-      <Card title={L("الأحياء والمراحل (اختيارات wizard إضافة القطعة)", "Districts (choices in the add-plot wizard)")}>
+      <>
+      <Card title={L("الأحياء (المكان) — اختيارات معالج إضافة القطعة", "Districts (place) — choices in the add-plot wizard")}>
         <nav className="flex flex-wrap gap-1.5">
           {CITY_KEYS.map((c) => (
-            <Link key={c} href={`${base}?tab=districts&city=${c}`} className={`inline-flex min-h-9 items-center border px-2.5 text-sm ${c === city ? "border-navy bg-navy text-white" : "border-line"}`}>
+            <Link key={c} href={`${base}?tab=districts&city=${c}`} className={`inline-flex min-h-11 items-center border px-2.5 text-sm ${c === city ? "border-navy bg-navy text-white" : "border-line"}`}>
               {label(CITY, c, locale)}
             </Link>
           ))}
@@ -424,7 +464,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             <tr key={d.id}>
               <td className="font-semibold">{d.nameAr}</td>
               <td>{d.nameEn}</td>
-              <td>{num(counts.find((c) => c.district === d.nameAr)?._count ?? 0, locale)}</td>
+              <td className="tabular-nums">{num(plotsOf(d), locale)}</td>
               <td>
                 <form action={toggleDistrict.bind(null, locale, d.id)} className="flex items-center gap-2">
                   <Badge tone={d.active ? "green" : "gray"}>{d.active ? L("ظاهر", "Shown") : L("موقوف", "Hidden")}</Badge>
@@ -446,7 +486,185 @@ export default async function SettingsPage({ params, searchParams }: Props) {
           </label>
           <button className={btn.primary}>{L("أضف / حدّث", "Add / update")}</button>
         </form>
-        <p className="text-xs text-muted">{L("الحي ما بيتمسحش عشان القطع القديمة — بيتوقف بس فيختفي من الاختيارات.", "Districts are never deleted (older plots use them) — hiding removes them from the choices.")}</p>
+        <p className="text-sm text-muted">{L("الحي ما بيتمسحش عشان القطع القديمة — بيتوقف بس فيختفي من الاختيارات. الاسم الإنجليزي لازم يبقى حروف لاتيني.", "Districts are never deleted (older plots use them) — hiding removes them from the choices. English names must be Latin letters.")}</p>
+      </Card>
+      <Card title={L("الطروحات (مراحل بيت الوطن) — منفصلة عن الحي", "Offering rounds (Beit El Watan phases) — separate from districts")}>
+        <Table head={[L("الطرح", "Round"), L("بالإنجليزي", "English"), L("السنة", "Year"), L("مهلة البناء (شهور)", "Build deadline (months)"), L("عملة الأقساط", "Installments"), L("قطع", "Plots"), L("الحالة", "Status")]}>
+          {rounds.map((r) => (
+            <tr key={r.id}>
+              <td className="font-semibold">
+                {num(r.number, locale)}. {r.nameAr}
+              </td>
+              <td>{r.nameEn}</td>
+              <td className="tabular-nums">{r.year ?? "—"}</td>
+              <td className="tabular-nums">{r.defaultBuildDeadlineMonths ?? "—"}</td>
+              <td>{r.installmentCurrency}</td>
+              <td className="tabular-nums">{num(roundCounts.find((c) => c.offeringRoundId === r.id)?._count ?? 0, locale)}</td>
+              <td>
+                <form action={toggleRound.bind(null, locale, r.id)} className="flex items-center gap-2">
+                  <Badge tone={r.isActive ? "green" : "gray"}>{r.isActive ? L("ظاهر", "Shown") : L("موقوف", "Hidden")}</Badge>
+                  <button className={`${btn.small} border border-line`}>{r.isActive ? L("أوقفه", "Hide") : L("رجّعه", "Show")}</button>
+                </form>
+              </td>
+            </tr>
+          ))}
+        </Table>
+        <form action={saveRound.bind(null, locale)} className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="cityId" value={city} />
+          <label className={labelCls}>
+            {L("رقم الطرح", "Number")}
+            <input name="number" type="number" min={1} max={99} required className={`${field} w-24`} />
+          </label>
+          <label className={labelCls}>
+            {L("الاسم بالعربي", "Arabic name")}
+            <input name="nameAr" required minLength={2} placeholder="المرحلة الخامسة" className={`${field} w-44`} />
+          </label>
+          <label className={labelCls}>
+            {L("الاسم بالإنجليزي", "English name")}
+            <input name="nameEn" required dir="ltr" placeholder="Round 5" pattern="[A-Za-z0-9][A-Za-z0-9 .,'()&-]+" className={`${field} w-40`} />
+          </label>
+          <label className={labelCls}>
+            {L("السنة", "Year")}
+            <input name="year" type="number" min={2001} max={2099} className={`${field} w-28`} />
+          </label>
+          <label className={labelCls}>
+            {L("مهلة البناء الافتراضية (شهور)", "Default build deadline (months)")}
+            <input name="defaultBuildDeadlineMonths" type="number" min={1} max={239} className={`${field} w-28`} />
+          </label>
+          <label className={labelCls}>
+            {L("عملة الأقساط", "Installment currency")}
+            <select name="installmentCurrency" className={field}>
+              <option value="USD">USD</option>
+              <option value="EGP">EGP</option>
+            </select>
+          </label>
+          <label className={`${labelCls} w-full`}>
+            {L("الشروط (اختياري)", "Terms (optional)")}
+            <textarea name="terms" rows={2} className={field} />
+          </label>
+          <button className={btn.primary}>{L("أضف طرح", "Add round")}</button>
+        </form>
+      </Card>
+      </>
+    );
+  }
+
+  /** GEO-01 / GEO-04: المدن — إضافة / تعديل / إيقاف (ممنوع الحذف)، والبادئة وصيغة كود القطعة */
+  async function Cities({ locale }: { locale: "ar" | "en" }) {
+    const rows = await allCities(true);
+    const counts = await db.plot.groupBy({ by: ["city"], _count: true });
+    const cityForm = (c?: (typeof rows)[number]) => (
+      <form action={saveCity.bind(null, locale)} className="flex flex-wrap items-end gap-2">
+        {c && <input type="hidden" name="id" value={c.id} />}
+        <label className={labelCls}>
+          {L("الاسم بالعربي", "Arabic name")}
+          <input name="nameAr" required minLength={2} defaultValue={c?.nameAr} placeholder="العاشر من رمضان" className={`${field} w-44`} />
+        </label>
+        <label className={labelCls}>
+          {L("الاسم بالإنجليزي (لاتيني)", "English name (Latin)")}
+          <input name="nameEn" required dir="ltr" defaultValue={c?.nameEn} placeholder="10th of Ramadan" pattern="[A-Za-z0-9][A-Za-z0-9 .,'()&-]+" className={`${field} w-44`} />
+        </label>
+        <label className={labelCls}>
+          {L("بادئة الكود", "Code prefix")}
+          <input name="codePrefix" required dir="ltr" defaultValue={c?.codePrefix} placeholder="TR" pattern="[A-Za-z]{2,4}" className={`${field} w-24 uppercase`} />
+        </label>
+        <label className={labelCls}>
+          {L("صيغة كود القطعة", "Plot code pattern")}
+          <input name="plotCodePattern" dir="ltr" defaultValue={c?.plotCodePattern ?? "{prefix}-{block}-{number}"} className={`${field} w-64`} />
+        </label>
+        <label className={labelCls}>
+          {L("الترتيب", "Order")}
+          <input name="sortOrder" type="number" min={0} max={999} defaultValue={c?.sortOrder ?? 50} className={`${field} w-24`} />
+        </label>
+        <button className={c ? btn.secondary : btn.primary}>{c ? L("احفظ", "Save") : L("أضف مدينة", "Add city")}</button>
+      </form>
+    );
+    return (
+      <Card title={L("المدن", "Cities")}>
+        <p className="text-sm text-muted">
+          {L(
+            "أي مدينة تضيفها بتظهر فوراً في معالج العرض والفلاتر وطلبات الشراء. المدينة ما بتتمسحش لو عليها قطع — بتتوقف بس، فتختفي من الإضافة الجديدة وتفضل ظاهرة على القديم.",
+            "A city you add shows immediately in the listing wizard, filters and buy requests. Cities with plots are never deleted — deactivating hides them from new entries while old records keep showing them.",
+          )}
+        </p>
+        <ul className="flex flex-col divide-y divide-line">
+          {rows.map((c) => {
+            const h = codeHint(c, ar);
+            return (
+              <li key={c.id} className="flex flex-col gap-2 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold">
+                    {c.nameAr} · <span dir="ltr">{c.nameEn}</span>
+                  </span>
+                  <span className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="text-muted">
+                      {L("مثال الكود", "Code example")}: <code dir="ltr">{h.example}</code>
+                    </span>
+                    <span className="tabular-nums">{L(`${num(counts.find((x) => x.city === c.id)?._count ?? 0, locale)} قطعة`, `${counts.find((x) => x.city === c.id)?._count ?? 0} plots`)}</span>
+                    <Badge tone={c.isActive ? "green" : "gray"}>{c.isActive ? L("شغالة", "Active") : L("موقوفة", "Inactive")}</Badge>
+                    <form action={toggleCity.bind(null, locale, c.id)}>
+                      <button className={`${btn.small} border border-line`}>{c.isActive ? L("أوقفها", "Deactivate") : L("شغّلها", "Activate")}</button>
+                    </form>
+                  </span>
+                </div>
+                <details>
+                  <summary className="min-h-11 cursor-pointer py-2 text-sm text-brand">{L("تعديل", "Edit")}</summary>
+                  {cityForm(c)}
+                </details>
+              </li>
+            );
+          })}
+        </ul>
+        <h3 className="font-bold">{L("مدينة جديدة", "New city")}</h3>
+        {cityForm()}
+        <p className="text-sm text-muted">{L("الصيغة: {prefix} البادئة، {block} البلوك، {number} الرقم — والفاصل شرطة.", "Pattern: {prefix} the prefix, {block} the block, {number} the number — separated by dashes.")}</p>
+      </Card>
+    );
+  }
+
+  /** PRIV-01: طلبات الجهات الرسمية — سجل ما بيتعدّلش */
+  async function Official({ locale }: { locale: "ar" | "en" }) {
+    const rows = await db.officialRequest.findMany({ orderBy: { createdAt: "desc" }, take: 50, include: { user: { select: { name: true } }, createdBy: { select: { name: true } } } });
+    return (
+      <Card title={L("طلبات الجهات الرسمية", "Requests from authorities")}>
+        <form action={recordOfficialRequest.bind(null, locale)} className="grid gap-2 sm:grid-cols-2">
+          <label className={labelCls}>
+            {L("الجهة", "Authority")}
+            <input name="authority" required minLength={3} className={field} />
+          </label>
+          <label className={labelCls}>
+            {L("رقم الطلب / السند", "Request / legal reference no.")}
+            <input name="referenceNo" required className={field} />
+          </label>
+          <label className={labelCls}>
+            {L("موبايل المستخدم المعني (اختياري)", "Affected user's mobile (optional)")}
+            <input name="phone" dir="ltr" className={field} />
+          </label>
+          <label className={labelCls}>
+            {L("رقم الصفقة (اختياري)", "Deal id (optional)")}
+            <input name="dealId" dir="ltr" className={field} />
+          </label>
+          <label className={`${labelCls} sm:col-span-2`}>
+            {L("إيه اللي اتسلّم", "What was delivered")}
+            <textarea name="delivered" required minLength={5} rows={2} className={field} />
+          </label>
+          <label className="flex min-h-11 items-center gap-2">
+            <input type="checkbox" name="gagged" className="size-5" /> {L("ممنوع قانوناً إبلاغ المستخدم", "Notifying the user is legally prohibited")}
+          </label>
+          <button className={`${btn.primary} self-end`}>{L("سجّل الطلب", "Record request")}</button>
+        </form>
+        <Table head={[L("التاريخ", "Date"), L("الجهة", "Authority"), L("الرقم", "No."), L("المستخدم", "User"), L("اتبلّغ", "Notified"), L("سجّله", "By")]}>
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <td>{date(r.createdAt, locale)}</td>
+              <td>{r.authority}</td>
+              <td dir="ltr">{r.referenceNo}</td>
+              <td>{r.user?.name ?? "—"}</td>
+              <td>{r.gagged ? L("ممنوع قانوناً", "Prohibited") : r.notifiedAt ? L("أيوه", "Yes") : "—"}</td>
+              <td>{r.createdBy.name}</td>
+            </tr>
+          ))}
+        </Table>
       </Card>
     );
   }
@@ -548,7 +766,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             <a
               key={t ?? "all"}
               href={`/${locale}/settings?tab=audit${t ? `&entity=${t}` : ""}${sp.from ? `&from=${sp.from}` : ""}${sp.to ? `&to=${sp.to}` : ""}${sp.actor ? `&actor=${encodeURIComponent(sp.actor)}` : ""}${sp.group ? `&group=${sp.group}` : ""}`}
-              className={`inline-flex min-h-9 items-center border px-2.5 text-sm ${t === entity ? "border-navy bg-navy text-white" : "border-line"}`}
+              className={`inline-flex min-h-11 items-center border px-2.5 text-sm ${t === entity ? "border-navy bg-navy text-white" : "border-line"}`}
             >
               {t ?? L("الكل", "All")}
             </a>
@@ -561,14 +779,14 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               <td>{a.actor?.name ?? (a.action.startsWith("cron.") || a.action.startsWith("listing.statement") ? L("النظام", "System") : L("زائر", "Visitor"))}</td>
               <td>
                 {auditLabel(a.action, locale)}
-                <div dir="ltr" className="text-start font-mono text-[11px] text-muted">
+                <div dir="ltr" className="text-start font-mono text-[13px] text-muted">
                   {a.action}
                 </div>
               </td>
-              <td className="text-xs">
+              <td className="text-[13px]">
                 {a.entityType} <span className="text-muted">…{a.entityId.slice(-6)}</span>
               </td>
-              <td dir="ltr" className="text-start text-xs text-muted">
+              <td dir="ltr" className="text-start text-[13px] text-muted">
                 {a.ip ?? "—"}
               </td>
             </tr>

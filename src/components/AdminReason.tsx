@@ -8,7 +8,7 @@ export function AdminReason({ show, ar }: { show?: boolean; ar: boolean }) {
       minLength={5}
       placeholder={ar ? "سبب تدخّل الأدمن (إجباري)" : "Admin override reason (required)"}
       aria-label={ar ? "سبب تدخّل الأدمن" : "Admin override reason"}
-      className="min-h-9 w-56 border border-[#F0D9A8] bg-[#FDF3E1] px-2 text-sm"
+      className="min-h-11 w-56 border border-[#F0D9A8] bg-[#FDF3E1] px-2 text-sm"
     />
   );
 }

@@ -1,3 +1,8 @@
+import { pendingConsents } from "@/lib/clickwrap";
+import { ConsentGate } from "@/components/ConsentGate";
+import { acceptClickwrap } from "./consent-actions";
+import { OTP_ERRORS } from "@/lib/action-otp";
+import { allCities } from "@/lib/cities";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale, type Locale } from "@/i18n/config";
@@ -35,7 +40,7 @@ import { applyAsPartner, createBuyRequest, setBuyRequestAlerts, setBuyRequestSta
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string; partner?: string; ev?: string }>;
+  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string; partner?: string; ev?: string; ok?: string; err?: string; view?: string }>;
 };
 
 // مراحل العرض من ناحية البائع
@@ -44,11 +49,15 @@ const LISTING_FLOW = ["DRAFT", "IN_REVIEW", "VERIFIED", "PUBLISHED", "IN_DEAL", 
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "حسابي", "My account", { noindex: true });
 
 export default async function AccountPage({ params, searchParams }: Props) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const sp = await searchParams;
   const L = tr(locale);
   const me = await requireUser(locale, `/${locale}/account`);
+  // CON-03: موافقات مطلوبة (أو موافقة جديدة على نسخة اتنشرت) + «مستنداتي»
+  const consents = await pendingConsents(me);
+  const myDocs = await db.document.findMany({ where: { type: { in: ["CONTRACT_PDF", "POWER_OF_ATTORNEY"] }, status: { not: "SUPERSEDED" }, OR: [{ ownerId: me.id }, { deal: { OR: [{ buyerId: me.id }, { listing: { sellerId: me.id } }] }, visibility: "SHARED_WITH_COUNTERPARTY" }] }, orderBy: { createdAt: "desc" }, take: 40, select: { id: true, title: true, fileName: true, createdAt: true } });
   // MKT-06: الإحالة (للعميل والشريك الموثّق)
   const refCode = ["CLIENT", "PARTNER_BROKER"].includes(me.role) ? await ensureReferralCode(me) : null;
   const [referralsCount, rewards, rewardCfg] = refCode
@@ -98,6 +107,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
     }),
   ]);
   const deals = allDeals.filter((d) => d.status === "ACTIVE" || d.status === "ON_HOLD");
+  // REL-01: التبويب الافتراضي «بيع» لو عنده عروض ومفيش صفقات شراء، وإلا «شراء»
+  const view = sp.view === "sell" || sp.view === "buy" ? sp.view : listings.length > 0 && allDeals.length === 0 ? "sell" : "buy";
   const endedDeals = allDeals.filter((d) => d.status === "COMPLETED" || d.status === "CANCELLED");
 
   /** سبب انتهاء الصفقة بكلام واضح */
@@ -131,10 +142,30 @@ export default async function AccountPage({ params, searchParams }: Props) {
         }
       />
       <Container className="flex flex-col gap-6">
+        {sp.ok === "consent" && <Notice tone="green">{L("موافقتك اتسجلت، ونسخة PDF منها في «مستنداتي».", "Your consent was recorded; a PDF copy is in “My documents”.")}</Notice>}
+        {sp.err && OTP_ERRORS[sp.err] && <Notice tone="red">{OTP_ERRORS[sp.err][locale === "ar" ? 0 : 1]}</Notice>}
+        {consents.length > 0 && (
+          <Card title={<span id="consents">{L("مطلوب موافقتك", "Your consent is needed")}</span>}>
+            {consents.map((c) => (
+              <div key={`${c.key}-${c.subjectId ?? ""}`} className="flex flex-col gap-2 border-t border-line pt-3 first:border-0 first:pt-0">
+                <strong>
+                  {c.title} {c.subjectLabel && <span dir="ltr">({c.subjectLabel})</span>} — {L(`نسخة v${c.version}`, `version v${c.version}`)}
+                </strong>
+                {c.key === "terms_of_use" && me.termsAcceptedAt && <span className="text-sm text-[#8A5A00]">{L("اتنشرت نسخة جديدة من الشروط — محتاجين موافقتك عليها. موافقتك القديمة بتفضل مرتبطة بنسختها.", "A new version of the terms was published — please consent again. Your earlier consent stays linked to its version.")}</span>}
+                {!c.ok ? (
+                  <Notice tone="amber">{L("النموذج ناقصه بيانات من الإدارة — الموافقة هتتفتح بعد استكمالها.", "The form is missing data from the admin — consent opens once it's completed.")}</Notice>
+                ) : (
+                <ConsentGate locale={locale} title={c.title} version={c.version} text={c.text} action="consent.accept" subjectId={c.subjectId} fields={["versionId"]} hidden={{ versionId: c.versionId }} formAction={acceptClickwrap.bind(null, locale, c.key, c.versionId, c.subjectId)} />
+                )}
+              </div>
+            ))}
+          </Card>
+        )}
         {sp.welcome && <Notice tone="green">{L("حسابك اتعمل. وثّق هويتك عشان تقدر تبيع أو تشتري.", "Your account is ready. Verify your ID to buy or sell.")}</Notice>}
         {sp.listed && <ClearDraft />}
         <TrackEvent name={sp.ev} />
-        {sp.listed && <Notice tone="green">{L("قطعتك وصلت وهي دلوقتي قيد المراجعة. هنبلغك على واتساب.", "Your plot was received and is now in review. We'll update you on WhatsApp.")}</Notice>}
+        {sp.listed === "1" && <Notice tone="green">{L("قطعتك اتسجلت كمسودة. وافق على «تفويض عرض القطعة» تحت وهتتبعت للمراجعة على طول (لو حسابك موثّق).", "Your plot was saved as a draft. Accept the listing authorization below and it goes to review right away (if your account is verified).")}</Notice>}
+        {sp.listed === "owner" && <Notice tone="green">{L("العرض اتسجل، وبعتنا للمالك كود على واتساب وSMS — أول ما يأكّد هيتبعت للمراجعة.", "The listing was saved and the owner got a code by WhatsApp and SMS — it goes to review once they confirm.")}</Notice>}
         {sp.rescue && (
           <Notice tone="amber">
             {L("تاريخ مهلة البناء اللي كتبته عدّى — العرض اتقبل ومتعلّم «المهلة خلصت».", "The build deadline you entered has passed — the listing was accepted and marked “deadline passed”.")}{" "}
@@ -147,6 +178,21 @@ export default async function AccountPage({ params, searchParams }: Props) {
         {sp.upload === "ok" && <Notice tone="green">{L("النسخة الجديدة اترفعت ووصلت للوسيط.", "The new version was uploaded and sent to the broker.")}</Notice>}
         {sp.upload === "bad" && <Notice tone="red">{L("الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا.", "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB.")}</Notice>}
 
+        {/* REL-01: البائع والمشتري علاقة مش دور — نفس الحساب بيبيع ويشتري، في تبويبين */}
+        <nav aria-label={L("بيع وشراء", "Selling and buying")} className="flex gap-2 border-b border-line">
+          {(
+            [
+              ["buy", L("شراء", "Buying")],
+              ["sell", L("بيع", "Selling")],
+            ] as const
+          ).map(([k, t]) => (
+            <Link key={k} href={`/${locale}/account?view=${k}`} aria-current={view === k ? "page" : undefined} className={`inline-flex min-h-11 items-center border-b-2 px-4 font-semibold ${view === k ? "border-brand text-brand" : "border-transparent text-muted"}`}>
+              {t}
+            </Link>
+          ))}
+        </nav>
+        {view === "buy" && (
+          <>
         {/* ── المشتري: القطع اللي مهتم بيها ومرحلة كل صفقة ── */}
         <section className="flex flex-col gap-3">
           <h2 className="text-2xl font-bold">{L("القطع اللي مهتم بيها", "Plots you're interested in")}</h2>
@@ -172,7 +218,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                   hasAuthorityApprovalDoc: d.documents.some((x) => x.type === "AUTHORITY_STATEMENT" && x.status !== "REJECTED"),
                 });
                 const toSign = d.contracts.filter(
-                  (c) => c.status === "SENT_FOR_SIGNATURE" && requiredSigners(c.type).includes("BUYER") && !((c.signatures as { role: string }[]) ?? []).some((x) => x.role === "BUYER"),
+                  (c) => (c.status === "SENT_FOR_SIGNATURE" || c.status === "PARTIALLY_SIGNED") && requiredSigners(c.type).includes("BUYER") && !((c.signatures as { role: string }[]) ?? []).some((x) => x.role === "BUYER"),
                 ).length;
                 return (
                   <li key={d.id}>
@@ -209,7 +255,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                       {label(CITY, d.listing.plot.city, locale)} — {districtName(d.listing.plot, locale)} · {num(d.listing.plot.areaSqm, locale)} {L("م²", "m²")}
                     </Link>
                     <span className={`text-sm ${d.status === "COMPLETED" ? "text-ok" : "text-[#A32020]"}`}>{endReason(d)}</span>
-                    <span className="text-xs text-muted">
+                    <span className="text-[13px] text-muted">
                       {L(`وقفت عند: ${label(DEAL_STAGE, d.stage, locale)}`, `Stopped at: ${label(DEAL_STAGE, d.stage, locale)}`)} · {date(d.updatedAt, locale)}
                       {d.deposits.some((x) => x.escrowStatus === "REFUNDED_TO_BUYER") && L(" · العربون اترد لك", " · your deposit was refunded")}
                     </span>
@@ -221,6 +267,10 @@ export default async function AccountPage({ params, searchParams }: Props) {
           </section>
         )}
 
+          </>
+        )}
+        {view === "sell" && (
+          <>
         {/* ── البائع: قطعي ومرحلة كل عرض ── */}
         <section className="flex flex-col gap-3">
           <h2 className="text-2xl font-bold">{L("قطعي المعروضة", "My plots")}</h2>
@@ -350,7 +400,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                           ? L(`اتباعت لـ ${d.buyer.name} بـ ${money(d.agreedPrice, "EGP", locale)}`, `Sold to ${d.buyer.name} for ${money(d.agreedPrice, "EGP", locale)}`)
                           : endReason(d)}
                       </span>
-                      <span className="text-xs text-muted">
+                      <span className="text-[13px] text-muted">
                         {d.closedAt ? L(`اتقفلت ${date(d.closedAt, locale)}`, `Closed ${date(d.closedAt, locale)}`) : L(`اتلغت عند: ${label(DEAL_STAGE, d.stage, locale)}`, `Cancelled at: ${label(DEAL_STAGE, d.stage, locale)}`)}
                         {released && L(` · العربون اتصرف لك (${money(released.amount, "EGP", locale)})`, ` · deposit released to you (${money(released.amount, "EGP", locale)})`)}
                         {d.listing.status === "PUBLISHED" && d.status === "CANCELLED" && L(" · العرض رجع منشور", " · listing is published again")}
@@ -362,6 +412,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
               })}
             </ul>
           </section>
+        )}
+          </>
         )}
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -378,10 +430,36 @@ export default async function AccountPage({ params, searchParams }: Props) {
                 ],
               ]}
             />
-            <Link href={`/${locale}/account/security`} className={`${btn.small} self-start border border-brand text-brand`}>
-              {L("الخصوصية والأمان", "Privacy & security")}
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href={`/${locale}/account/security`} className={`${btn.small} border border-brand text-brand`}>
+                {L("الخصوصية والأمان", "Privacy & security")}
+              </Link>
+              {/* TXN-02 */}
+              <Link href={`/${locale}/account/transactions`} className={`${btn.small} border border-brand text-brand`}>
+                {L("معاملاتي", "My transactions")}
+              </Link>
+              {/* BANK-01 */}
+              <Link href={`/${locale}/account/bank`} className={`${btn.small} border border-brand text-brand`}>
+                {L("حساباتي البنكية", "My bank accounts")}
+              </Link>
+            </div>
           </Card>
+
+          {/* CON-03/04: «مستنداتي» — نسخ الموافقات والعقود الموقّعة */}
+          {myDocs.length > 0 && (
+            <Card title={<span id="my-docs">{L("مستنداتي", "My documents")}</span>}>
+              <ul className="flex flex-col divide-y divide-line text-sm">
+                {myDocs.map((d) => (
+                  <li key={d.id} className="flex flex-wrap justify-between gap-2 py-2">
+                    <a href={`/api/files/${d.id}`} className="font-semibold text-brand underline">
+                      {d.title ?? d.fileName}
+                    </a>
+                    <span className="text-[13px] text-muted">{date(d.createdAt, locale)}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           {/* UX-11: حسابات الفريق الموثّقة (أو أي حساب موثّق من غير ملف) ما يتطلبش منها توثيق */}
           {me.accountLevel === "VERIFIED" && (!kyc || kyc.status === "APPROVED") ? (

@@ -20,3 +20,18 @@ describe("DATA-07 plot code", () => {
     expect(normalizeCode("NC 8E-1016")).toBe(normalizeCode("nc-8e--1016"));
   });
 });
+
+describe("GEO-04 per-city code pattern", () => {
+  it("hint follows the city's prefix", async () => {
+    const { codeHint } = await import("./plot-code");
+    expect(codeHint({ codePrefix: "SZ" }, true)).toEqual({ example: "SZ-8E-1016", words: "SZ-البلوك-الرقم" });
+  });
+  it("a new city with its own pattern validates against it", () => {
+    const spec = { codePrefix: "TR", plotCodePattern: "{prefix}/{number}" };
+    expect(checkCode("TENTH", "tr/0045", spec)).toEqual({ code: "TR-0045", error: "format" }); // الفاصل بيتوحد لشرطة
+    const dash = { codePrefix: "TR", plotCodePattern: "{prefix}-{number}" };
+    expect(checkCode("TENTH", "tr 45", dash)).toEqual({ code: "TR-45", error: null });
+    expect(checkCode("TENTH", "NC-45", dash).error).toBe("prefix");
+    expect(checkCode("TENTH", "TR-8E-45", dash).error).toBe("format");
+  });
+});

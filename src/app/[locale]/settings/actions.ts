@@ -1,7 +1,10 @@
 "use server";
 
+import { allCities, invalidateCities, isCity } from "@/lib/cities";
+import { cityIdFromSlug, isLatinName, slugFromName, validPattern, validPrefix } from "@/lib/geo-rules";
 import { revalidatePath } from "next/cache";
-import type { City, Prisma, Role } from "@prisma/client";
+import type { Prisma, Role } from "@prisma/client";
+type City = string;
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { requireRecentAuth, requireUser } from "@/lib/auth";
@@ -200,6 +203,7 @@ export async function saveOps(locale: string, form: FormData) {
   const dev = Math.min(50, Math.max(0.5, Number(form.get("maxDeviationPct")) || 5));
   const access = form.get("unassignedBrokers") === "read" ? "read" : "none";
   await saveSetting(me.id, "payments.fourEyes", { limitEgp: limit });
+  await saveSetting(me.id, "deal.fees", { transferFeeEgp: Math.max(0, Number(form.get("transferFeeEgp")) || 0), notaryFeeEgp: Math.max(0, Number(form.get("notaryFeeEgp")) || 0) });
   await saveSetting(me.id, "fx.manual", { maxDeviationPct: dev });
   await saveSetting(me.id, "deals.unassignedBrokers", { access });
   await saveSetting(me.id, "documents.validity", {
@@ -248,13 +252,15 @@ export async function saveMarketing(locale: string, form: FormData) {
 
 /** DATA-07: إضافة حي/مرحلة للقايمة، أو إيقافه (ما بيتمسحش عشان القطع القديمة) */
 export async function addDistrict(locale: string, form: FormData) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const l = loc(locale);
   const me = await signedIn(l);
   await authorize(me, "settings.fees", {}, { back: back(l, "districts") });
   const city = String(form.get("city") ?? "");
   const nameAr = String(form.get("nameAr") ?? "").trim().replace(/\s+/g, " ");
   const nameEn = String(form.get("nameEn") ?? "").trim().replace(/\s+/g, " ");
-  if (!CITY_KEYS.includes(city as never) || nameAr.length < 2 || nameEn.length < 2) redirect(`${back(l, "districts")}&err=district`);
+  // GEO-03: الاسم الإنجليزي لاتيني بس
+  if (!CITY_KEYS.includes(city as never) || nameAr.length < 2 || !isLatinName(nameEn)) redirect(`${back(l, "districts")}&err=district&city=${city}`);
   const d = await db.district.upsert({
     where: { city_nameAr: { city: city as City, nameAr } },
     create: { city: city as City, nameAr, nameEn, sort: 50 },
@@ -288,4 +294,140 @@ export async function bumpTemplate(locale: string, type: string, form: FormData)
   );
   await saveSetting(me.id, "contract.templates", next);
   refresh(l);
+}
+
+/** GEO-01: إضافة/تعديل مدينة — من غير deploy. ممنوع الحذف (إيقاف بس) */
+export async function saveCity(locale: string, form: FormData) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "settings.fees", {}, { back: back(l, "cities") });
+  const s = (k: string) => String(form.get(k) ?? "").trim().replace(/\s+/g, " ");
+  const id = s("id");
+  const nameAr = s("nameAr");
+  const nameEn = s("nameEn");
+  const codePrefix = s("codePrefix").toUpperCase();
+  const plotCodePattern = s("plotCodePattern") || "{prefix}-{block}-{number}";
+  const sortOrder = Math.max(0, Math.min(999, Number(s("sortOrder")) || 50));
+  if (nameAr.length < 2 || !isLatinName(nameEn) || !validPrefix(codePrefix) || !validPattern(plotCodePattern)) redirect(`${back(l, "cities")}&err=city`);
+  const clash = await db.city.findFirst({ where: { codePrefix, NOT: id ? { id } : undefined } });
+  if (clash) redirect(`${back(l, "cities")}&err=city_prefix`);
+  if (id) {
+    const before = await db.city.findUnique({ where: { id } });
+    if (!before) redirect(back(l, "cities"));
+    // أكواد القطع القديمة بتفضل زي ما هي؛ البادئة الجديدة بتسري على الإضافات الجديدة
+    await db.city.update({ where: { id }, data: { nameAr, nameEn, codePrefix, plotCodePattern, sortOrder } });
+    await audit(me.id, "city.update", "City", id, {
+      before: { nameAr: before!.nameAr, nameEn: before!.nameEn, codePrefix: before!.codePrefix, plotCodePattern: before!.plotCodePattern },
+      after: { nameAr, nameEn, codePrefix, plotCodePattern },
+    });
+  } else {
+    const slug = slugFromName(nameEn);
+    const newId = cityIdFromSlug(slug);
+    if (!slug || (await db.city.findFirst({ where: { OR: [{ id: newId }, { slug }] } }))) redirect(`${back(l, "cities")}&err=city_exists`);
+    await db.city.create({ data: { id: newId, nameAr, nameEn, slug, codePrefix, plotCodePattern, sortOrder } });
+    await audit(me.id, "city.create", "City", newId, { nameAr, nameEn, codePrefix, plotCodePattern });
+  }
+  invalidateCities();
+  await allCities(true);
+  refresh(l);
+  redirect(`${back(l, "cities")}&ok=city`);
+}
+
+/** GEO-01: إيقاف/تشغيل مدينة — الموقوفة ما تظهرش في الإضافة الجديدة لكن تفضل على القديم */
+export async function toggleCity(locale: string, id: string) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "settings.fees", {}, { back: back(l, "cities") });
+  const c = await db.city.findUnique({ where: { id } });
+  if (!c) return;
+  await db.city.update({ where: { id }, data: { isActive: !c.isActive } });
+  await audit(me.id, "city.toggle", "City", id, { before: c.isActive, after: !c.isActive });
+  invalidateCities();
+  await allCities(true);
+  refresh(l);
+}
+
+/** GEO-02: الطرح (مرحلة بيت الوطن) — منفصل عن الحي */
+export async function saveRound(locale: string, form: FormData) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "settings.fees", {}, { back: back(l, "districts") });
+  const s = (k: string) => String(form.get(k) ?? "").trim().replace(/\s+/g, " ");
+  const cityId = s("cityId");
+  const nameAr = s("nameAr");
+  const nameEn = s("nameEn");
+  const number = Number(s("number"));
+  const year = s("year") ? Number(s("year")) : null;
+  const months = s("defaultBuildDeadlineMonths") ? Number(s("defaultBuildDeadlineMonths")) : null;
+  const currency = s("installmentCurrency") === "EGP" ? "EGP" : "USD";
+  if (!(await isCity(cityId)) || nameAr.length < 2 || !isLatinName(nameEn) || !Number.isInteger(number) || number < 1 || number > 99)
+    redirect(`${back(l, "districts")}&err=round&city=${cityId}`);
+  const r = await db.offeringRound.create({
+    data: {
+      cityId,
+      nameAr,
+      nameEn,
+      number,
+      year: year && year > 2000 && year < 2100 ? year : null,
+      defaultBuildDeadlineMonths: months && months > 0 && months < 240 ? months : null,
+      installmentCurrency: currency,
+      terms: s("terms").slice(0, 1000) || null,
+    },
+  });
+  await audit(me.id, "round.create", "OfferingRound", r.id, { cityId, nameAr, nameEn, number });
+  refresh(l);
+  redirect(`${back(l, "districts")}&city=${cityId}`);
+}
+
+export async function toggleRound(locale: string, id: string) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  await authorize(me, "settings.fees", {}, { back: back(l, "districts") });
+  const r = await db.offeringRound.findUnique({ where: { id } });
+  if (!r) return;
+  await db.offeringRound.update({ where: { id }, data: { isActive: !r.isActive } });
+  await audit(me.id, "round.toggle", "OfferingRound", id, { before: r.isActive, after: !r.isActive });
+  refresh(l);
+}
+
+/** PRIV-01: تسجيل طلب جهة رسمية — الجهة ورقم الطلب واللي اتسلّم، وتنبيه المستخدم إلا لو ممنوع قانوناً */
+export async function recordOfficialRequest(locale: string, form: FormData) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  if (me.role !== "ADMIN") redirect(back(l, "official"));
+  const s = (k: string) => String(form.get(k) ?? "").trim().slice(0, 1000);
+  const authority = s("authority");
+  const referenceNo = s("referenceNo");
+  const delivered = s("delivered");
+  if (authority.length < 3 || referenceNo.length < 2 || delivered.length < 5) redirect(`${back(l, "official")}&err=official`);
+  const phone = s("phone");
+  const target = phone ? await db.user.findFirst({ where: { phone }, select: { id: true } }) : null;
+  const gagged = form.get("gagged") === "on";
+  const r = await db.officialRequest.create({
+    data: { authority, referenceNo, delivered, gagged, userId: target?.id ?? null, dealId: s("dealId") || null, createdById: me.id, notifiedAt: target && !gagged ? new Date() : null },
+  });
+  await audit(me.id, "privacy.official_request", "OfficialRequest", r.id, { authority, referenceNo, userId: target?.id, gagged });
+  if (target && !gagged) {
+    const { notify } = await import("@/lib/notifications");
+    await notify([target.id], {
+      kind: "privacy.official_request",
+      ar: ["جهة رسمية طلبت بيانات تخصّك", `${authority} — طلب رقم ${referenceNo}. اللي اتسلّم: ${delivered}`],
+      en: ["An authority requested data about you", `${authority} — request no. ${referenceNo}. Delivered: ${delivered}`],
+      link: `/account/security#privacy`,
+    });
+  }
+  refresh(l);
+  redirect(`${back(l, "official")}&ok=official`);
+}
+
+/** REL-03: تفعيل/إيقاف «يتعامل كعميل» لموظف (يبيع/يشتري لنفسه) */
+export async function toggleClientEnabled(locale: string, userId: string) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  if (me.role !== "ADMIN") redirect(back(l, "users"));
+  const u = await db.user.findUnique({ where: { id: userId }, select: { role: true, clientEnabled: true } });
+  if (!u || u.role === "CLIENT") redirect(`/${l}/settings/users/${userId}`);
+  await db.user.update({ where: { id: userId }, data: { clientEnabled: !u!.clientEnabled } });
+  await audit(me.id, "user.client_enabled", "User", userId, { before: u!.clientEnabled, after: !u!.clientEnabled });
+  redirect(`/${l}/settings/users/${userId}`);
 }

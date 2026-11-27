@@ -64,15 +64,15 @@ describe("PERM-10 matrix — every role × every action", () => {
   // على حاجات مش مسندة ليه: ولا دور (غير الأدمن ومسؤول الوسطاء والمالي في نطاقهم) يقدر يعمل فعل على صفقة/عرض/مستند
   const unassignedAllowed: Partial<Record<Role, Action[]>> = {
     // مسؤول الوسطاء بيشوف كل حاجة ويسند، ويراجع الهويات (notMine فيه ملف هوية مستني المراجعة)
-    BROKER_LEAD: ["listing.view_private", "listing.view_code", "listing.assign", "deal.view", "deal.view_money", "deal.assign", "deal.note", "deal.internal_note", "deposit.view", "service.view_queue", "service.assign", "service.update", "service.site_report", "reports.view", "kyc.view_id", "kyc.decide", "document.view"],
+    BROKER_LEAD: ["listing.view_private", "listing.view_code", "listing.assign", "deal.view", "deal.view_money", "deal.assign", "deal.note", "deal.internal_note", "deposit.view", "service.view_queue", "service.assign", "service.update", "service.site_report", "reports.view", "kyc.view_id", "kyc.decide", "document.view", "listing.create", "listing.pause", "buy_request.create", "service.create"],
     // المالي شغال على كل الصفقات: ملاحظات، رفع إيصالات، تسجيل وتأكيد عرابين
     FINANCE: ["deal.view", "deal.view_money", "deal.note", "deal.upload_doc", "deposit.view", "deposit.record", "deposit.confirm", "deposit.release", "deposit.refund", "commission.collect", "reports.view", "finance.reconcile", "fx.manual", "audit.view_money", "deal.internal_note", "document.view"],
     // الوسيط: طابور الخدمات + مراجعة هوية مستنية (SEC-06) — مش صفقات ولا عروض مش مسندة ليه
-    BROKER: ["service.view_queue", "service.assign", "service.update", "service.site_report", "reports.view", "kyc.view_id", "kyc.decide", "document.view"],
+    BROKER: ["service.view_queue", "service.assign", "service.update", "service.site_report", "reports.view", "kyc.view_id", "kyc.decide", "document.view", "listing.create", "buy_request.create", "service.create"],
     LAWYER: ["reports.view"],
     AGENT: ["service.view_queue"],
-    CLIENT: ["listing.create", "deal.create"],
-    PARTNER_BROKER: ["listing.create", "deal.create"],
+    CLIENT: ["listing.create", "deal.create", "buy_request.create", "service.create"],
+    PARTNER_BROKER: ["listing.create", "deal.create", "buy_request.create", "service.create"],
   };
 
   for (const role of ROLES.filter((r) => r !== "ADMIN")) {
@@ -84,7 +84,7 @@ describe("PERM-10 matrix — every role × every action", () => {
   }
 
   // أفعال الأدمن بس — ولا دور تاني
-  const adminOnly: Action[] = ["user.list", "user.set_role", "user.suspend", "deal.revert", "template.edit", "payment.approve", "commission.waive", "commission.rates", "settings.fees", "audit.view", "storage.manage"];
+  const adminOnly: Action[] = ["user.list", "user.set_role", "user.suspend", "deal.revert", "template.edit", "payment.approve", "commission.waive", "commission.rates", "settings.fees", "audit.view", "storage.manage", "export.user"];
   it("admin-only actions are denied to every other role, even when assigned", () => {
     for (const role of ROLES.filter((r) => r !== "ADMIN"))
       for (const a of adminOnly) expect(can(me(role), a, mine(role)).allowed, `${role} ${a}`).toBe(false);
@@ -92,13 +92,13 @@ describe("PERM-10 matrix — every role × every action", () => {
 
   it("the role that owns each step can do it when assigned", () => {
     const ok: [Role, Action][] = [
-      ["BROKER", "listing.verify"],
+      ["LAWYER", "listing.verify"],
       ["BROKER", "listing.send_to_lawyer"],
       ["BROKER", "deal.advance"],
       ["LAWYER", "document.review"],
       ["AGENT", "deal.view"],
       ["CLIENT", "deal.view"],
-      ["PARTNER_BROKER", "listing.withdraw"],
+      ["CLIENT", "listing.withdraw"], // PUB-01: الشريك ما يسحبش
       ["FINANCE", "deposit.confirm"],
     ];
     for (const [role, a] of ok) expect(can(me(role), a, mine(role)).allowed, `${role} ${a}`).toBe(true);

@@ -80,7 +80,7 @@ export function CostCalculator({ locale, priceEgp, buyerPct, transferPct, lawyer
           <div key={k} className="flex items-baseline justify-between gap-3 py-2">
             <dt className="flex flex-col">
               <span>{k}</span>
-              {hint && <span className="text-xs text-muted">{hint}</span>}
+              {hint && <span className="text-[13px] text-muted">{hint}</span>}
             </dt>
             <dd className="font-semibold">{v}</dd>
           </div>

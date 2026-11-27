@@ -16,7 +16,7 @@ export function ShareButtons({ base, path, text, refCode, ar, compact = false }:
       /* المتصفح منع النسخ */
     }
   };
-  const cls = compact ? "inline-flex min-h-9 items-center gap-1 border px-2.5 text-sm font-semibold" : "inline-flex min-h-11 items-center gap-1.5 border px-4 font-semibold";
+  const cls = compact ? "inline-flex min-h-11 items-center gap-1 border px-2.5 text-sm font-semibold" : "inline-flex min-h-11 items-center gap-1.5 border px-4 font-semibold";
   return (
     <div className="flex flex-wrap gap-2">
       <a href={wa} target="_blank" rel="noopener noreferrer" className={`${cls} border-[#1F9D55] text-[#157A42] hover:bg-[#EAF6EE]`}>

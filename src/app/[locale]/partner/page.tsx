@@ -1,3 +1,4 @@
+import { getSetting } from "@/lib/settings";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
@@ -34,8 +35,10 @@ export default async function PartnerPage({ params }: { params: Promise<{ locale
     },
     orderBy: { createdAt: "desc" },
   });
-  const sharePct = me.role === "PARTNER_BROKER" ? toNum(me.partnerSharePct ?? 0) : null;
-  const closed = listings.flatMap((l) => l.deals.filter((d) => d.status === "COMPLETED").map((d) => ({ d, pct: toNum(l.submittedBy?.partnerSharePct ?? 0) })));
+  // PUB-03: نسبة الشريك من إعداداته، وإلا الافتراضي من إعدادات الأدمن (مش 0٪)
+  const defaultShare = (await getSetting("partner.defaultSharePct")).value;
+  const sharePct = me.role === "PARTNER_BROKER" ? (me.partnerSharePct != null ? toNum(me.partnerSharePct) : defaultShare) : null;
+  const closed = listings.flatMap((l) => l.deals.filter((d) => d.status === "COMPLETED").map((d) => ({ d, pct: l.submittedBy?.partnerSharePct != null ? toNum(l.submittedBy.partnerSharePct) : defaultShare })));
   const shareOf = (d: (typeof closed)[number]["d"], pct: number) => (d.commission ? ((toNum(d.commission.sellerAmount) + toNum(d.commission.buyerAmount)) * pct) / 100 : 0);
   const earned = closed.reduce((s, x) => s + shareOf(x.d, x.pct), 0);
 
@@ -63,7 +66,7 @@ export default async function PartnerPage({ params }: { params: Promise<{ locale
                     <Link href={`/${locale}/listings/${l.id}`} className="font-semibold text-brand">
                       {label(CITY, l.plot.city, locale)} — {districtName(l.plot, locale)}
                     </Link>
-                    <div className="text-xs text-muted">
+                    <div className="text-[13px] text-muted">
                       {num(l.plot.areaSqm, locale)} {L("م²", "m²")} · {date(l.createdAt, locale)}
                       {me.role === "ADMIN" && ` · ${l.submittedBy?.name ?? ""}`}
                     </div>
@@ -75,7 +78,7 @@ export default async function PartnerPage({ params }: { params: Promise<{ locale
                     {l.deals.length === 0
                       ? "—"
                       : l.deals.map((d) => {
-                          const agreed = d.contracts.some((c) => c.type === "COMMISSION_AGREEMENT" && c.status === "SIGNED");
+                          const agreed = d.contracts.some((c) => c.type === "COMMISSION_AGREEMENT" && (c.status === "SIGNED" || c.status === "VERIFIED"));
                           return (
                             <div key={d.id} className="text-sm">
                               <Link href={`/${locale}/deals/${d.id}`} className="text-brand">
@@ -87,7 +90,7 @@ export default async function PartnerPage({ params }: { params: Promise<{ locale
                           );
                         })}
                   </td>
-                  <td>{money(l.deals.filter((d) => d.status === "COMPLETED").reduce((s, d) => s + shareOf(d, toNum(l.submittedBy?.partnerSharePct ?? 0)), 0), "EGP", locale)}</td>
+                  <td>{money(l.deals.filter((d) => d.status === "COMPLETED").reduce((s, d) => s + shareOf(d, l.submittedBy?.partnerSharePct != null ? toNum(l.submittedBy.partnerSharePct) : defaultShare), 0), "EGP", locale)}</td>
                 </tr>
               ))}
             </Table>

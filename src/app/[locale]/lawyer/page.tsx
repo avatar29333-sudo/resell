@@ -10,6 +10,8 @@ import { districtName } from "@/lib/district";
 import { CITY, CONTRACT_TYPE, DOC_TYPE, REVIEW_DECISION, label, toneOf } from "@/lib/labels";
 import { Badge, Card, Container, Empty, FileLink, Notice, PageHeader, Stat, Table, btn } from "@/components/ui";
 import { reviewDocument } from "./actions";
+import { moveListing } from "../broker/actions";
+import { can, listingCtx, subject } from "@/lib/authz";
 import { CHECKLISTS } from "./checklists";
 import { pageMeta } from "@/lib/meta";
 import { ReviewForm } from "./ReviewForm";
@@ -28,6 +30,7 @@ export default async function LawyerPage({ params, searchParams }: Props) {
   const ar = locale === "ar";
   const me = await requireUser(locale, `/${locale}/lawyer`, ["LAWYER", "ADMIN"]);
   const isAdmin = me.role === "ADMIN";
+  const readyListings = (await db.listing.findMany({ where: { status: "IN_REVIEW", ...(isAdmin ? {} : { assignedLawyerId: me.id }) }, include: { plot: true, documents: { select: { type: true, status: true } } } })).filter((l) => isAdmin ? listingCtx(l).requiredDocsApproved : can(subject(me), "listing.verify", { listing: listingCtx(l) }).allowed);
 
   // PERM-02: المحامي يشوف مستندات العروض والصفقات المسندة ليه بس، ومش ورق هو رافعه أو صاحبه
   const docScope: Prisma.DocumentWhereInput = isAdmin
@@ -66,6 +69,24 @@ export default async function LawyerPage({ params, searchParams }: Props) {
           <Stat label={L("مراجعات اتعملت", "Reviews done")} value={num(reviewsDone, locale)} />
         </div>
 
+        {/* PUB-01: الاعتماد القانوني للعرض بقى للمحامي المسند (بعد ما كل مستنداته تتعمد) */}
+        {readyListings.length > 0 && (
+          <Card title={L("عروض جاهزة للاعتماد القانوني", "Listings ready for legal approval")}>
+            <ul className="flex flex-col divide-y divide-line text-sm">
+              {readyListings.map((l) => (
+                <li key={l.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                  <span>
+                    {label(CITY, l.plot.city, locale)} — {districtName(l.plot, locale)} — <span dir="ltr">{l.plot.code}</span>
+                  </span>
+                  <form action={moveListing.bind(null, locale, l.id, "VERIFIED")} className="flex flex-wrap gap-1">
+                    {isAdmin && <input name="overrideReason" required minLength={5} aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className="min-h-11 border border-line px-2" />}
+                    <button className={`${btn.small} bg-ok text-white`}>{L("اعتماد قانوني", "Legal approval")}</button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
         <Card title={L("مستندات مستنية المراجعة", "Documents awaiting review")}>
           {docs.length === 0 ? (
             <Empty>{L("مفيش مستندات مستنية.", "Nothing waiting.")}</Empty>
@@ -120,7 +141,7 @@ export default async function LawyerPage({ params, searchParams }: Props) {
               {contracts.map((c) => (
                 <tr key={c.id}>
                   <td className="font-semibold">
-                    {label(CONTRACT_TYPE, c.type, locale)} <span className="text-xs text-muted">{c.templateVersion}</span>
+                    {label(CONTRACT_TYPE, c.type, locale)} <span className="text-[13px] text-muted">{c.templateVersion}</span>
                   </td>
                   <td>
                     #{c.dealId.slice(-6).toUpperCase()} · {label(CITY, c.deal.listing.plot.city, locale)}

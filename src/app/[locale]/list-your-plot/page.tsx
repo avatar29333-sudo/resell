@@ -1,3 +1,4 @@
+import { activeCities, cityOptions } from "@/lib/cities";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
@@ -41,13 +42,22 @@ export default async function ListYourPlotPage({ params, searchParams }: { param
         )}
       />
       <Container className="max-w-3xl">
-        {allowed ? (
+        {allowed && user.role === "PARTNER_BROKER" && !user.partnerAgreedAt ? (
+          <Notice tone="amber">
+            {L("قبل أول عرض: وافق على اتفاقية السمسار الشريك (نموذج 10) — مرة واحدة بس.", "Before your first listing: accept the partner broker agreement (form 10) — once only.")}{" "}
+            <Link href={`/${locale}/account#consents`} className="font-semibold text-brand underline">
+              {L("وافق دلوقتي", "Accept now")}
+            </Link>
+          </Notice>
+        ) : allowed ? (
           <Card>
             <Wizard
               locale={locale}
-              partner={user.role === "PARTNER_BROKER"}
+              partner={["PARTNER_BROKER", "BROKER", "BROKER_LEAD"].includes(user.role)}
               initial={initial}
+              cities={cityOptions(await activeCities())}
               districts={await db.district.findMany({ where: { active: true }, orderBy: [{ city: "asc" }, { sort: "asc" }], select: { id: true, city: true, nameAr: true, nameEn: true } })}
+              rounds={await db.offeringRound.findMany({ where: { isActive: true }, orderBy: [{ cityId: "asc" }, { number: "asc" }], select: { id: true, cityId: true, nameAr: true, nameEn: true } })}
             />
           </Card>
         ) : staff ? (

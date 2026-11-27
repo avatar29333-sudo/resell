@@ -1,3 +1,4 @@
+import { activeCities, cityOptions } from "@/lib/cities";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
@@ -30,7 +31,7 @@ export default async function ValuationPage({ params }: { params: Promise<{ loca
         subtitle={L("5 خانات، ووسيط مرخّص يبعت لك تقييم مبني على صفقات اتقفلت فعلاً — من غير التزام بالبيع.", "Five fields, and a licensed broker sends a valuation based on deals that actually closed — no obligation to sell.")}
       />
       <Container className="max-w-2xl">
-        <ValuationForm locale={locale} districts={districts} perSqm={perSqm} />
+        <ValuationForm locale={locale} cities={cityOptions(await activeCities())} districts={districts} perSqm={perSqm} />
       </Container>
     </>
   );

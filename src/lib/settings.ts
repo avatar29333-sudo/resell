@@ -17,6 +17,10 @@ export const DEFAULTS = {
   "service.fees": { deadlineRescueEgp: 15000, siteInspectionEgp: 3500 } as ServiceFees,
   /** PERM-09 — حد الأربع عيون: أي صرف من المالي فوقه محتاج موافقة أدمن */
   "payments.fourEyes": { limitEgp: 500_000 } as { limitEgp: number },
+  /** PUB-03 — نصيب السمسار الشريك الافتراضي من عمولة المنصة (٪) — بيتعدّل من الإعدادات؛ ⚠️ القيمة دي مبدئية لحد تأكيد نموذج 10 */
+  "partner.defaultSharePct": { value: 20 } as { value: number },
+  /** TXN-01 — رسوم تقديرية على المشتري (0 = «بتتحدد من الجهاز») */
+  "deal.fees": { transferFeeEgp: 0, notaryFeeEgp: 0, bankFeeEstimateEgp: 0 } as { transferFeeEgp: number; notaryFeeEgp: number; bankFeeEstimateEgp?: number },
   /** OPS-04 — السعر اليدوي ما يبعدش عن آخر سعر آلي أكتر من النسبة دي إلا بتأكيد صريح */
   "fx.manual": { maxDeviationPct: 5 } as { maxDeviationPct: number },
   /** MKT-01 — قرار إنقاذ المهلة: تاريخ القرار وآخر موعد للتقديم (بيتعدّل من لوحة الأدمن) */

@@ -6,6 +6,7 @@ import { homeFor } from "@/lib/auth";
 import { ROLE, label } from "@/lib/labels";
 import { signOut } from "@/app/[locale]/auth-actions";
 import { Logo } from "./Logo";
+import { MobileMenu } from "./MobileMenu";
 
 type Props = { locale: Locale; t: Dictionary; user: User | null; unread?: number };
 
@@ -19,7 +20,7 @@ function Bell({ href, unread, ar }: { href: string; unread: number; ar: boolean 
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
         <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0" />
       </svg>
-      {unread > 0 && <span className="absolute top-1 end-0 min-w-5 bg-[#D9480F] px-1 text-center text-xs font-bold text-white">{unread > 99 ? "99+" : unread}</span>}
+      {unread > 0 && <span className="absolute top-1 end-0 min-w-5 bg-[#D9480F] px-1 text-center text-[13px] font-bold text-white">{unread > 99 ? "99+" : unread}</span>}
     </Link>
   );
 }
@@ -40,6 +41,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
     { href: `${base}/broker`, label: ar ? "لوحة الوسيط" : "Broker", roles: ["ADMIN", "BROKER", "BROKER_LEAD"] },
     { href: `${base}/agent`, label: ar ? "لوحة المندوب" : "Field agent", roles: ["ADMIN", "AGENT"] },
     { href: `${base}/lawyer`, label: ar ? "شاشة المحامي" : "Lawyer", roles: ["ADMIN", "LAWYER"] },
+    { href: `${base}/templates`, label: ar ? "نماذج العقود" : "Templates", roles: ["ADMIN", "LAWYER"] },
     { href: `${base}/finance`, label: ar ? "المالية" : "Finance", roles: ["ADMIN", "FINANCE"] },
     { href: `${base}/reports`, label: ar ? "التقارير" : "Reports", roles: ["ADMIN", "FINANCE", "BROKER", "BROKER_LEAD", "LAWYER"] },
     { href: `${base}/partner`, label: ar ? "بوابة الشريك" : "Partner portal", roles: ["PARTNER_BROKER"] },
@@ -50,24 +52,19 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
 
   return (
     <header className="bg-navy text-white print:hidden">
-      <div className="bg-[#FDF3E1] px-5 py-1 text-center text-xs text-[#5C3D00] md:py-1.5 md:text-sm">{t.demo.banner}</div>
+      <div className="bg-[#FDF3E1] px-5 py-1 text-center text-[13px] text-[#5C3D00] md:py-1.5 md:text-sm">{t.demo.banner}</div>
 
       {/* UX-06: الموبايل (تحت 768px) — لوجو + «اعرض قطعتك» + ☰ وبس، والهيدر ≤ 72px */}
       <div className="relative flex h-[64px] items-center justify-between gap-2 px-4 md:hidden">
         <Link href={base} className="flex items-center text-white no-underline" aria-label="Resell">
-          <Logo />
+          <Logo tone="white" size={30} />
         </Link>
         <div className="flex items-center gap-1">
           {user && <Bell href={`${base}/notifications`} unread={unread} ar={ar} />}
           <Link href={`${base}/list-your-plot`} className="inline-flex min-h-11 items-center bg-white px-3 text-sm font-semibold text-navy">
             {t.nav.listPlot}
           </Link>
-          <details className="group">
-            <summary aria-label={t.nav.menu} className="flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center text-2xl text-white [&::-webkit-details-marker]:hidden">
-              <span aria-hidden="true" className="group-open:hidden">☰</span>
-              <span aria-hidden="true" className="hidden group-open:inline">✕</span>
-            </summary>
-            <nav aria-label={t.nav.menu} className="absolute inset-x-0 top-full z-50 flex max-h-[80vh] flex-col overflow-y-auto bg-navy px-4 pb-4 shadow-lg">
+          <MobileMenu label={t.nav.menu}>
               {links.map((l) => (
                 <Link key={l.href} href={l.href} className={menuLink}>
                   {l.label}
@@ -102,15 +99,14 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
               <Link href={`/${other}`} hrefLang={other} className={menuLink}>
                 {t.nav.otherLanguage}
               </Link>
-            </nav>
-          </details>
+          </MobileMenu>
         </div>
       </div>
 
       {/* الشاشات الأكبر */}
       <div className="mx-auto hidden min-h-[68px] max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-3 md:flex md:px-8">
         <Link href={base} className="flex items-center gap-3 text-white no-underline">
-          <Logo />
+          <Logo tone="white" size={30} />
           <span className="hidden border-s border-navy-soft ps-3 text-sm text-[#B9C3DE] lg:inline">{t.brand.tagline}</span>
         </Link>
 
@@ -131,7 +127,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
               <Bell href={`${base}/notifications`} unread={unread} ar={ar} />
               <Link href={dash!} className="flex flex-col px-2 py-1 leading-tight text-white hover:text-[#D6DCEE]">
                 <span className="font-semibold">{user.name}</span>
-                <span className="text-xs text-[#B9C3DE]">{label(ROLE, user.role, locale)}</span>
+                <span className="text-[13px] text-[#B9C3DE]">{label(ROLE, user.role, locale)}</span>
               </Link>
               {user.role !== "CLIENT" && (
                 <Link href={`${base}/account`} className="text-[#D6DCEE] hover:text-white">
@@ -157,7 +153,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
         {staffLinks.length > 0 && (
           <nav aria-label={ar ? "لوحات الفريق" : "Team dashboards"} className="flex w-full flex-wrap gap-1 border-t border-navy-soft pt-2 text-sm">
             {staffLinks.map((l) => (
-              <Link key={l.href} href={l.href} className="inline-flex min-h-9 items-center bg-navy-soft px-3 text-[#D6DCEE] hover:text-white">
+              <Link key={l.href} href={l.href} className="inline-flex min-h-11 items-center bg-navy-soft px-3 text-[#D6DCEE] hover:text-white">
                 {l.label}
               </Link>
             ))}

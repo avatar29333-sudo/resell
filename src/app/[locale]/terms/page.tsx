@@ -30,6 +30,20 @@ export default async function TermsPage({ params }: { params: Promise<{ locale: 
       ),
     ],
     [
+      L("مصاريف التحويل", "Transfer fees"),
+      L(
+        "أي عمولات أو مصاريف تحويل بنكي يتحملها المحوَّل له، ولا تتحملها المنصة. عمولة المنصة بتتحسب على الثمن المتفق ولازم توصل كاملة، والفاتورة ما تعتبرش مدفوعة إلا بوصول المبلغ كامل. أقساط الجهاز بتتدفع للجهاز مباشرة ومش بتعدّي على المنصة.",
+        "Any bank transfer fees or charges are borne by the recipient, never by the platform. The platform commission is calculated on the agreed price and must arrive in full; an invoice counts as paid only when the full amount arrives. Authority installments are paid to the authority directly and never pass through the platform.",
+      ),
+    ],
+    [
+      L("سرية المعلومات وعدم بيعها", "Confidentiality and no sale of data"),
+      L(
+        "المعلومات المرفوعة على المنصة سرية، ما بتتعرضش للطرف الآخر إلا بموافقة صاحبها، وما بتتباعش ولا بتتشارك لأي جهة لأغراض تسويقية. المشاركة بتكون مع الجهات اللازمة لإتمام الصفقة بس (الجهاز، بنك الضمان، مزوّد التوقيع، التخزين، الرسائل).",
+        "Information uploaded to the platform is confidential, shown to the other party only with its owner's consent, and never sold or shared for marketing. It is shared only with parties needed to complete the deal (the authority, the escrow bank, the e-signature provider, storage, messaging).",
+      ),
+    ],
+    [
       L("العربون", "Deposit"),
       L(
         "المنصة ما بتمسكش أي فلوس. العربون بيتحوّل لحساب ضمان عند [البنك الشريك]، وبيترد للمشتري كامل لو الجهاز رفض التنازل.",

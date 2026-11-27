@@ -61,7 +61,7 @@ export default async function InspectionReport({ params }: { params: Promise<{ l
       <div className="flex flex-wrap items-center justify-between gap-3 border-b-[3px] border-navy pb-4">
         <div className="flex flex-col gap-1">
           <span className="text-navy">
-            <Logo />
+            <Logo tone="color" size={30} />
           </span>
           <h1 className="text-2xl font-bold">{L("تقرير معاينة قطعة", "Plot inspection report")}</h1>
           <span className="text-sm text-muted">
@@ -102,7 +102,7 @@ export default async function InspectionReport({ params }: { params: Promise<{ l
           <h2 className="text-lg font-bold">{L("حدود القطعة", "Plot boundary")}</h2>
           <PlotMap polygon={geo.polygon} label={L("خريطة حدود القطعة", "Map of the plot boundary")} height={300} />
           {geo.center && (
-            <span className="text-xs text-muted" dir="ltr">
+            <span className="text-[13px] text-muted" dir="ltr">
               {geo.center[0].toFixed(6)}, {geo.center[1].toFixed(6)} (WGS84)
             </span>
           )}
@@ -116,7 +116,7 @@ export default async function InspectionReport({ params }: { params: Promise<{ l
             {photos.map((p) => (
               <figure key={p.id} className="flex flex-col gap-1">
                 <img src={`/api/files/${p.id}`} alt={L("صورة من موقع القطعة", "Photo of the plot site")} className="aspect-[4/3] w-full border border-line object-cover" />
-                <figcaption className="text-xs text-muted">{date(p.createdAt, locale)}</figcaption>
+                <figcaption className="text-[13px] text-muted">{date(p.createdAt, locale)}</figcaption>
               </figure>
             ))}
           </div>
@@ -149,7 +149,7 @@ export default async function InspectionReport({ params }: { params: Promise<{ l
         </table>
       </section>
 
-      <p className="border-t border-line pt-3 text-xs leading-6 text-muted">
+      <p className="border-t border-line pt-3 text-[13px] leading-6 text-muted">
         {L(
           "التقرير ده من واقع معاينة مندوب Resell ومراجعة المحامي للمستندات المرفوعة، وما بيغنيش عن إفادة الجهاز الرسمية. نسبة التنفيذ النهائية بيحددها جهاز المدينة.",
           "This report reflects the Resell agent's inspection and the lawyer's review of uploaded documents. It does not replace the official authority statement; the final construction percentage is set by the city authority.",

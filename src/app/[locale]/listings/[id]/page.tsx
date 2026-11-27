@@ -10,8 +10,8 @@ import { latestRate, totalEgp } from "@/lib/listing";
 import { date, daysUntil, money, num, toNum, tr } from "@/lib/format";
 import { districtName } from "@/lib/district";
 import { CITY, DEAL_STAGE, DOC_STATUS, DOC_TYPE, LISTING_STATUS, PAYMENT_STATUS, PRICE_TYPE, label, toneOf } from "@/lib/labels";
-import { Badge, Card, Container, DL, FileLink, Notice, PageHeader, btn } from "@/components/ui";
-import { expressInterest } from "../actions";
+import { Badge, Card, Container, DL, FileLink, Notice, PageHeader, btn, field } from "@/components/ui";
+import { expressInterest, referBuyer } from "../actions";
 import { approximateCenter, plotGeo } from "@/lib/geo";
 import { getSetting } from "@/lib/settings";
 import { PlotMap } from "@/components/PlotMap";
@@ -20,7 +20,7 @@ import { ShareButtons } from "@/components/ShareButtons";
 import { ensureReferralCode } from "@/lib/referral";
 import { siteUrl } from "@/lib/meta";
 
-type Props = { params: Promise<{ locale: string; id: string }> };
+type Props = { params: Promise<{ locale: string; id: string }>; searchParams: Promise<{ ok?: string; err?: string }> };
 
 /** UX-08: «أرض 405م² · القاهرة الجديدة — المرحلة الرابعة · Resell» + وصف للمشاركة */
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -37,7 +37,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title, description, openGraph: { title: `${title} · Resell`, description, type: "website" }, alternates: { languages: { ar: `/ar/listings/${id}`, en: `/en/listings/${id}` } } };
 }
 
-export default async function ListingPage({ params }: Props) {
+export default async function ListingPage({ params, searchParams }: Props) {
+  const sp = await searchParams;
   const { locale, id } = await params;
   if (!isLocale(locale)) notFound();
   const L = tr(locale);
@@ -64,7 +65,7 @@ export default async function ListingPage({ params }: Props) {
   const myDeal = user
     ? await db.deal.findFirst({
         where: { listingId: id, buyerId: user.id, status: { in: ["ACTIVE", "ON_HOLD", "COMPLETED"] } },
-        include: { contracts: true, listing: true, documents: { select: { type: true, status: true } } },
+        include: { contracts: true, listing: true, documents: { select: { type: true, status: true } }, disclosures: { where: { revokedAt: null } } },
         orderBy: { createdAt: "desc" },
       })
     : null;
@@ -184,7 +185,7 @@ export default async function ListingPage({ params }: Props) {
                 <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                   <span className="flex items-center gap-2">
                     {canSeeFiles ? <FileLink id={d.id}>{label(DOC_TYPE, d.type, locale)}</FileLink> : <span>{label(DOC_TYPE, d.type, locale)}</span>}
-                    {d.version > 1 && <span className="text-xs text-muted">v{d.version}</span>}
+                    {d.version > 1 && <span className="text-[13px] text-muted">v{d.version}</span>}
                   </span>
                   <Badge tone={toneOf(d.status)}>{label(DOC_STATUS, d.status, locale)}</Badge>
                 </li>
@@ -294,6 +295,22 @@ export default async function ListingPage({ params }: Props) {
               <p className="text-muted">{L("القطعة دي في صفقة دلوقتي.", "This plot is currently in a deal.")}</p>
             )}
           </Card>
+          {/* PUB-03: الشريك يحيل مشتري (بموافقته) — الصفقة بتتسجل باسمه */}
+          {user?.role === "PARTNER_BROKER" && listing.status === "PUBLISHED" && (
+            <Card title={<span id="refer">{L("أحِل مشتري للقطعة دي", "Refer a buyer to this plot")}</span>}>
+              {sp.ok === "referred" && <Notice tone="green">{L("اتسجلت الإحالة وبعتنا للمشتري رابط القطعة.", "Referral recorded and the buyer got the link.")}</Notice>}
+              {sp.err?.startsWith("refer_") && <Notice tone="red">{L("كمّل بيانات المشتري وأكّد موافقته (ومينفعش تحيل البائع أو نفسك).", "Complete the buyer's details and confirm their consent (not the seller or yourself).")}</Notice>}
+              <form action={referBuyer.bind(null, locale, id)} className="flex flex-col gap-2">
+                <input name="buyerName" required minLength={3} aria-label={L("اسم المشتري", "Buyer name")} placeholder={L("اسم المشتري", "Buyer name")} className={field} />
+                <input name="buyerPhone" required dir="ltr" inputMode="tel" aria-label={L("موبايل المشتري", "Buyer mobile")} placeholder="+20 10 …" className={`${field} text-start`} />
+                <label className="flex items-start gap-2 text-sm">
+                  <input type="checkbox" name="buyerConsent" required className="mt-1 size-5" />
+                  {L("المشتري موافق إن بياناته تتسجل ويوصله رابط القطعة", "The buyer agrees to be registered and receive the plot link")}
+                </label>
+                <button className={`${btn.secondary} self-start`}>{L("سجّل الإحالة", "Record referral")}</button>
+              </form>
+            </Card>
+          )}
         </aside>
       </Container>
     </>

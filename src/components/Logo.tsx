@@ -1,29 +1,37 @@
-type Props = { className?: string; size?: number };
+// شعار Resell (مجموعة الشعار من صاحب المشروع) — الاتجاه «ب»: سهم البيع + علامة الصح
+type Props = { className?: string; size?: number; tone?: "color" | "white" | "mono" };
 
-// شعار Resell: مربع القطعة مقسوم — نفس الرمز اللي في التصميم
-export function LogoMark({ className, size = 26 }: Props) {
+const ARC = "M49.34 18.46A22 22 0 1 1 23.76 11.60";
+const HEAD = "M35.17 10.23L19.09 3.81L26.59 20.18Z";
+const CHECK = "M21 32.5l7.5 7.5L43 25";
+const WORD = "M26.6 58.8V42.4H47.7Q54.4 42.4 58.0 39.0Q61.6 35.6 61.6 29.7Q61.6 24.4 58.1 20.8Q54.5 17.3 47.9 17.3H26.6V0.0H50.4Q60.3 0.0 67.8 3.8Q75.4 7.5 79.6 14.2Q83.9 20.8 83.9 29.5Q83.9 38.2 79.6 44.8Q75.4 51.4 67.7 55.1Q60.1 58.8 49.7 58.8ZM9.6 100.0V0.0H31.9V100.0ZM64.0 100.0 32.9 56.9 53.3 51.4 90.4 100.0Z M132.6 101.6Q121.4 101.6 112.7 97.0Q104.0 92.4 99.0 84.1Q94.1 75.9 94.1 65.6Q94.1 55.2 98.9 47.1Q103.8 39.0 112.2 34.3Q120.5 29.6 131.0 29.6Q141.2 29.6 149.0 34.0Q156.8 38.4 161.3 46.2Q165.7 54.0 165.7 64.0Q165.7 65.9 165.5 67.9Q165.3 70.0 164.7 72.7L105.4 72.8V57.9L155.5 57.8L146.2 64.0Q146.0 58.1 144.3 54.2Q142.6 50.3 139.3 48.2Q136.0 46.2 131.2 46.2Q126.1 46.2 122.3 48.5Q118.6 50.8 116.5 55.1Q114.4 59.3 114.4 65.4Q114.4 71.5 116.6 75.8Q118.8 80.2 122.9 82.5Q126.9 84.8 132.4 84.8Q137.5 84.8 141.6 83.1Q145.8 81.3 148.9 77.8L160.8 89.7Q155.7 95.6 148.4 98.6Q141.2 101.6 132.6 101.6Z M199.9 101.7Q193.8 101.7 187.9 100.1Q182.0 98.6 177.0 95.7Q172.0 92.8 168.4 89.0L180.7 76.5Q184.1 80.2 188.8 82.2Q193.5 84.3 199.0 84.3Q202.8 84.3 204.9 83.1Q206.9 82.0 206.9 80.0Q206.9 77.5 204.5 76.1Q202.0 74.8 198.2 73.7Q194.3 72.7 190.1 71.4Q185.8 70.1 182.0 67.8Q178.2 65.6 175.8 61.5Q173.4 57.5 173.4 51.3Q173.4 44.6 176.8 39.7Q180.2 34.8 186.4 32.0Q192.6 29.2 201.0 29.2Q209.8 29.2 217.2 32.2Q224.6 35.3 229.3 41.2L217.0 53.7Q213.7 49.9 209.7 48.3Q205.7 46.7 201.8 46.7Q198.2 46.7 196.3 47.8Q194.5 48.9 194.5 50.8Q194.5 53.0 196.9 54.2Q199.3 55.5 203.1 56.5Q206.9 57.5 211.2 58.9Q215.4 60.3 219.3 62.7Q223.1 65.2 225.5 69.2Q227.9 73.2 227.9 79.7Q227.9 89.8 220.3 95.8Q212.7 101.7 199.9 101.7Z M272.2 101.6Q261.0 101.6 252.3 97.0Q243.6 92.4 238.7 84.1Q233.7 75.9 233.7 65.6Q233.7 55.2 238.6 47.1Q243.5 39.0 251.8 34.3Q260.2 29.6 270.7 29.6Q280.9 29.6 288.7 34.0Q296.5 38.4 300.9 46.2Q305.4 54.0 305.4 64.0Q305.4 65.9 305.2 67.9Q305.0 70.0 304.4 72.7L245.0 72.8V57.9L295.2 57.8L285.8 64.0Q285.7 58.1 284.0 54.2Q282.3 50.3 279.0 48.2Q275.6 46.2 270.8 46.2Q265.7 46.2 262.0 48.5Q258.2 50.8 256.2 55.1Q254.1 59.3 254.1 65.4Q254.1 71.5 256.3 75.8Q258.5 80.2 262.5 82.5Q266.6 84.8 272.1 84.8Q277.2 84.8 281.3 83.1Q285.4 81.3 288.5 77.8L300.4 89.7Q295.3 95.6 288.1 98.6Q280.9 101.6 272.2 101.6Z M314.4 100.0V-2.8H336.1V100.0Z M350.0 100.0V-2.8H371.7V100.0Z";
+
+const tones = {
+  color: { ring: "#0A1944", check: "#2B55D6", word: "#0A1944" },
+  white: { ring: "#FFFFFF", check: "#8FA6EA", word: "#FFFFFF" },
+  mono: { ring: "currentColor", check: "currentColor", word: "currentColor" },
+};
+
+export function LogoMark({ className, size = 28, tone = "color" }: Props) {
+  const t = tones[tone];
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 26 26"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      aria-hidden="true"
-      className={className}
-    >
-      <rect x="2" y="2" width="22" height="22" />
-      <path d="M2 10h22M13 10v14" />
+    <svg width={size} height={size} viewBox="0 0 64 64" role="img" aria-label="Resell" className={className}>
+      <path d={ARC} fill="none" stroke={t.ring} strokeWidth={7.5} />
+      <path d={HEAD} fill={t.ring} />
+      <path d={CHECK} fill="none" stroke={t.check} strokeWidth={7.5} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
-export function Logo({ className }: { className?: string }) {
+export function Logo({ className, size = 32, tone = "color" }: Props) {
+  const t = tones[tone];
+  const wordH = size * 0.46 * (100 / 64);
   return (
-    <span className={`inline-flex items-center gap-2.5 ${className ?? ""}`} dir="ltr">
-      <span className="text-[22px] font-bold tracking-wide">Resell</span>
-      <LogoMark />
+    <span className={`inline-flex items-center ${className ?? ""}`} style={{ gap: size * 0.2 }} dir="ltr">
+      <LogoMark size={size} tone={tone} />
+      <svg height={wordH} viewBox="0 0 379.3 100" aria-hidden="true">
+        <path d={WORD} fill={t.word} />
+      </svg>
     </span>
   );
 }
