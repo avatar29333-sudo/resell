@@ -13,7 +13,35 @@ import { can, subject } from "@/lib/authz";
 import { leastLoaded } from "@/lib/assign";
 import { validatePlotInput, type PlotErrors } from "@/lib/plot-input";
 
-export type ListState = { error?: string; fieldErrors?: PlotErrors };
+export type ListState = { error?: string; fieldErrors?: PlotErrors & Partial<Record<"allocation" | "receipts" | "statement", string>> };
+
+const FILE_FIELDS: [string, DocumentType][] = [
+  ["allocation", "ALLOCATION_LETTER"],
+  ["receipts", "PAYMENT_RECEIPT"],
+  ["statement", "AUTHORITY_STATEMENT"],
+];
+
+/**
+ * UX-01/UX-02: رفع مؤقت أول ما الملف يتختار — بيرجع id بيتحفظ في الفورم والمسودة،
+ * فلو حصل خطأ أو الصفحة اتقفلت الملف ما يضيعش. بيتربط بالعرض لما يتبعت.
+ */
+export async function uploadDraftFile(locale: string, field: string, form: FormData): Promise<{ id?: string; name?: string; error?: string }> {
+  const l = isLocale(locale) ? locale : "ar";
+  const ar = l === "ar";
+  const user = await requireUser(l, `/${l}/list-your-plot`);
+  if (!can(subject(user), "listing.create", {}).allowed) return { error: ar ? "لازم توثّق هويتك الأول." : "Verify your ID first." };
+  const type = FILE_FIELDS.find(([f]) => f === field)?.[1];
+  if (!type) return { error: "field" };
+  const r = await fileFromForm(form, "file");
+  if ("error" in r && r.error) return { error: ar ? "الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا" : "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB" };
+  if (!r.file) return { error: ar ? "اختار ملف" : "Choose a file" };
+  const s = await saveFile(r.file.data, r.file.type);
+  const d = await db.document.create({
+    data: { type, ownerId: user.id, uploadedById: user.id, storageKey: s.key, sha256: s.sha256, sizeBytes: s.sizeBytes, fileName: r.file.name, mimeType: r.file.type },
+  });
+  await audit(user.id, "document.draft_upload", "Document", d.id, { type });
+  return { id: d.id, name: r.file.name };
+}
 
 const FIELD_MSG: Record<string, Record<string, [string, string]>> = {
   city: { required: ["اختار المدينة", "Choose the city"] },
@@ -62,18 +90,24 @@ export async function createListing(locale: string, _prev: ListState, form: Form
   const deadline = v.values.deadline;
 
   // الملفات: خطاب التخصيص إجباري
-  const files: [string, DocumentType][] = [
-    ["allocation", "ALLOCATION_LETTER"],
-    ["receipts", "PAYMENT_RECEIPT"],
-    ["statement", "AUTHORITY_STATEMENT"],
-  ];
+  // UX-01: الملف ممكن يكون اترفع مؤقتاً أول ما اتختار (id) أو جاي مع الفورم
   const uploads = [];
-  for (const [field, type] of files) {
+  const drafts: string[] = [];
+  for (const [field, type] of FILE_FIELDS) {
+    const draftId = String(form.get(`${field}Id`) ?? "");
+    if (draftId) {
+      const d = await db.document.findFirst({ where: { id: draftId, ownerId: user.id, uploadedById: user.id, type, listingId: null, plotId: null, dealId: null, serviceRequestId: null } });
+      if (d) {
+        drafts.push(d.id);
+        continue;
+      }
+    }
     const r = await fileFromForm(form, field);
-    if ("error" in r && r.error) return { error: ar ? "كل ملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا" : "Each file must be a PDF or image (JPG/PNG/WebP) under 4 MB" };
+    if ("error" in r && r.error) return { error: ar ? "كل ملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا" : "Each file must be a PDF or image (JPG/PNG/WebP) under 4 MB", fieldErrors: { [field]: "file" } };
     if (r.file) uploads.push({ ...r.file, docType: type });
   }
-  if (!uploads.some((u) => u.docType === "ALLOCATION_LETTER")) return { error: ar ? "خطاب التخصيص مطلوب" : "The allocation letter is required" };
+  const hasAllocation = uploads.some((u) => u.docType === "ALLOCATION_LETTER") || (await db.document.count({ where: { id: { in: drafts }, type: "ALLOCATION_LETTER" } })) > 0;
+  if (!hasAllocation) return { error: ar ? "خطاب التخصيص مطلوب" : "The allocation letter is required", fieldErrors: { allocation: "required" } };
 
   // كشف التكرار: نفس القطعة معروضة بالفعل؟
   const existingPlot = await db.plot.findUnique({ where: { city_district_code: { city: city as City, district, code } } });
@@ -120,6 +154,8 @@ export async function createListing(locale: string, _prev: ListState, form: Form
     },
   });
 
+  // الملفات اللي اترفعت مؤقتاً بتتربط بالعرض
+  if (drafts.length) await db.document.updateMany({ where: { id: { in: drafts } }, data: { listingId: listing.id, plotId: plot.id } });
   for (const u of uploads) {
     const s = await saveFile(u.data, u.type);
     await db.document.create({
@@ -137,7 +173,7 @@ export async function createListing(locale: string, _prev: ListState, form: Form
       },
     });
   }
-  await audit(user.id, "listing.create", "Listing", listing.id, { plotId: plot.id, files: uploads.length, brokerId });
+  await audit(user.id, "listing.create", "Listing", listing.id, { plotId: plot.id, files: uploads.length + drafts.length, brokerId });
   if (brokerId) await audit(null, "listing.assign_broker", "Listing", listing.id, { before: null, after: brokerId, auto: true });
   await notify(brokerId ? [brokerId] : await idsByRole("BROKER_LEAD"), {
     kind: "listing.new",

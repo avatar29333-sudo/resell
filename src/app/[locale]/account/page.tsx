@@ -24,6 +24,7 @@ import {
   toneOf,
 } from "@/lib/labels";
 import { Badge, Card, Container, DL, Empty, Notice, PageHeader, btn, field, labelCls } from "@/components/ui";
+import { ClearDraft } from "../list-your-plot/ClearDraft";
 import { MiniSteps } from "@/components/MiniSteps";
 import { createBuyRequest, setBuyRequestStatus, setMyListingStatus, submitKyc, uploadNewVersion } from "./actions";
 
@@ -119,6 +120,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
       />
       <Container className="flex flex-col gap-6">
         {sp.welcome && <Notice tone="green">{L("حسابك اتعمل. وثّق هويتك عشان تقدر تبيع أو تشتري.", "Your account is ready. Verify your ID to buy or sell.")}</Notice>}
+        {sp.listed && <ClearDraft />}
         {sp.listed && <Notice tone="green">{L("قطعتك وصلت وهي دلوقتي قيد المراجعة. هنبلغك على واتساب.", "Your plot was received and is now in review. We'll update you on WhatsApp.")}</Notice>}
         {sp.rescue && (
           <Notice tone="amber">
