@@ -9,7 +9,7 @@ import { CITY_KEYS } from "@/lib/labels";
 import type { City } from "@prisma/client";
 import { idsByRole, notify } from "@/lib/notifications";
 
-export type RescueState = { ok?: boolean; error?: string; ref?: string };
+export type RescueState = { ok?: boolean; error?: string; ref?: string; fieldErrors?: Partial<Record<"name" | "phone" | "file", string>> };
 
 export async function submitRescue(locale: string, _prev: RescueState, form: FormData): Promise<RescueState> {
   const ar = locale === "ar";
@@ -21,12 +21,13 @@ export async function submitRescue(locale: string, _prev: RescueState, form: For
   const plotCode = String(form.get("plotCode") ?? "").trim() || null;
   const type = form.get("type") === "SITE_INSPECTION" ? "SITE_INSPECTION" : "DEADLINE_RESCUE";
 
-  if (name.length < 3) return { error: ar ? "اكتب اسمك" : "Enter your name" };
-  if (!isValidPhone(phone)) return { error: ar ? "رقم الواتساب مش صحيح — اكتبه بكود الدولة" : "Invalid WhatsApp number — include the country code" };
-
+  // UX-01: الخطأ بيرجع لكل حقل لوحده عشان يظهر جنبه
+  const fieldErrors: RescueState["fieldErrors"] = {};
+  if (name.length < 3) fieldErrors.name = ar ? "اكتب اسمك بالكامل" : "Enter your full name";
+  if (!isValidPhone(phone)) fieldErrors.phone = ar ? "رقم الواتساب مش صحيح — اكتبه بكود الدولة" : "Invalid WhatsApp number — include the country code";
   const upload = await fileFromForm(form, "file");
-  if ("error" in upload && upload.error)
-    return { error: ar ? "الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا" : "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB" };
+  if ("error" in upload && upload.error) fieldErrors.file = ar ? "الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا" : "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB";
+  if (Object.keys(fieldErrors).length) return { error: ar ? "راجع الخانات المعلّمة" : "Please check the highlighted fields", fieldErrors };
 
   const user = await getCurrentUser();
   const req = await db.serviceRequest.create({

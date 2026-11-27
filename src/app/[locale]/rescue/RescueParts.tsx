@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
+import { useKeptAction } from "@/components/useKeptAction";
 import type { Locale } from "@/i18n/config";
 import { tr } from "@/lib/format";
 import { CITY, CITY_KEYS, label } from "@/lib/labels";
@@ -62,10 +63,15 @@ export function RescueCalculator({ locale }: { locale: Locale }) {
 
 export function RescueForm({ locale }: { locale: Locale }) {
   const L = tr(locale);
-  const [state, action, pending] = useActionState(
-    (p: RescueState, f: FormData) => submitRescue(locale, p, f),
-    {} as RescueState,
-  );
+  // UX-01: الفورم ما يتمسحش لو السيرفر رجّع خطأ
+  const [state, onSubmit, pending] = useKeptAction((p: RescueState, f: FormData) => submitRescue(locale, p, f), {} as RescueState);
+  const fe = state.fieldErrors ?? {};
+  const Err = ({ k }: { k: keyof typeof fe }) =>
+    fe[k] ? (
+      <span role="alert" className="text-sm font-semibold text-[#A32020]">
+        {fe[k]}
+      </span>
+    ) : null;
   if (state.ok)
     return (
       <Notice tone="green">
@@ -74,7 +80,7 @@ export function RescueForm({ locale }: { locale: Locale }) {
       </Notice>
     );
   return (
-    <form action={action} className="flex flex-col gap-3.5 border border-line p-6">
+    <form onSubmit={onSubmit} className="flex flex-col gap-3.5 border border-line p-6">
       {state.error && (
         <p role="alert" className="border border-[#EFC4C4] bg-[#FBEAEA] px-3 py-2 text-[#A32020]">
           {state.error}
@@ -82,11 +88,13 @@ export function RescueForm({ locale }: { locale: Locale }) {
       )}
       <label className={labelCls}>
         {L("الاسم بالكامل", "Full name")}
-        <input name="name" required autoComplete="name" className={field} />
+        <input name="name" required minLength={3} autoComplete="name" aria-invalid={!!fe.name} className={field} />
+        <Err k="name" />
       </label>
       <label className={labelCls}>
         {L("رقم الواتساب", "WhatsApp number")}
-        <input name="phone" type="tel" required dir="ltr" placeholder="+966 5x xxx xxxx" className={`${field} text-start`} />
+        <input name="phone" type="tel" required dir="ltr" placeholder="+966 5x xxx xxxx" aria-invalid={!!fe.phone} className={`${field} text-start`} />
+        <Err k="phone" />
       </label>
       <div className="grid gap-3.5 sm:grid-cols-2">
         <label className={labelCls}>
@@ -113,7 +121,8 @@ export function RescueForm({ locale }: { locale: Locale }) {
       </label>
       <label className={labelCls}>
         {L("خطاب التخصيص (اختياري دلوقتي) — PDF أو صورة (JPG/PNG/WebP)", "Allocation letter (optional for now) — PDF or image (JPG/PNG/WebP)")}
-        <input name="file" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="border border-dashed border-[#C5CBD8] p-2.5" />
+        <input name="file" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" aria-invalid={!!fe.file} className="border border-dashed border-[#C5CBD8] p-2.5" />
+        <Err k="file" />
       </label>
       <button type="submit" disabled={pending} className={btn.primary}>
         {pending ? L("بنبعت…", "Sending…") : L("أرسل طلب الفحص", "Send inspection request")}
