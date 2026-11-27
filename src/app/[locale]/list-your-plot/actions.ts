@@ -9,6 +9,8 @@ import { fileFromForm, saveFile } from "@/lib/storage";
 import { CITY_KEYS } from "@/lib/labels";
 import { isLocale } from "@/i18n/config";
 import { idsByRole, notify } from "@/lib/notifications";
+import { can, subject } from "@/lib/authz";
+import { leastLoaded } from "@/lib/assign";
 
 export type ListState = { error?: string };
 
@@ -16,6 +18,14 @@ export async function createListing(locale: string, _prev: ListState, form: Form
   const l = isLocale(locale) ? locale : "ar";
   const ar = l === "ar";
   const user = await requireUser(l, `/${l}/list-your-plot`);
+  // 5.2: عرض قطعة للعميل/الشريك الموثّق بس — والقرار في السيرفر
+  const d = can(subject(user), "listing.create", {});
+  if (!d.allowed) {
+    await audit(user.id, "authz.denied", "Action", "listing.create", { reason: d.reason ?? "forbidden" });
+    return { error: ar ? "لازم توثّق هويتك الأول عشان تعرض قطعة." : "You need to verify your ID before listing a plot." };
+  }
+  const isPartner = user.role === "PARTNER_BROKER";
+  if (isPartner && form.get("clientConsent") !== "on") return { error: ar ? "لازم تأكد إن المالك موافق على العرض." : "Confirm the owner has consented to this listing." };
 
   const city = String(form.get("city") ?? "");
   const district = String(form.get("district") ?? "").trim();
@@ -73,10 +83,15 @@ export async function createListing(locale: string, _prev: ListState, form: Form
       },
     }));
 
+  // PERM-04: وسيط العرض = أقل وسيط عنده شغل (مش صاحب العرض)
+  const brokerId = await leastLoaded("BROKER", [user.id]);
   const listing = await db.listing.create({
     data: {
       plotId: plot.id,
       sellerId: user.id,
+      submittedById: user.id,
+      assignedBrokerId: brokerId,
+      clientConsentAt: isPartner ? new Date() : null,
       priceType,
       price,
       currency: "EGP",
@@ -102,11 +117,12 @@ export async function createListing(locale: string, _prev: ListState, form: Form
       },
     });
   }
-  await audit(user.id, "listing.create", "Listing", listing.id, { plotId: plot.id, files: uploads.length });
-  await notify(await idsByRole("BROKER"), {
+  await audit(user.id, "listing.create", "Listing", listing.id, { plotId: plot.id, files: uploads.length, brokerId });
+  if (brokerId) await audit(null, "listing.assign_broker", "Listing", listing.id, { before: null, after: brokerId, auto: true });
+  await notify(brokerId ? [brokerId] : await idsByRole("BROKER_LEAD"), {
     kind: "listing.new",
-    ar: [`عرض جديد مستني المراجعة من ${user.name}`, `${area} م² — ${district}`],
-    en: [`New listing to review from ${user.name}`, `${area} m² — ${district}`],
+    ar: [`عرض جديد مسند ليك مستني المراجعة من ${user.name}`, `${area} م² — ${district}`],
+    en: [`New listing assigned to you for review from ${user.name}`, `${area} m² — ${district}`],
     link: `/broker?tab=queue`,
   });
   redirect(`/${l}/account?listed=1`);

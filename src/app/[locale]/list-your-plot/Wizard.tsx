@@ -7,7 +7,7 @@ import { CITY, CITY_KEYS, label } from "@/lib/labels";
 import { btn, field, labelCls } from "@/components/ui";
 import { createListing, type ListState } from "./actions";
 
-export function Wizard({ locale }: { locale: Locale }) {
+export function Wizard({ locale, partner = false }: { locale: Locale; partner?: boolean }) {
   const L = tr(locale);
   const [step, setStep] = useState(0);
   const [priceType, setPriceType] = useState("ALL_INCLUSIVE");
@@ -136,6 +136,12 @@ export function Wizard({ locale }: { locale: Locale }) {
           {L("آخر إفادة من الجهاز", "Latest authority statement")}
           <input name="statement" type="file" accept="application/pdf,image/*" className="border border-dashed border-line p-2.5" />
         </label>
+        {partner && (
+          <label className="flex min-h-11 items-center gap-2 text-sm">
+            <input type="checkbox" name="clientConsent" className="size-4" />
+            {L("أؤكد إن مالك القطعة موافق كتابةً على عرضها عن طريقي", "I confirm the plot owner has agreed in writing to list it through me")}
+          </label>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-3">

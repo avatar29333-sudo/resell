@@ -1,9 +1,14 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import type { User } from "@prisma/client";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { STAGES } from "@/lib/deal-machine";
+import { can, listingCtx, subject } from "@/lib/authz";
+import { scopeDealsFor, scopeKycQueueFor, scopePrivateListingsFor, scopeServiceRequestsFor } from "@/lib/authz/scope";
+import { errorText } from "@/lib/errors";
+import { getSetting } from "@/lib/settings";
 import { date, daysUntil, money, num, toNum, tr } from "@/lib/format";
 import {
   CITY,
@@ -19,38 +24,42 @@ import {
   label,
   toneOf,
 } from "@/lib/labels";
-import { Badge, Card, Container, Empty, FileLink, PageHeader, Stat, Table, Tabs, btn, field } from "@/components/ui";
-import { kycDecision, moveListing, sendDocsToLawyer, updateServiceRequest } from "./actions";
+import { Badge, Card, Container, Empty, FileLink, Notice, PageHeader, Stat, Table, Tabs, btn, field } from "@/components/ui";
+import { AdminReason } from "@/components/AdminReason";
+import { assignListingBroker, kycDecision, moveListing, sendDocsToLawyer, updateServiceRequest } from "./actions";
 
-type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string }> };
+type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string }> };
 
 export default async function BrokerPage({ params, searchParams }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const sp = await searchParams;
   const L = tr(locale);
-  const me = await requireUser(locale, `/${locale}/broker`, ["ADMIN", "BROKER", "AGENT"]);
+  const me = await requireUser(locale, `/${locale}/broker`, ["ADMIN", "BROKER", "BROKER_LEAD", "AGENT"]);
+  // SEC-04: المندوب ليه صفحته الخاصة، ما يشوفش طابور التوثيق ولا الهويات
+  if (me.role === "AGENT") redirect(`/${locale}/agent?from=broker`);
   const tab = ["queue", "deals", "services", "commissions"].includes(sp.tab ?? "") ? sp.tab! : "queue";
-  const isAgent = me.role === "AGENT";
-  const mine = isAgent ? { agentId: me.id } : {};
 
+  const listingScope = scopePrivateListingsFor(me);
+  const dealScope = scopeDealsFor(me);
   const [reviewListings, verifiedListings, kycPending, newServices, activeDeals, counts] = await Promise.all([
-    db.listing.count({ where: { status: "IN_REVIEW" } }),
-    db.listing.count({ where: { status: "VERIFIED" } }),
-    db.kycProfile.count({ where: { status: "PENDING" } }),
-    db.serviceRequest.count({ where: { status: "NEW" } }),
-    db.deal.count({ where: { status: "ACTIVE", ...mine } }),
-    db.deal.groupBy({ by: ["stage"], where: { status: { in: ["ACTIVE", "ON_HOLD"] }, ...mine }, _count: true }),
+    db.listing.count({ where: { AND: [listingScope, { status: "IN_REVIEW" }] } }),
+    db.listing.count({ where: { AND: [listingScope, { status: "VERIFIED" }] } }),
+    db.kycProfile.count({ where: scopeKycQueueFor(me) }),
+    db.serviceRequest.count({ where: { AND: [scopeServiceRequestsFor(me), { status: "NEW" }] } }),
+    db.deal.count({ where: { AND: [dealScope, { status: "ACTIVE" }] } }),
+    db.deal.groupBy({ by: ["stage"], where: { AND: [dealScope, { status: { in: ["ACTIVE", "ON_HOLD"] } }] }, _count: true }),
   ]);
 
   const base = `/${locale}/broker`;
   return (
     <>
       <PageHeader
-        title={isAgent ? L("لوحة المندوب", "Field agent dashboard") : L("لوحة الوسيط", "Broker dashboard")}
-        subtitle={L("طابور التوثيق، الصفقات حسب المرحلة، وطلبات الخدمات.", "Verification queue, deals by stage and service requests.")}
+        title={me.role === "BROKER_LEAD" ? L("لوحة مسؤول الوسطاء", "Broker lead dashboard") : L("لوحة الوسيط", "Broker dashboard")}
+        subtitle={L("العروض المسندة ليك، طابور التوثيق، الصفقات حسب المرحلة، وطلبات الخدمات.", "Listings assigned to you, the verification queue, deals by stage and service requests.")}
       />
       <Container className="flex flex-col gap-6">
+        {sp.err && <Notice tone="red">{errorText(sp.err, locale === "ar")}</Notice>}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           <Stat label={L("عروض للمراجعة", "Listings to review")} value={num(reviewListings, locale)} href={`${base}?tab=queue`} />
           <Stat label={L("موثّقة ومستنية النشر", "Verified, to publish")} value={num(verifiedListings, locale)} href={`${base}?tab=queue`} />
@@ -69,34 +78,43 @@ export default async function BrokerPage({ params, searchParams }: Props) {
           ]}
         />
 
-        {tab === "queue" && <Queue locale={locale} canAct={!isAgent} />}
-        {tab === "deals" && <Deals locale={locale} counts={counts} status={sp.status} agentId={isAgent ? me.id : undefined} />}
-        {tab === "services" && <Services locale={locale} />}
-        {tab === "commissions" && <Commissions locale={locale} />}
+        {tab === "queue" && <Queue locale={locale} me={me} />}
+        {tab === "deals" && <Deals locale={locale} me={me} counts={counts} status={sp.status} />}
+        {tab === "services" && <Services locale={locale} me={me} />}
+        {tab === "commissions" && <Commissions locale={locale} me={me} />}
       </Container>
     </>
   );
 }
 
-async function Queue({ locale, canAct }: { locale: "ar" | "en"; canAct: boolean }) {
+async function Queue({ locale, me }: { locale: "ar" | "en"; me: User }) {
   const L = tr(locale);
-  const [listings, kyc] = await Promise.all([
+  const ar = locale === "ar";
+  const isAdmin = me.role === "ADMIN";
+  const canAssign = can(subject(me), "listing.assign", {}).allowed;
+  const [listings, kyc, brokers] = await Promise.all([
     db.listing.findMany({
-      where: { status: { in: ["IN_REVIEW", "VERIFIED"] } },
-      include: { plot: true, seller: true, documents: { where: { status: { not: "SUPERSEDED" } } } },
+      where: { AND: [scopePrivateListingsFor(me), { status: { in: ["IN_REVIEW", "VERIFIED"] } }] },
+      include: { plot: true, seller: true, assignedBroker: true, documents: { where: { status: { not: "SUPERSEDED" } } }, deals: { select: { stage: true, status: true } } },
       orderBy: { createdAt: "asc" },
     }),
-    db.kycProfile.findMany({ where: { status: "PENDING" }, include: { user: true }, orderBy: { createdAt: "asc" } }),
+    db.kycProfile.findMany({ where: scopeKycQueueFor(me), include: { user: true }, orderBy: { createdAt: "asc" } }),
+    canAssign ? db.user.findMany({ where: { role: { in: ["BROKER", "BROKER_LEAD"] }, status: "ACTIVE" }, orderBy: { name: "asc" } }) : Promise.resolve([]),
   ]);
   return (
     <>
       <Card title={L("العروض", "Listings")}>
         {listings.length === 0 ? (
-          <Empty>{L("الطابور فاضي.", "The queue is empty.")}</Empty>
+          <Empty>{L("مفيش عروض مسندة ليك في الطابور.", "No listings assigned to you in the queue.")}</Empty>
         ) : (
           <Table head={[L("القطعة", "Plot"), L("البائع", "Seller"), L("المستندات", "Documents"), L("الحالة", "Status"), L("الإجراء", "Action")]}>
             {listings.map((l) => {
-              const allocApproved = l.documents.some((d) => d.type === "ALLOCATION_LETTER" && d.status === "APPROVED");
+              const ctx = { listing: listingCtx(l) };
+              const p = (a: "listing.send_to_lawyer" | "listing.verify" | "listing.publish" | "listing.pause") => can(subject(me), a, ctx);
+              const send = p("listing.send_to_lawyer");
+              const verify = p("listing.verify");
+              const publish = p("listing.publish");
+              const pause = p("listing.pause");
               const uploaded = l.documents.some((d) => d.status === "UPLOADED");
               return (
                 <tr key={l.id}>
@@ -106,6 +124,9 @@ async function Queue({ locale, canAct }: { locale: "ar" | "en"; canAct: boolean 
                     </Link>
                     <div className="text-xs text-muted" dir="ltr">
                       {l.plot.code} · {num(l.plot.areaSqm, locale)} m²
+                    </div>
+                    <div className="text-xs text-muted">
+                      {L("الوسيط:", "Broker:")} {l.assignedBroker?.name ?? L("مش متسند", "Unassigned")}
                     </div>
                   </td>
                   <td>
@@ -126,30 +147,51 @@ async function Queue({ locale, canAct }: { locale: "ar" | "en"; canAct: boolean 
                     <Badge tone={toneOf(l.status)}>{label(LISTING_STATUS, l.status, locale)}</Badge>
                   </td>
                   <td>
-                    {canAct && (
-                      <div className="flex flex-col items-start gap-1">
-                        {uploaded && (
-                          <form action={sendDocsToLawyer.bind(null, locale, l.id)}>
-                            <button className={`${btn.small} border border-brand text-brand`}>{L("ابعت للمحامي", "Send to lawyer")}</button>
-                          </form>
-                        )}
-                        {l.status === "IN_REVIEW" && (
-                          <form action={moveListing.bind(null, locale, l.id, "VERIFIED")}>
-                            <button disabled={!allocApproved} title={allocApproved ? "" : L("مستني اعتماد المحامي لخطاب التخصيص", "Waiting for lawyer approval of the allocation letter")} className={`${btn.small} bg-ok text-white disabled:opacity-40`}>
-                              {L("وثّق العرض", "Verify")}
-                            </button>
-                          </form>
-                        )}
-                        {l.status === "VERIFIED" && (
-                          <form action={moveListing.bind(null, locale, l.id, "PUBLISHED")}>
-                            <button className={`${btn.small} bg-brand text-white`}>{L("انشر", "Publish")}</button>
-                          </form>
-                        )}
-                        <form action={moveListing.bind(null, locale, l.id, "DRAFT")}>
+                    <div className="flex flex-col items-start gap-1">
+                      {uploaded && send.allowed && (
+                        <form action={sendDocsToLawyer.bind(null, locale, l.id)} className="flex flex-wrap gap-1">
+                          <AdminReason show={send.override} ar={ar} />
+                          <button className={`${btn.small} border border-brand text-brand`}>{L("ابعت للمحامي", "Send to lawyer")}</button>
+                        </form>
+                      )}
+                      {l.status === "IN_REVIEW" && (
+                        <form action={moveListing.bind(null, locale, l.id, "VERIFIED")} className="flex flex-wrap gap-1">
+                          <AdminReason show={verify.override} ar={ar} />
+                          <button
+                            disabled={!verify.allowed}
+                            title={verify.allowed ? "" : L("مستني اعتماد المحامي لخطاب التخصيص وإيصال السداد وإفادة الجهاز", "Waiting for lawyer approval of the allocation letter, payment receipt and authority statement")}
+                            className={`${btn.small} bg-ok text-white disabled:opacity-40`}
+                          >
+                            {L("وثّق العرض", "Verify")}
+                          </button>
+                        </form>
+                      )}
+                      {l.status === "VERIFIED" && publish.allowed && (
+                        <form action={moveListing.bind(null, locale, l.id, "PUBLISHED")} className="flex flex-wrap gap-1">
+                          <AdminReason show={publish.override} ar={ar} />
+                          <button className={`${btn.small} bg-brand text-white`}>{L("انشر", "Publish")}</button>
+                        </form>
+                      )}
+                      {pause.allowed && (
+                        <form action={moveListing.bind(null, locale, l.id, "DRAFT")} className="flex flex-wrap gap-1">
+                          <AdminReason show={pause.override} ar={ar} />
                           <button className={`${btn.small} text-[#A32020]`}>{L("رجّعه للبائع", "Return to seller")}</button>
                         </form>
-                      </div>
-                    )}
+                      )}
+                      {canAssign && (
+                        <form action={assignListingBroker.bind(null, locale, l.id)} className="flex flex-wrap items-center gap-1">
+                          <select name="brokerId" defaultValue={l.assignedBrokerId ?? ""} className={`${field} min-h-9 w-36`} aria-label={L("وسيط العرض", "Listing broker")}>
+                            <option value="">{L("مش متسند", "Unassigned")}</option>
+                            {brokers.map((b) => (
+                              <option key={b.id} value={b.id}>
+                                {b.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button className={`${btn.small} border border-line`}>{L("إسناد", "Assign")}</button>
+                        </form>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
@@ -163,33 +205,41 @@ async function Queue({ locale, canAct }: { locale: "ar" | "en"; canAct: boolean 
           <Empty>{L("مفيش هويات مستنية.", "No IDs waiting.")}</Empty>
         ) : (
           <Table head={[L("العميل", "Client"), L("الملفات", "Files"), L("القرار", "Decision")]}>
-            {kyc.map((k) => (
-              <tr key={k.id}>
-                <td>
-                  <div className="font-semibold">{k.user.name}</div>
-                  <div className="text-xs text-muted">
-                    <span dir="ltr">{k.user.phone}</span> · {label(COUNTRY, k.user.countryOfResidence, locale)}
-                  </div>
-                </td>
-                <td className="flex flex-col gap-1">
-                  {k.idDocumentId && <FileLink id={k.idDocumentId}>{k.idType === "PASSPORT" ? L("الباسبور", "Passport") : L("البطاقة", "National ID")}</FileLink>}
-                  {k.selfieDocumentId && <FileLink id={k.selfieDocumentId}>{L("الصورة الشخصية", "Selfie")}</FileLink>}
-                </td>
-                <td>
-                  {canAct && (
-                    <form action={kycDecision.bind(null, locale, k.id)} className="flex flex-wrap items-center gap-1.5">
-                      <button name="decision" value="APPROVED" className={`${btn.small} bg-ok text-white`}>
-                        {L("قبول", "Approve")}
-                      </button>
-                      <input name="reason" placeholder={L("سبب الرفض", "Reason if rejecting")} className={`${field} min-h-9 w-40`} />
-                      <button name="decision" value="REJECTED" className={`${btn.small} border border-[#A32020] text-[#A32020]`}>
-                        {L("رفض", "Reject")}
-                      </button>
-                    </form>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {kyc.map((k) => {
+              const adminOnly = k.user.kycRejections >= 3 && !isAdmin;
+              return (
+                <tr key={k.id}>
+                  <td>
+                    <div className="font-semibold">{k.user.name}</div>
+                    <div className="text-xs text-muted">
+                      <span dir="ltr">{k.user.phone}</span> · {label(COUNTRY, k.user.countryOfResidence, locale)}
+                    </div>
+                    {k.user.kycRejections > 0 && (
+                      <div className="text-xs text-[#A32020]">{L(`اترفض قبل كده ${num(k.user.kycRejections, locale)} مرة`, `Rejected ${k.user.kycRejections} time(s) before`)}</div>
+                    )}
+                  </td>
+                  <td className="flex flex-col gap-1">
+                    {k.idDocumentId && <FileLink id={k.idDocumentId}>{k.idType === "PASSPORT" ? L("الباسبور", "Passport") : L("البطاقة", "National ID")}</FileLink>}
+                    {k.selfieDocumentId && <FileLink id={k.selfieDocumentId}>{L("الصورة الشخصية", "Selfie")}</FileLink>}
+                  </td>
+                  <td>
+                    {adminOnly ? (
+                      <span className="text-xs text-muted">{L("محتاج قرار الأدمن (3 رفضات)", "Needs an admin decision (3 rejections)")}</span>
+                    ) : (
+                      <form action={kycDecision.bind(null, locale, k.id)} className="flex flex-wrap items-center gap-1.5">
+                        <button name="decision" value="APPROVED" className={`${btn.small} bg-ok text-white`}>
+                          {L("قبول", "Approve")}
+                        </button>
+                        <input name="reason" minLength={10} placeholder={L("سبب الرفض (10 حروف على الأقل)", "Rejection reason (10+ chars)")} className={`${field} min-h-9 w-48`} />
+                        <button name="decision" value="REJECTED" className={`${btn.small} border border-[#A32020] text-[#A32020]`}>
+                          {L("رفض", "Reject")}
+                        </button>
+                      </form>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </Table>
         )}
       </Card>
@@ -197,22 +247,12 @@ async function Queue({ locale, canAct }: { locale: "ar" | "en"; canAct: boolean 
   );
 }
 
-async function Deals({
-  locale,
-  counts,
-  status,
-  agentId,
-}: {
-  locale: "ar" | "en";
-  counts: { stage: string; _count: number }[];
-  status?: string;
-  agentId?: string;
-}) {
+async function Deals({ locale, me, counts, status }: { locale: "ar" | "en"; me: User; counts: { stage: string; _count: number }[]; status?: string }) {
   const L = tr(locale);
   const statuses = ["ACTIVE", "ON_HOLD", "COMPLETED", "CANCELLED"];
   const st = statuses.includes(status ?? "") ? status! : "ACTIVE";
   const deals = await db.deal.findMany({
-    where: { status: st as never, ...(agentId ? { agentId } : {}) },
+    where: { AND: [scopeDealsFor(me, { brokersCanReadAll: me.role === "BROKER" && (await getSetting("deals.unassignedBrokers")).access === "read" }), { status: st as never }] },
     include: { listing: { include: { plot: true } }, buyer: true, broker: true },
     orderBy: { stageChangedAt: "asc" },
   });
@@ -247,6 +287,7 @@ async function Deals({
                       {label(CITY, d.listing.plot.city, locale)} · #{d.id.slice(-6).toUpperCase()}
                     </span>
                     <span className="text-muted">{d.buyer.name}</span>
+                    {me.role !== "BROKER" && d.broker && <span className="text-xs text-muted">{d.broker.name}</span>}
                     <span className={`text-xs ${waited > 14 ? "font-semibold text-[#A32020]" : "text-muted"}`}>
                       {L(`في المرحلة من ${num(waited, locale)} يوم`, `${waited} days in stage`)}
                     </span>
@@ -261,11 +302,13 @@ async function Deals({
   );
 }
 
-async function Services({ locale }: { locale: "ar" | "en" }) {
+async function Services({ locale, me }: { locale: "ar" | "en"; me: User }) {
   const L = tr(locale);
+  const ar = locale === "ar";
+  const canAssign = can(subject(me), "service.assign", { serviceRequest: { requesterId: "", assignedToId: null } });
   const [rows, team] = await Promise.all([
-    db.serviceRequest.findMany({ include: { assignedTo: true, documents: true }, orderBy: [{ status: "asc" }, { createdAt: "desc" }] }),
-    db.user.findMany({ where: { role: { in: ["BROKER", "AGENT", "LAWYER"] } }, orderBy: { name: "asc" } }),
+    db.serviceRequest.findMany({ where: scopeServiceRequestsFor(me), include: { assignedTo: true, documents: true }, orderBy: [{ status: "asc" }, { createdAt: "desc" }] }),
+    db.user.findMany({ where: { role: { in: ["BROKER", "AGENT", "LAWYER"] }, status: "ACTIVE" }, orderBy: { name: "asc" } }),
   ]);
   return rows.length === 0 ? (
     <Empty>{L("مفيش طلبات.", "No requests.")}</Empty>
@@ -309,14 +352,19 @@ async function Services({ locale }: { locale: "ar" | "en" }) {
                   </option>
                 ))}
               </select>
-              <select name="assignedToId" defaultValue={r.assignedToId ?? ""} className={`${field} min-h-9 w-36`} aria-label={L("المسؤول", "Owner")}>
-                <option value="">{L("مش متسند", "Unassigned")}</option>
-                {team.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
+              {canAssign.allowed ? (
+                <select name="assignedToId" defaultValue={r.assignedToId ?? ""} className={`${field} min-h-9 w-36`} aria-label={L("المسؤول", "Owner")}>
+                  <option value="">{L("مش متسند", "Unassigned")}</option>
+                  {team.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-xs text-muted">{r.assignedTo?.name ?? L("مش متسند", "Unassigned")}</span>
+              )}
+              <AdminReason show={canAssign.override} ar={ar} />
               <button className={`${btn.small} border border-brand text-brand`}>{L("حفظ", "Save")}</button>
             </form>
           </td>
@@ -326,9 +374,10 @@ async function Services({ locale }: { locale: "ar" | "en" }) {
   );
 }
 
-async function Commissions({ locale }: { locale: "ar" | "en" }) {
+async function Commissions({ locale, me }: { locale: "ar" | "en"; me: User }) {
   const L = tr(locale);
   const rows = await db.commission.findMany({
+    where: { deal: scopeDealsFor(me) },
     include: { deal: { include: { listing: { include: { plot: true } } } } },
     orderBy: { createdAt: "desc" },
   });

@@ -1,15 +1,19 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { requireUser } from "@/lib/auth";
+import { can, subject } from "@/lib/authz";
 import { tr } from "@/lib/format";
-import { Card, Container, PageHeader } from "@/components/ui";
+import { Card, Container, Notice, PageHeader } from "@/components/ui";
 import { Wizard } from "./Wizard";
 
 export default async function ListYourPlotPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const L = tr(locale);
-  await requireUser(locale, `/${locale}/list-your-plot`);
+  const user = await requireUser(locale, `/${locale}/list-your-plot`);
+  const allowed = can(subject(user), "listing.create", {}).allowed;
+  const staff = !["CLIENT", "PARTNER_BROKER", "ADMIN"].includes(user.role);
 
   return (
     <>
@@ -21,9 +25,20 @@ export default async function ListYourPlotPage({ params }: { params: Promise<{ l
         )}
       />
       <Container className="max-w-3xl">
-        <Card>
-          <Wizard locale={locale} />
-        </Card>
+        {allowed ? (
+          <Card>
+            <Wizard locale={locale} partner={user.role === "PARTNER_BROKER"} />
+          </Card>
+        ) : staff ? (
+          <Notice tone="amber">{L("حسابات الفريق ما بتعرضش قطع. العرض بيتعمل من حساب المالك أو السمسار الشريك.", "Team accounts can't list plots. Listings are created by the owner or a partner broker.")}</Notice>
+        ) : (
+          <Notice tone="amber">
+            {L("لازم توثّق هويتك الأول عشان تعرض قطعة. التوثيق بياخد دقيقتين: صورة البطاقة أو الباسبور + صورة شخصية.", "You need to verify your ID before listing a plot. It takes two minutes: a photo of your ID or passport plus a selfie.")}{" "}
+            <Link href={`/${locale}/account#kyc`} className="font-semibold text-brand underline">
+              {L("وثّق هويتك", "Verify your ID")}
+            </Link>
+          </Notice>
+        )}
       </Container>
     </>
   );

@@ -4,7 +4,7 @@ import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { isStaff } from "@/lib/access";
-import { buyerCanSeeFiles, buyerCanSeePlotCode } from "@/lib/deal-machine";
+import { can, dealCtx, listingCtx, subject } from "@/lib/authz";
 import { latestRate, totalEgp } from "@/lib/listing";
 import { date, daysUntil, money, num, toNum, tr } from "@/lib/format";
 import { CITY, DEAL_STAGE, DOC_STATUS, DOC_TYPE, LISTING_STATUS, PAYMENT_STATUS, PRICE_TYPE, label, toneOf } from "@/lib/labels";
@@ -33,20 +33,26 @@ export default async function ListingPage({ params }: Props) {
   });
   if (!listing) notFound();
 
-  const owner = user?.id === listing.sellerId;
+  const owner = user?.id === listing.sellerId || (!!listing.submittedById && user?.id === listing.submittedById);
   const staff = isStaff(user);
-  // العروض اللي مش منشورة: صاحبها والفريق بس
-  if (!["PUBLISHED", "IN_DEAL", "SOLD"].includes(listing.status) && !owner && !staff) notFound();
+  const lc = listingCtx({ ...listing, deals: [] });
+  // العروض اللي مش منشورة: صاحبها والفريق المسند بس (PERM-02)
+  // PERM-07: عروض البائع الموقوف بتختفي من السجل العام
+  const hidden = !["PUBLISHED", "IN_DEAL", "SOLD"].includes(listing.status) || listing.seller.status === "SUSPENDED";
+  if (hidden && !can(subject(user), "listing.view_private", { listing: lc }).allowed) notFound();
 
   const myDeal = user
     ? await db.deal.findFirst({
         where: { listingId: id, buyerId: user.id, status: { in: ["ACTIVE", "ON_HOLD", "COMPLETED"] } },
-        include: { contracts: true },
+        include: { contracts: true, listing: true, documents: { select: { type: true, status: true } } },
         orderBy: { createdAt: "desc" },
       })
     : null;
-  const canSeeCode = owner || staff || (!!myDeal && buyerCanSeePlotCode(myDeal.stage, myDeal.contracts));
-  const canSeeFiles = owner || staff || (!!myDeal && buyerCanSeeFiles(myDeal.stage, myDeal.contracts));
+  const pc = { listing: lc, ...(myDeal ? { deal: dealCtx(myDeal) } : {}) };
+  const canSeeCode = can(subject(user), "listing.view_code", pc).allowed;
+  // الملفات: نفس قاعدة فتح المستندات (المشتري بعد العقد المبدئي)
+  const canSeeFiles = can(subject(user), "document.view", { ...pc, document: { type: "ALLOCATION_LETTER", ownerId: listing.sellerId, uploadedById: listing.sellerId, status: "APPROVED" } }).allowed;
+  const canInterest = can(subject(user), "deal.create", { listing: lc }).allowed;
 
   const rate = await latestRate();
   const usd = toNum(rate?.sell ?? 50);
@@ -236,11 +242,20 @@ export default async function ListingPage({ params }: Props) {
                     "Register your interest and a broker will contact you. After the commission agreement we introduce you to the seller and negotiate with you.",
                   )}
                 </p>
-                <form action={expressInterest.bind(null, locale, id)}>
-                  <button type="submit" className={`${btn.primary} w-full`}>
-                    {user ? L("أنا مهتم بالقطعة دي", "I'm interested in this plot") : L("ادخل وابدي اهتمامك", "Sign in to register interest")}
-                  </button>
-                </form>
+                {user && !canInterest ? (
+                  <Notice tone="amber">
+                    {L("لازم توثّق هويتك الأول عشان تبدي اهتمام بقطعة.", "You need to verify your ID before registering interest in a plot.")}{" "}
+                    <Link href={`/${locale}/account#kyc`} className="font-semibold underline">
+                      {L("وثّق هويتك", "Verify your ID")}
+                    </Link>
+                  </Notice>
+                ) : (
+                  <form action={expressInterest.bind(null, locale, id)}>
+                    <button type="submit" className={`${btn.primary} w-full`}>
+                      {user ? L("أنا مهتم بالقطعة دي", "I'm interested in this plot") : L("ادخل وابدي اهتمامك", "Sign in to register interest")}
+                    </button>
+                  </form>
+                )}
               </>
             ) : (
               <p className="text-muted">{L("القطعة دي في صفقة دلوقتي.", "This plot is currently in a deal.")}</p>

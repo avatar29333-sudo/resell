@@ -29,6 +29,7 @@ export default async function ListingsPage({ params, searchParams }: Props) {
   const rows = await db.listing.findMany({
     where: {
       status: { in: ["PUBLISHED", "IN_DEAL"] },
+      seller: { status: "ACTIVE" },
       plot: {
         ...(city ? { city } : {}),
         ...(minArea ? { areaSqm: { gte: minArea } } : {}),

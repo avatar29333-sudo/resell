@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { isStaff } from "@/lib/access";
+import { can, listingCtx, subject } from "@/lib/authz";
 import { buyerCanSeeFiles } from "@/lib/deal-machine";
 import { plotGeo } from "@/lib/geo";
 import { audit } from "@/lib/audit";
@@ -33,8 +33,8 @@ export default async function InspectionReport({ params }: { params: Promise<{ l
   });
   if (!listing) notFound();
 
-  // نفس قاعدة المستندات: صاحب القطعة والفريق، والمشتري بعد العقد المبدئي
-  let allowed = isStaff(me) || listing.sellerId === me.id;
+  // نفس قاعدة المستندات (PERM-01): صاحب القطعة والفريق المسند، والمشتري بعد العقد المبدئي
+  let allowed = can(subject(me), "listing.view_private", { listing: listingCtx({ ...listing, deals: [] }) }).allowed;
   if (!allowed) {
     const deals = await db.deal.findMany({ where: { listingId: id, buyerId: me.id }, include: { contracts: true } });
     allowed = deals.some((d) => buyerCanSeeFiles(d.stage, d.contracts));

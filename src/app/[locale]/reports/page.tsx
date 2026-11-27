@@ -1,8 +1,10 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { can, subject } from "@/lib/authz";
+import { scopeDealsFor } from "@/lib/authz/scope";
 import { STAGES } from "@/lib/deal-machine";
 import { money, num, toNum, tr } from "@/lib/format";
 import { CITY, CITY_KEYS, DEAL_STAGE, LISTING_STATUS, SERVICE_STATUS, label } from "@/lib/labels";
@@ -29,15 +31,18 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const L = tr(locale);
-  await requireUser(locale, `/${locale}/reports`, ["ADMIN", "FINANCE", "BROKER"]);
+  const me = await requireUser(locale, `/${locale}/reports`, ["ADMIN", "FINANCE", "BROKER", "BROKER_LEAD", "LAWYER"]);
+  if (!can(subject(me), "reports.view").allowed) redirect(`/${locale}/account?denied=1`);
+  // PERM-02: الوسيط/المحامي بيشوف أرقام صفقاته هو
+  const dealScope = scopeDealsFor(me);
 
   const [listingsBy, dealsBy, servicesBy, closed, commissions, deposits, expiring] = await Promise.all([
     db.listing.groupBy({ by: ["status"], _count: true }),
-    db.deal.groupBy({ by: ["stage"], where: { status: { in: ["ACTIVE", "ON_HOLD"] } }, _count: true }),
+    db.deal.groupBy({ by: ["stage"], where: { AND: [dealScope, { status: { in: ["ACTIVE", "ON_HOLD"] } }] }, _count: true }),
     db.serviceRequest.groupBy({ by: ["status"], _count: true }),
-    db.deal.findMany({ where: { status: "COMPLETED" }, include: { listing: { include: { plot: true } } } }),
-    db.commission.findMany(),
-    db.deposit.groupBy({ by: ["escrowStatus"], _sum: { amount: true }, _count: true }),
+    db.deal.findMany({ where: { AND: [dealScope, { status: "COMPLETED" }] }, include: { listing: { include: { plot: true } } } }),
+    db.commission.findMany({ where: { deal: dealScope } }),
+    db.deposit.groupBy({ by: ["escrowStatus"], where: { deal: dealScope }, _sum: { amount: true }, _count: true }),
     db.document.count({ where: { expiresAt: { lte: new Date(Date.now() + 30 * 86400000), gte: new Date() }, status: "APPROVED" } }),
   ]);
 
