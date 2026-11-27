@@ -30,11 +30,11 @@ import { pageMeta, siteUrl } from "@/lib/meta";
 import { ensureReferralCode } from "@/lib/referral";
 import { getSetting } from "@/lib/settings";
 import { ShareButtons } from "@/components/ShareButtons";
-import { createBuyRequest, setBuyRequestStatus, setMyListingStatus, submitKyc, uploadNewVersion } from "./actions";
+import { applyAsPartner, createBuyRequest, setBuyRequestStatus, setMyListingStatus, submitKyc, uploadNewVersion } from "./actions";
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string }>;
+  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string; partner?: string }>;
 };
 
 // مراحل العرض من ناحية البائع
@@ -422,6 +422,28 @@ export default async function AccountPage({ params, searchParams }: Props) {
           </Card>
           )}
         </div>
+
+        {/* MKT-07: التسجيل كسمسار شريك */}
+        {me.role === "CLIENT" && me.accountLevel === "VERIFIED" && (
+          <Card title={<span id="partner">{L("إنت سمسار؟ اشتغل معانا كشريك", "Are you a broker? Work with us as a partner")}</span>}>
+            {sp.partner === "sent" && <Notice tone="green">{L("طلبك وصل — الأدمن هيراجع رقم القيد ويفعّل حسابك.", "Application received — an admin will check your registry number and activate your account.")}</Notice>}
+            {sp.partner === "reg_no" && <Notice tone="red">{L("اكتب رقم القيد في سجل الوسطاء.", "Enter your broker registry number.")}</Notice>}
+            {me.brokerRegNo && !me.partnerApprovedAt ? (
+              <p className="text-sm text-muted">{L(`طلبك برقم القيد ${me.brokerRegNo} تحت المراجعة.`, `Your application with registry no. ${me.brokerRegNo} is under review.`)}</p>
+            ) : (
+              <form action={applyAsPartner.bind(null, locale)} className="flex flex-wrap items-end gap-2">
+                <p className="w-full text-sm text-muted">
+                  {L("اعرض قطع عملائك (بنفس مراجعة المحامي)، تابع عروضك وصفقاتها، وخد نصيبك من العمولة.", "List your clients' plots (with the same lawyer review), follow your listings and deals, and earn your share of the commission.")}
+                </p>
+                <label className={labelCls}>
+                  {L("رقم القيد في سجل الوسطاء", "Broker registry number")}
+                  <input name="brokerRegNo" required minLength={4} dir="ltr" className={`${field} w-52`} />
+                </label>
+                <button className={btn.secondary}>{L("قدّم كشريك", "Apply as a partner")}</button>
+              </form>
+            )}
+          </Card>
+        )}
 
         {/* MKT-06: برنامج الإحالة */}
         {refCode && (

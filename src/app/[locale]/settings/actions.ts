@@ -210,6 +210,21 @@ export async function saveOps(locale: string, form: FormData) {
   refresh(l);
 }
 
+/** MKT-07: نصيب السمسار الشريك من العمولة (%) */
+export async function setPartnerShare(locale: string, userId: string, form: FormData) {
+  const l = loc(locale);
+  const b = back(l, "users");
+  const me = await signedIn(l);
+  await authorize(me, "commission.rates", {}, { back: b });
+  const pct = Number(form.get("share"));
+  if (!(pct >= 0 && pct <= 100)) redirect(`${b}&err=forbidden`);
+  const u = await db.user.findUnique({ where: { id: userId }, select: { role: true, partnerSharePct: true } });
+  if (u?.role !== "PARTNER_BROKER") return;
+  await db.user.update({ where: { id: userId }, data: { partnerSharePct: pct } });
+  await audit(me.id, "partner.share", "User", userId, { before: u.partnerSharePct ? Number(u.partnerSharePct) : null, after: pct });
+  refresh(l);
+}
+
 /** MKT-01 + MKT-15: قرار إنقاذ المهلة (التواريخ والنسبة) + رقم القيد في سجل الوسطاء */
 export async function saveMarketing(locale: string, form: FormData) {
   const l = loc(locale);

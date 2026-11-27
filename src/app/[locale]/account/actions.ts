@@ -10,7 +10,7 @@ import { authorize, dealCtx, listingCtx } from "@/lib/authz";
 import { fileFromForm, saveFile } from "@/lib/storage";
 import { CITY_KEYS } from "@/lib/labels";
 import { isLocale } from "@/i18n/config";
-import { notify } from "@/lib/notifications";
+import { idsByRole, notify } from "@/lib/notifications";
 
 const loc = (l: string) => (isLocale(l) ? l : "ar");
 
@@ -125,6 +125,25 @@ export async function uploadNewVersion(locale: string, documentId: string, form:
     link: `/broker?tab=queue`,
   });
   redirect(`/${l}/account?upload=ok#listing-${old!.listingId}`);
+}
+
+/** MKT-07: طلب تسجيل كسمسار شريك — برقم القيد، والأدمن بيراجع قبل التفعيل */
+export async function applyAsPartner(locale: string, form: FormData) {
+  const l = loc(locale);
+  const back = `/${l}/account`;
+  const user = await requireUser(l, back);
+  if (user.role !== "CLIENT" || user.accountLevel !== "VERIFIED") redirect(`${back}?partner=not_eligible#partner`);
+  const regNo = String(form.get("brokerRegNo") ?? "").trim().toUpperCase().slice(0, 40);
+  if (regNo.length < 4) redirect(`${back}?partner=reg_no#partner`);
+  await db.user.update({ where: { id: user.id }, data: { brokerRegNo: regNo, partnerApprovedAt: null } });
+  await audit(user.id, "partner.apply", "User", user.id, { brokerRegNo: regNo });
+  await notify(await idsByRole("ADMIN"), {
+    kind: "partner.application",
+    ar: [`طلب سمسار شريك جديد: ${user.name}`, `رقم القيد ${regNo} — راجعه في سجل الوسطاء قبل التفعيل.`],
+    en: [`New partner broker application: ${user.name}`, `Registry no. ${regNo} — check it against the broker registry before approving.`],
+    link: `/settings?tab=users&role=CLIENT&q=${encodeURIComponent(user.phone)}`,
+  });
+  redirect(`${back}?partner=sent#partner`);
 }
 
 /** البائع (أو الشريك اللي عرضها): يبعت المسودة للمراجعة أو يسحب العرض */

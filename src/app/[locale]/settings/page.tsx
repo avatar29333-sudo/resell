@@ -13,7 +13,7 @@ import { getSetting } from "@/lib/settings";
 import { date, dateTime, money, num, tr } from "@/lib/format";
 import { ACCOUNT_LEVEL, ACCOUNT_STATUS, CITY, CITY_KEYS, CONTRACT_TYPE, RATE_SOURCE, ROLE, label } from "@/lib/labels";
 import { Badge, Card, Container, DL, Notice, PageHeader, Table, Tabs, btn, field, labelCls } from "@/components/ui";
-import { saveMarketing } from "./actions";
+import { saveMarketing, setPartnerShare } from "./actions";
 import { addDistrict, addManualRate, bumpTemplate, fetchRateNow, moveFilesToS3, saveCommission, saveFees, saveOps, setUserRole, suspendUser, toggleDistrict, unsuspendUser } from "./actions";
 import { RoleForm } from "./RoleForm";
 import { pageMeta } from "@/lib/meta";
@@ -137,6 +137,14 @@ export default async function SettingsPage({ params, searchParams }: Props) {
                   <div className="text-xs font-normal text-muted" dir="ltr">
                     #{u.brokerRegNo}
                   </div>
+                )}
+                {/* MKT-07: طلب شريك مستني المراجعة / نصيب الشريك */}
+                {u.role === "CLIENT" && u.brokerRegNo && !u.partnerApprovedAt && <Badge tone="amber">{L("طلب سمسار شريك — راجع رقم القيد وغيّر الدور", "Partner application — check the registry no. and change the role")}</Badge>}
+                {u.role === "PARTNER_BROKER" && (
+                  <form action={setPartnerShare.bind(null, locale, u.id)} className="mt-1 flex items-center gap-1 font-normal">
+                    <input name="share" type="number" min={0} max={100} step={0.5} defaultValue={u.partnerSharePct ? Number(u.partnerSharePct) : ""} aria-label={L("نصيب الشريك من العمولة (%)", "Partner share of commission (%)")} placeholder="%" className={`${field} min-h-8 w-20`} />
+                    <button className={`${btn.small} border border-line`}>{L("نصيبه %", "Share %")}</button>
+                  </form>
                 )}
               </td>
               <td dir="ltr" className="text-start">

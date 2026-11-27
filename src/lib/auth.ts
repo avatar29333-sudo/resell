@@ -154,6 +154,8 @@ export function homeFor(role: Role) {
       return "lawyer";
     case "FINANCE":
       return "finance";
+    case "PARTNER_BROKER":
+      return "partner";
     default:
       return "account";
   }

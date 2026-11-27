@@ -18,7 +18,7 @@ export function siteUrl() {
 }
 
 /** الصفحات الخاصة: ما تتأرشفش في محركات البحث */
-export const PRIVATE_PREFIXES = ["account", "deals", "broker", "agent", "lawyer", "finance", "reports", "settings", "notifications", "sign-in", "list-your-plot", "marketing", "unsubscribe"];
+export const PRIVATE_PREFIXES = ["account", "deals", "broker", "agent", "lawyer", "finance", "reports", "settings", "notifications", "sign-in", "list-your-plot", "marketing", "unsubscribe", "partner"];
 
 export function isPrivatePath(pathname: string) {
   const seg = pathname.split("/").filter(Boolean);
