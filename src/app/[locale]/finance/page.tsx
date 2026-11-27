@@ -12,7 +12,7 @@ import { Badge, Card, Container, Empty, Notice, PageHeader, Stat, Table, Tabs, b
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { confirmDeposit, setCommissionStatus, settleDeposit } from "../deals/actions";
 import { pageMeta } from "@/lib/meta";
-import { saveReconciliation } from "./actions";
+import { payReferral, saveReconciliation } from "./actions";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ tab?: string; status?: string; err?: string; ok?: string }> };
 
@@ -41,7 +41,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
   const L = tr(locale);
   const ar = locale === "ar";
   const me = await requireUser(locale, `/${locale}/finance`, ["FINANCE", "ADMIN"]);
-  const tab = ["deposits", "commissions", "reconcile"].includes(sp.tab ?? "") ? sp.tab! : "deposits";
+  const tab = ["deposits", "commissions", "referrals", "reconcile"].includes(sp.tab ?? "") ? sp.tab! : "deposits";
   const base = `/${locale}/finance`;
 
   const [awaiting, held, pendingApprovals, due] = await Promise.all([
@@ -69,10 +69,12 @@ export default async function FinancePage({ params, searchParams }: Props) {
           tabs={[
             { key: "deposits", label: L("العرابين", "Deposits"), href: `${base}?tab=deposits`, count: awaiting },
             { key: "commissions", label: L("العمولات", "Commissions"), href: `${base}?tab=commissions` },
+            { key: "referrals", label: L("مكافآت الإحالة", "Referral rewards"), href: `${base}?tab=referrals` },
             { key: "reconcile", label: L("المطابقة الشهرية", "Monthly reconciliation"), href: `${base}?tab=reconcile` },
           ]}
         />
         {tab === "deposits" && <Deposits />}
+        {tab === "referrals" && <Referrals />}
         {tab === "commissions" && <Commissions />}
         {tab === "reconcile" && <Reconcile />}
       </Container>
@@ -237,6 +239,47 @@ export default async function FinancePage({ params, searchParams }: Props) {
           </Table>
         )}
       </Card>
+    );
+  }
+
+  /** MKT-06: مكافآت الإحالة المستحقة — المالي بيصرفها بمرجع */
+  async function Referrals() {
+    const rows = await db.referralReward.findMany({ include: { referrer: { select: { name: true, phone: true } }, referred: { select: { name: true } } }, orderBy: [{ status: "asc" }, { createdAt: "desc" }], take: 200 });
+    if (rows.length === 0) return <Empty>{L("مفيش مكافآت إحالة لسه.", "No referral rewards yet.")}</Empty>;
+    return (
+      <Table head={[L("صاحب الإحالة", "Referrer"), L("المُحال", "Referred"), L("الصفقة", "Deal"), L("المبلغ", "Amount"), L("الحالة", "Status")]}>
+        {rows.map((r) => (
+          <tr key={r.id}>
+            <td>
+              {r.referrer.name}
+              <div dir="ltr" className="text-xs text-muted">
+                {r.referrer.phone}
+              </div>
+            </td>
+            <td>{r.referred.name}</td>
+            <td>
+              <Link href={`/${locale}/deals/${r.dealId}`} className="text-brand">
+                #{r.dealId.slice(-6).toUpperCase()}
+              </Link>
+            </td>
+            <td className="font-semibold">{money(r.amount, "EGP", locale)}</td>
+            <td>
+              {r.status === "PAID" ? (
+                <Badge tone="green">
+                  {L("اتصرفت", "Paid")} {r.paidAt && `· ${date(r.paidAt, locale)}`} {r.paymentRef && <span dir="ltr">· {r.paymentRef}</span>}
+                </Badge>
+              ) : (
+                <form action={payReferral.bind(null, locale, r.id)} className="flex flex-wrap items-center gap-1.5">
+                  <input name="reference" required minLength={3} dir="ltr" placeholder={L("مرجع التحويل", "Transfer ref")} aria-label={L("مرجع التحويل", "Transfer ref")} className={`${field} min-h-9 w-36`} />
+                  <ConfirmButton message={L(`صرف ${money(r.amount, "EGP", locale)} لـ ${r.referrer.name}؟`, `Pay ${money(r.amount, "EGP", locale)} to ${r.referrer.name}?`)} className={`${btn.small} bg-ok text-white`}>
+                    {L("اتصرفت", "Mark paid")}
+                  </ConfirmButton>
+                </form>
+              )}
+            </td>
+          </tr>
+        ))}
+      </Table>
     );
   }
 

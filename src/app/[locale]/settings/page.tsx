@@ -238,7 +238,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   }
 
   async function Commission({ locale }: { locale: "ar" | "en" }) {
-    const [rescue, regNo] = await Promise.all([getSetting("rescue"), getSetting("brokerRegistrationNumber")]);
+    const [rescue, regNo, reward] = await Promise.all([getSetting("rescue"), getSetting("brokerRegistrationNumber"), getSetting("referral.reward")]);
     const [rates, fees, fourEyes, fxCfg, brokersCfg, validity] = await Promise.all([
       getSetting("commission.rates"),
       getSetting("service.fees"),
@@ -305,6 +305,17 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             <label className={labelCls}>
               {L("نسبة مقابل السنة (%)", "One-year fee (%)")}
               <input name="feePct" type="number" min={0} max={50} step={0.5} defaultValue={rescue.feePct} className={`${field} w-28`} />
+            </label>
+            <label className={labelCls}>
+              {L("مكافأة الإحالة", "Referral reward")}
+              <select name="rewardType" defaultValue={reward.type} className={`${field} w-44`}>
+                <option value="pct">{L("نسبة من العمولة (%)", "% of commission")}</option>
+                <option value="fixed">{L("مبلغ ثابت (ج.م)", "Fixed amount (EGP)")}</option>
+              </select>
+            </label>
+            <label className={labelCls}>
+              {L("القيمة", "Value")}
+              <input name="rewardValue" type="number" min={0} step="any" defaultValue={reward.value} className={`${field} w-32`} />
             </label>
             <button className={btn.primary}>{L("حفظ", "Save")}</button>
           </form>

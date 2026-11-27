@@ -223,6 +223,11 @@ export async function saveMarketing(locale: string, form: FormData) {
     feePct: Math.min(50, Math.max(0, Number(form.get("feePct")) || cur.feePct)),
   });
   await saveSetting(me.id, "brokerRegistrationNumber", { value: String(form.get("brokerRegistrationNumber") ?? "").trim().slice(0, 60) });
+  // MKT-06: مكافأة الإحالة
+  await saveSetting(me.id, "referral.reward", {
+    type: form.get("rewardType") === "fixed" ? "fixed" : "pct",
+    value: Math.max(0, Math.min(form.get("rewardType") === "fixed" ? 1_000_000 : 100, Number(form.get("rewardValue")) || 0)),
+  });
   refresh(l);
 }
 

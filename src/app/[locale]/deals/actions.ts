@@ -20,6 +20,8 @@ import { idsByRole, notify } from "@/lib/notifications";
 import { CONTRACT_TYPE, DEAL_STAGE } from "@/lib/labels";
 import { leastLoaded } from "@/lib/assign";
 import { lockRateAt } from "@/lib/fx-lock";
+import { referralReward } from "@/lib/referral-rules";
+import { isDemoMode } from "@/lib/demo";
 
 const loc = (l: string): Locale => (isLocale(l) ? l : "ar");
 
@@ -63,6 +65,29 @@ const finish = (l: string, id: string, form?: FormData | null, q = "") => {
 
 const partiesOf = (deal: LoadedDeal) => [deal.buyerId, deal.listing.sellerId];
 
+/** MKT-06: الصفقة اتقفلت → مكافأة لصاحب الإحالة (لو فيه) وبتظهر في «حسابي» وفي المالية للصرف */
+async function accrueReferralReward(deal: LoadedDeal, actor: User) {
+  if (deal.isDemo && !isDemoMode()) return;
+  const [buyer, seller] = await Promise.all([
+    db.user.findUnique({ where: { id: deal.buyerId }, select: { id: true, phone: true, referredById: true } }),
+    db.user.findUnique({ where: { id: deal.listing.sellerId }, select: { id: true, phone: true, referredById: true } }),
+  ]);
+  if (!buyer || !seller || (!buyer.referredById && !seller.referredById)) return;
+  const refIds = [buyer.referredById, seller.referredById].filter((x): x is string => !!x);
+  const refs = await db.user.findMany({ where: { id: { in: refIds } }, select: { id: true, phone: true, status: true } });
+  const commissionTotal = deal.commission ? toNum(deal.commission.sellerAmount) + toNum(deal.commission.buyerAmount) : 0;
+  const reward = referralReward({ buyer, seller, commissionTotal }, Object.fromEntries(refs.map((r) => [r.id, r])), await getSetting("referral.reward"));
+  if (!reward) return;
+  const created = await db.referralReward.upsert({ where: { dealId: deal.id }, create: { ...reward, dealId: deal.id }, update: {} });
+  await audit(actor.id, "referral.reward_due", "ReferralReward", created.id, { dealId: deal.id, amount: reward.amount });
+  await notify([reward.referrerId], {
+    kind: "referral.reward",
+    ar: ["مكافأة إحالة مستحقة لك", `${reward.amount.toLocaleString("en-US")} ج.م — صفقة اللي دعيته اتقفلت.`],
+    en: ["A referral reward is due to you", `EGP ${reward.amount.toLocaleString("en-US")} — your referral's deal closed.`],
+    link: `/account#referral`,
+  });
+}
+
 // ─── المراحل ───
 
 export async function advanceStage(locale: string, dealId: string, form?: FormData) {
@@ -80,6 +105,7 @@ export async function advanceStage(locale: string, dealId: string, form?: FormDa
   if (to === "CLOSED") {
     await db.listing.update({ where: { id: deal.listingId }, data: { status: "SOLD" } });
     if (deal.commission) await db.commission.update({ where: { id: deal.commission.id }, data: { status: "INVOICED" } });
+    await accrueReferralReward(deal, user);
     // باقي الصفقات على نفس القطعة بتتقفل، ويتسجل السبب عشان المشتري يعرف
     const others = await db.deal.findMany({ where: { listingId: deal.listingId, id: { not: dealId }, status: { in: ["ACTIVE", "ON_HOLD"] } } });
     for (const o of others) {

@@ -26,7 +26,10 @@ import {
 import { Badge, Card, Container, DL, Empty, Notice, PageHeader, btn, field, labelCls } from "@/components/ui";
 import { ClearDraft } from "../list-your-plot/ClearDraft";
 import { MiniSteps } from "@/components/MiniSteps";
-import { pageMeta } from "@/lib/meta";
+import { pageMeta, siteUrl } from "@/lib/meta";
+import { ensureReferralCode } from "@/lib/referral";
+import { getSetting } from "@/lib/settings";
+import { ShareButtons } from "@/components/ShareButtons";
 import { createBuyRequest, setBuyRequestStatus, setMyListingStatus, submitKyc, uploadNewVersion } from "./actions";
 
 type Props = {
@@ -45,6 +48,11 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const sp = await searchParams;
   const L = tr(locale);
   const me = await requireUser(locale, `/${locale}/account`);
+  // MKT-06: الإحالة (للعميل والشريك الموثّق)
+  const refCode = ["CLIENT", "PARTNER_BROKER"].includes(me.role) ? await ensureReferralCode(me) : null;
+  const [referralsCount, rewards, rewardCfg] = refCode
+    ? await Promise.all([db.user.count({ where: { referredById: me.id } }), db.referralReward.findMany({ where: { referrerId: me.id } }), getSetting("referral.reward")])
+    : [0, [], { type: "pct" as const, value: 0 }];
 
   const [kyc, listings, allDeals, buyRequests, services, soldDeals] = await Promise.all([
     db.kycProfile.findUnique({ where: { userId: me.id } }),
@@ -414,6 +422,32 @@ export default async function AccountPage({ params, searchParams }: Props) {
           </Card>
           )}
         </div>
+
+        {/* MKT-06: برنامج الإحالة */}
+        {refCode && (
+          <Card title={<span id="referral">{L("ادعي حد واكسب", "Invite and earn")}</span>}>
+            <p className="text-sm text-muted">
+              {L(
+                `ابعت رابطك لأي حد عايز يبيع أو يشتري قطعة. لما صفقته تتقفل بتستحق مكافأة (${rewardCfg.type === "pct" ? `${num(rewardCfg.value, locale)}% من العمولة` : money(rewardCfg.value, "EGP", locale)}).`,
+                `Send your link to anyone buying or selling a plot. When their deal closes you earn a reward (${rewardCfg.type === "pct" ? `${rewardCfg.value}% of the commission` : money(rewardCfg.value, "EGP", locale)}).`,
+              )}
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm">{L("كودك:", "Your code:")}</span>
+              <code dir="ltr" className="bg-paper px-2 py-1 text-lg font-bold tracking-widest">
+                {refCode}
+              </code>
+            </div>
+            <ShareButtons base={siteUrl()} path={`/${locale}`} text={L("بيع واشتري قطع بيت الوطن على الورق الصحيح مع Resell", "Buy and sell Beit El Watan plots on the right paperwork with Resell")} refCode={refCode} ar={locale === "ar"} />
+            <DL
+              items={[
+                [L("اللي سجّلوا من رابطك", "Signed up with your link"), num(referralsCount, locale)],
+                [L("مكافآت مستحقة", "Rewards due"), money(rewards.filter((r) => r.status === "DUE").reduce((s, r) => s + toNum(r.amount), 0), "EGP", locale)],
+                [L("مكافآت اتصرفت", "Rewards paid"), money(rewards.filter((r) => r.status === "PAID").reduce((s, r) => s + toNum(r.amount), 0), "EGP", locale)],
+              ]}
+            />
+          </Card>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Card title={L("طلبات الشراء", "Buy requests")}>
