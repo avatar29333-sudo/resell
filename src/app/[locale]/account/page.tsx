@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { BLOCKER_TEXT, STAGES, blockersToAdvance, nextStage, requiredSigners, stageIndex, type Stage } from "@/lib/deal-machine";
 import { date, money, num, toNum, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import {
   ACCOUNT_LEVEL,
   BUY_REQUEST_STATUS,
@@ -23,16 +24,24 @@ import {
   toneOf,
 } from "@/lib/labels";
 import { Badge, Card, Container, DL, Empty, Notice, PageHeader, btn, field, labelCls } from "@/components/ui";
+import { ClearDraft } from "../list-your-plot/ClearDraft";
 import { MiniSteps } from "@/components/MiniSteps";
-import { createBuyRequest, setBuyRequestStatus, setMyListingStatus, submitKyc, uploadNewVersion } from "./actions";
+import { pageMeta, siteUrl } from "@/lib/meta";
+import { ensureReferralCode } from "@/lib/referral";
+import { getSetting } from "@/lib/settings";
+import { ShareButtons } from "@/components/ShareButtons";
+import { TrackEvent } from "@/components/Analytics";
+import { applyAsPartner, createBuyRequest, setBuyRequestAlerts, setBuyRequestStatus, setMyListingStatus, submitKyc, uploadNewVersion } from "./actions";
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; denied?: string; upload?: string }>;
+  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string; partner?: string; ev?: string }>;
 };
 
 // مراحل العرض من ناحية البائع
 const LISTING_FLOW = ["DRAFT", "IN_REVIEW", "VERIFIED", "PUBLISHED", "IN_DEAL", "SOLD"] as const;
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "حسابي", "My account", { noindex: true });
 
 export default async function AccountPage({ params, searchParams }: Props) {
   const { locale } = await params;
@@ -40,6 +49,11 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const sp = await searchParams;
   const L = tr(locale);
   const me = await requireUser(locale, `/${locale}/account`);
+  // MKT-06: الإحالة (للعميل والشريك الموثّق)
+  const refCode = ["CLIENT", "PARTNER_BROKER"].includes(me.role) ? await ensureReferralCode(me) : null;
+  const [referralsCount, rewards, rewardCfg] = refCode
+    ? await Promise.all([db.user.count({ where: { referredById: me.id } }), db.referralReward.findMany({ where: { referrerId: me.id } }), getSetting("referral.reward")])
+    : [0, [], { type: "pct" as const, value: 0 }];
 
   const [kyc, listings, allDeals, buyRequests, services, soldDeals] = await Promise.all([
     db.kycProfile.findUnique({ where: { userId: me.id } }),
@@ -118,10 +132,20 @@ export default async function AccountPage({ params, searchParams }: Props) {
       />
       <Container className="flex flex-col gap-6">
         {sp.welcome && <Notice tone="green">{L("حسابك اتعمل. وثّق هويتك عشان تقدر تبيع أو تشتري.", "Your account is ready. Verify your ID to buy or sell.")}</Notice>}
+        {sp.listed && <ClearDraft />}
+        <TrackEvent name={sp.ev} />
         {sp.listed && <Notice tone="green">{L("قطعتك وصلت وهي دلوقتي قيد المراجعة. هنبلغك على واتساب.", "Your plot was received and is now in review. We'll update you on WhatsApp.")}</Notice>}
+        {sp.rescue && (
+          <Notice tone="amber">
+            {L("تاريخ مهلة البناء اللي كتبته عدّى — العرض اتقبل ومتعلّم «المهلة خلصت».", "The build deadline you entered has passed — the listing was accepted and marked “deadline passed”.")}{" "}
+            <Link href={`/${locale}/rescue`} className="font-semibold text-brand underline">
+              {L("اعرف إزاي تنقذ المهلة", "See how to rescue the deadline")}
+            </Link>
+          </Notice>
+        )}
         {sp.denied && <Notice tone="amber">{L("الصفحة دي مش متاحة لحسابك.", "That page isn't available to your account.")}</Notice>}
         {sp.upload === "ok" && <Notice tone="green">{L("النسخة الجديدة اترفعت ووصلت للوسيط.", "The new version was uploaded and sent to the broker.")}</Notice>}
-        {sp.upload === "bad" && <Notice tone="red">{L("الملف لازم يكون PDF أو صورة وأقل من 4 ميجا.", "The file must be a PDF or image under 4 MB.")}</Notice>}
+        {sp.upload === "bad" && <Notice tone="red">{L("الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا.", "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB.")}</Notice>}
 
         {/* ── المشتري: القطع اللي مهتم بيها ومرحلة كل صفقة ── */}
         <section className="flex flex-col gap-3">
@@ -155,7 +179,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                     <DealCard
                       locale={locale}
                       href={`/${locale}/deals/${d.id}`}
-                      title={`${label(CITY, d.listing.plot.city, locale)} — ${d.listing.plot.district}`}
+                      title={`${label(CITY, d.listing.plot.city, locale)} — ${districtName(d.listing.plot, locale)}`}
                       meta={`${num(d.listing.plot.areaSqm, locale)} ${L("م²", "m²")} · ${money(d.agreedPrice ?? d.listing.price, "EGP", locale)}${d.agreedPrice ? L(" (متفق)", " (agreed)") : ""}`}
                       status={d.status}
                       stage={stage}
@@ -182,7 +206,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                 <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                   <div className="flex flex-col gap-0.5">
                     <Link href={`/${locale}/deals/${d.id}`} className="font-semibold text-navy hover:text-brand">
-                      {label(CITY, d.listing.plot.city, locale)} — {d.listing.plot.district} · {num(d.listing.plot.areaSqm, locale)} {L("م²", "m²")}
+                      {label(CITY, d.listing.plot.city, locale)} — {districtName(d.listing.plot, locale)} · {num(d.listing.plot.areaSqm, locale)} {L("م²", "m²")}
                     </Link>
                     <span className={`text-sm ${d.status === "COMPLETED" ? "text-ok" : "text-[#A32020]"}`}>{endReason(d)}</span>
                     <span className="text-xs text-muted">
@@ -233,7 +257,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <Link href={`/${locale}/listings/${l.id}`} className="text-lg font-bold text-navy hover:text-brand">
-                          {label(CITY, l.plot.city, locale)} — {l.plot.district}
+                          {label(CITY, l.plot.city, locale)} — {districtName(l.plot, locale)}
                         </Link>
                         <div className="text-sm text-muted">
                           <span dir="ltr">{l.plot.code}</span> · {num(l.plot.areaSqm, locale)} {L("م²", "m²")} · {money(l.price, l.currency, locale)}
@@ -241,6 +265,18 @@ export default async function AccountPage({ params, searchParams }: Props) {
                       </div>
                       <Badge tone={toneOf(l.status)}>{label(LISTING_STATUS, l.status, locale)}</Badge>
                     </div>
+                    {/* DATA-09: المهلة خلصت → خيار «إنقاذ المهلة» */}
+                    {l.plot.buildDeadline && l.plot.buildDeadline < new Date() && !["SOLD", "WITHDRAWN"].includes(l.status) && (
+                      <Notice tone="amber">
+                        {L("مهلة البناء للقطعة دي خلصت.", "The build deadline for this plot has passed.")}{" "}
+                        <Link href={`/${locale}/rescue?plot=${encodeURIComponent(l.plot.code)}`} className="font-semibold text-brand underline">
+                          {L("اطلب «إنقاذ المهلة»", "Request a deadline rescue")}
+                        </Link>
+                      </Notice>
+                    )}
+                    {l.statementExpiredAt && (
+                      <Notice tone="amber">{L("إفادة الجهاز انتهت — ارفع إفادة حديثة عشان العرض يرجع طبيعي.", "The authority statement expired — upload a recent one to restore the listing.")}</Notice>
+                    )}
                     {l.status === "WITHDRAWN" ? (
                       <MiniSteps steps={LISTING_FLOW.map((s) => label(LISTING_STATUS, s, locale))} current={0} stopped />
                     ) : (
@@ -266,7 +302,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                             {d.reviews[0]?.notes && ` — ${d.reviews[0].notes}`}
                           </span>
                           <div className="flex flex-wrap items-center gap-2">
-                            <input name="file" type="file" required accept="application/pdf,image/*" className="flex-1 border border-dashed border-line bg-white p-1.5 text-sm" />
+                            <input name="file" type="file" required accept="application/pdf,image/jpeg,image/png,image/webp" className="flex-1 border border-dashed border-line bg-white p-1.5 text-sm" />
                             <button className={`${btn.small} bg-brand text-white`}>
                               {L(`ارفع نسخة ${num(d.version + 1, locale)}`, `Upload version ${d.version + 1}`)}
                             </button>
@@ -307,7 +343,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                   <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                     <div className="flex flex-col gap-0.5">
                       <Link href={`/${locale}/deals/${d.id}`} className="font-semibold text-navy hover:text-brand">
-                        {label(CITY, d.listing.plot.city, locale)} — {d.listing.plot.district} · <span dir="ltr">{d.listing.plot.code}</span>
+                        {label(CITY, d.listing.plot.city, locale)} — {districtName(d.listing.plot, locale)} · <span dir="ltr">{d.listing.plot.code}</span>
                       </Link>
                       <span className={`text-sm ${d.status === "COMPLETED" ? "text-ok" : "text-[#A32020]"}`}>
                         {d.status === "COMPLETED"
@@ -347,10 +383,17 @@ export default async function AccountPage({ params, searchParams }: Props) {
             </Link>
           </Card>
 
+          {/* UX-11: حسابات الفريق الموثّقة (أو أي حساب موثّق من غير ملف) ما يتطلبش منها توثيق */}
+          {me.accountLevel === "VERIFIED" && (!kyc || kyc.status === "APPROVED") ? (
+            <Card title={<span id="kyc">{L("توثيق الهوية", "ID verification")}</span>}>
+              <Badge tone="green">{L("حسابك موثّق", "Your account is verified")}</Badge>
+              <p className="text-sm text-muted">{L("مش محتاج ترفع أي حاجة.", "Nothing to upload.")}</p>
+            </Card>
+          ) : (
           <Card title={<span id="kyc">{L("توثيق الهوية", "ID verification")}</span>}>
             {kyc && <Badge tone={toneOf(kyc.status)}>{label(VERIFICATION, kyc.status, locale)}</Badge>}
             {sp.kyc === "sent" && <Notice tone="green">{L("استلمنا صورك، والمراجعة خلال يوم عمل.", "We received your images; review takes one working day.")}</Notice>}
-            {sp.kyc === "missing" && <Notice tone="red">{L("ارفع صورة الهوية والصورة الشخصية (PDF أو صورة أقل من 4 ميجا).", "Upload both the ID and the selfie (PDF or image under 4 MB).")}</Notice>}
+            {sp.kyc === "missing" && <Notice tone="red">{L("ارفع صورة الهوية والصورة الشخصية (PDF أو صورة (JPG/PNG/WebP) أقل من 4 ميجا).", "Upload both the ID and the selfie (PDF or image (JPG/PNG/WebP) under 4 MB).")}</Notice>}
             {kyc?.status === "REJECTED" && kyc.rejectionReason && <Notice tone="red">{kyc.rejectionReason}</Notice>}
             {kyc?.status === "APPROVED" ? (
               <p className="text-ok">{L("هويتك موثّقة. تقدر تمضي العقود.", "Your ID is verified. You can sign contracts.")}</p>
@@ -367,11 +410,11 @@ export default async function AccountPage({ params, searchParams }: Props) {
                 </label>
                 <label className={labelCls}>
                   {L("صورة الهوية", "ID image")}
-                  <input name="idFile" type="file" required accept="application/pdf,image/*" className="border border-dashed border-line p-2" />
+                  <input name="idFile" type="file" required accept="application/pdf,image/jpeg,image/png,image/webp" className="border border-dashed border-line p-2" />
                 </label>
                 <label className={labelCls}>
                   {L("صورة شخصية واضحة", "A clear selfie")}
-                  <input name="selfieFile" type="file" required accept="image/*" className="border border-dashed border-line p-2" />
+                  <input name="selfieFile" type="file" required accept="image/jpeg,image/png,image/webp" className="border border-dashed border-line p-2" />
                 </label>
                 <button type="submit" className={btn.primary}>
                   {L("ابعت للتوثيق", "Submit for verification")}
@@ -379,7 +422,56 @@ export default async function AccountPage({ params, searchParams }: Props) {
               </form>
             )}
           </Card>
+          )}
         </div>
+
+        {/* MKT-07: التسجيل كسمسار شريك */}
+        {me.role === "CLIENT" && me.accountLevel === "VERIFIED" && (
+          <Card title={<span id="partner">{L("إنت سمسار؟ اشتغل معانا كشريك", "Are you a broker? Work with us as a partner")}</span>}>
+            {sp.partner === "sent" && <Notice tone="green">{L("طلبك وصل — الأدمن هيراجع رقم القيد ويفعّل حسابك.", "Application received — an admin will check your registry number and activate your account.")}</Notice>}
+            {sp.partner === "reg_no" && <Notice tone="red">{L("اكتب رقم القيد في سجل الوسطاء.", "Enter your broker registry number.")}</Notice>}
+            {me.brokerRegNo && !me.partnerApprovedAt ? (
+              <p className="text-sm text-muted">{L(`طلبك برقم القيد ${me.brokerRegNo} تحت المراجعة.`, `Your application with registry no. ${me.brokerRegNo} is under review.`)}</p>
+            ) : (
+              <form action={applyAsPartner.bind(null, locale)} className="flex flex-wrap items-end gap-2">
+                <p className="w-full text-sm text-muted">
+                  {L("اعرض قطع عملائك (بنفس مراجعة المحامي)، تابع عروضك وصفقاتها، وخد نصيبك من العمولة.", "List your clients' plots (with the same lawyer review), follow your listings and deals, and earn your share of the commission.")}
+                </p>
+                <label className={labelCls}>
+                  {L("رقم القيد في سجل الوسطاء", "Broker registry number")}
+                  <input name="brokerRegNo" required minLength={4} dir="ltr" className={`${field} w-52`} />
+                </label>
+                <button className={btn.secondary}>{L("قدّم كشريك", "Apply as a partner")}</button>
+              </form>
+            )}
+          </Card>
+        )}
+
+        {/* MKT-06: برنامج الإحالة */}
+        {refCode && (
+          <Card title={<span id="referral">{L("ادعي حد واكسب", "Invite and earn")}</span>}>
+            <p className="text-sm text-muted">
+              {L(
+                `ابعت رابطك لأي حد عايز يبيع أو يشتري قطعة. لما صفقته تتقفل بتستحق مكافأة (${rewardCfg.type === "pct" ? `${num(rewardCfg.value, locale)}% من العمولة` : money(rewardCfg.value, "EGP", locale)}).`,
+                `Send your link to anyone buying or selling a plot. When their deal closes you earn a reward (${rewardCfg.type === "pct" ? `${rewardCfg.value}% of the commission` : money(rewardCfg.value, "EGP", locale)}).`,
+              )}
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm">{L("كودك:", "Your code:")}</span>
+              <code dir="ltr" className="bg-paper px-2 py-1 text-lg font-bold tracking-widest">
+                {refCode}
+              </code>
+            </div>
+            <ShareButtons base={siteUrl()} path={`/${locale}`} text={L("بيع واشتري قطع بيت الوطن على الورق الصحيح مع Resell", "Buy and sell Beit El Watan plots on the right paperwork with Resell")} refCode={refCode} ar={locale === "ar"} />
+            <DL
+              items={[
+                [L("اللي سجّلوا من رابطك", "Signed up with your link"), num(referralsCount, locale)],
+                [L("مكافآت مستحقة", "Rewards due"), money(rewards.filter((r) => r.status === "DUE").reduce((s, r) => s + toNum(r.amount), 0), "EGP", locale)],
+                [L("مكافآت اتصرفت", "Rewards paid"), money(rewards.filter((r) => r.status === "PAID").reduce((s, r) => s + toNum(r.amount), 0), "EGP", locale)],
+              ]}
+            />
+          </Card>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Card title={L("طلبات الشراء", "Buy requests")}>
@@ -395,6 +487,11 @@ export default async function AccountPage({ params, searchParams }: Props) {
                 </div>
                 <div className="flex items-center gap-1">
                   <Badge tone={toneOf(b.status)}>{label(BUY_REQUEST_STATUS, b.status, locale)}</Badge>
+                  <form action={setBuyRequestAlerts.bind(null, locale, b.id, !b.alertConsentAt)}>
+                    <button className={`${btn.small} ${b.alertConsentAt ? "text-ok" : "text-muted"}`} title={L("تنبيهات واتساب", "WhatsApp alerts")}>
+                      {b.alertConsentAt ? L("🔔 التنبيهات شغالة", "🔔 Alerts on") : L("🔕 شغّل التنبيهات", "🔕 Turn on alerts")}
+                    </button>
+                  </form>
                   {b.status === "ACTIVE" && (
                     <form action={setBuyRequestStatus.bind(null, locale, b.id, "PAUSED")}>
                       <button className={`${btn.small} text-brand`}>{L("وقّف", "Pause")}</button>
@@ -432,6 +529,11 @@ export default async function AccountPage({ params, searchParams }: Props) {
                   <input name="budget" type="number" min={0} className={field} />
                 </label>
               </div>
+              {/* MKT-13: موافقة صريحة — الخانة مش متعلّمة */}
+              <label className="flex items-start gap-2 text-sm">
+                <input type="checkbox" name="alerts" className="mt-1 size-4 shrink-0" />
+                <span>{L("ابعتلي العروض الجديدة المطابقة على واتساب (رسالة واحدة في اليوم بالكتير، وفيها رابط إيقاف).", "Send me new matching listings on WhatsApp (at most one message a day, with a stop link).")}</span>
+              </label>
               <button className={btn.secondary}>{L("أضف طلب شراء", "Add buy request")}</button>
             </form>
           </Card>

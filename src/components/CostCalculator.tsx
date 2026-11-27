@@ -12,29 +12,38 @@ type Props = {
   transferPct: number | null;
   lawyerFeeEgp: number;
   usdEgp: number;
+  /** MKT-02: الأقساط الباقية للجهاز بالدولار — null لو البائع ما كتبهاش */
+  remainingUsd?: number | null;
 };
 
 /** حاسبة التكلفة الكاملة للمشتري — بالجنيه أو بالدولار */
-export function CostCalculator({ locale, priceEgp, buyerPct, transferPct, lawyerFeeEgp, usdEgp }: Props) {
+export function CostCalculator({ locale, priceEgp, buyerPct, transferPct, lawyerFeeEgp, usdEgp, remainingUsd = null }: Props) {
   const L = tr(locale);
   const [cur, setCur] = useState<"EGP" | "USD">("EGP");
   const [offer, setOffer] = useState(Math.round(priceEgp));
 
   const commission = (offer * buyerPct) / 100;
   const transfer = transferPct === null ? null : (offer * transferPct) / 100;
-  const total = offer + commission + (transfer ?? 0) + lawyerFeeEgp;
+  // MKT-02: الأقساط الباقية بالدولار بسعر النهارده
+  const remainingEgp = remainingUsd ? remainingUsd * usdEgp : 0;
+  const total = offer + remainingEgp + commission + (transfer ?? 0) + lawyerFeeEgp;
   const deposit = offer * 0.1;
   const show = (v: number) => (cur === "USD" ? money(v / usdEgp, "USD", locale) : money(v, "EGP", locale));
 
   const rows: [string, string, string?][] = [
-    [L("سعر القطعة", "Plot price"), show(offer)],
-    [L(`عمولة Resell (${num(buyerPct, locale, 2)}%)`, `Resell commission (${buyerPct}%)`), show(commission)],
+    [L("سعر القطعة", "Plot price"), show(offer), L("اللي بتدفعه للبائع", "What you pay the seller")],
+    [
+      L("الأقساط الباقية للجهاز", "Remaining authority instalments"),
+      remainingUsd === null ? L("البائع ما حددهاش — بنأكدها من إفادة الجهاز", "Not given by the seller — confirmed from the authority statement") : remainingUsd === 0 ? L("مفيش — القطعة مسددة", "None — fully paid") : show(remainingEgp),
+      remainingUsd ? L(`$${num(remainingUsd, "en")} بسعر النهارده ${num(usdEgp, locale, 2)}`, `$${remainingUsd.toLocaleString("en-US")} at today's rate ${usdEgp.toFixed(2)}`) : undefined,
+    ],
+    [L(`عمولة Resell (${num(buyerPct, locale, 2)}%)`, `Resell commission (${buyerPct}%)`), show(commission), L("بتتدفع بعد توقيع اتفاق العمولة", "Due after the commission agreement is signed")],
     [
       L("رسوم التنازل في الجهاز", "Authority transfer fee"),
       transfer === null ? L("بتتحدد من إفادة الجهاز", "Set by the authority statement") : show(transfer),
       transfer === null ? undefined : L(`${num(transferPct!, locale, 2)}% — تقديري من الإعدادات`, `${transferPct}% — estimate from settings`),
     ],
-    ...(lawyerFeeEgp > 0 ? ([[L("أتعاب المحامي", "Lawyer fee"), show(lawyerFeeEgp)]] as [string, string][]) : []),
+    ...(lawyerFeeEgp > 0 ? ([[L("أتعاب المحامي", "Lawyer fee"), show(lawyerFeeEgp), L("مراجعة العقود والورق", "Contract and document review")]] as [string, string, string][]) : []),
   ];
 
   return (

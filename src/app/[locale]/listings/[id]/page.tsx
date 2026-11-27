@@ -1,12 +1,14 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { isStaff } from "@/lib/access";
-import { buyerCanSeeFiles, buyerCanSeePlotCode } from "@/lib/deal-machine";
+import { can, dealCtx, listingCtx, subject } from "@/lib/authz";
 import { latestRate, totalEgp } from "@/lib/listing";
 import { date, daysUntil, money, num, toNum, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import { CITY, DEAL_STAGE, DOC_STATUS, DOC_TYPE, LISTING_STATUS, PAYMENT_STATUS, PRICE_TYPE, label, toneOf } from "@/lib/labels";
 import { Badge, Card, Container, DL, FileLink, Notice, PageHeader, btn } from "@/components/ui";
 import { expressInterest } from "../actions";
@@ -14,8 +16,26 @@ import { approximateCenter, plotGeo } from "@/lib/geo";
 import { getSetting } from "@/lib/settings";
 import { PlotMap } from "@/components/PlotMap";
 import { CostCalculator } from "@/components/CostCalculator";
+import { ShareButtons } from "@/components/ShareButtons";
+import { ensureReferralCode } from "@/lib/referral";
+import { siteUrl } from "@/lib/meta";
 
 type Props = { params: Promise<{ locale: string; id: string }> };
+
+/** UX-08: «أرض 405م² · القاهرة الجديدة — المرحلة الرابعة · Resell» + وصف للمشاركة */
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { locale, id } = await params;
+  if (!isLocale(locale)) return {};
+  const l = await db.listing.findUnique({ where: { id }, include: { plot: true, seller: { select: { status: true } } } });
+  if (!l || !["PUBLISHED", "IN_DEAL", "SOLD"].includes(l.status) || l.seller.status !== "ACTIVE") return { title: locale === "ar" ? "عرض" : "Listing", robots: { index: false } };
+  const area = num(l.plot.areaSqm, locale);
+  const place = `${label(CITY, l.plot.city, locale)} — ${districtName(l.plot, locale)}`;
+  const title = locale === "ar" ? `أرض ${area}م² · ${place}` : `${area} m² plot · ${place}`;
+  const rate = await latestRate();
+  const price = money(totalEgp(l, toNum(rate?.sell ?? 50)), "EGP", locale);
+  const description = locale === "ar" ? `${price} شامل · ورق متراجع مع محامي · بيت الوطن` : `${price} all-in · lawyer-checked papers · Beit El Watan`;
+  return { title, description, openGraph: { title: `${title} · Resell`, description, type: "website" }, alternates: { languages: { ar: `/ar/listings/${id}`, en: `/en/listings/${id}` } } };
+}
 
 export default async function ListingPage({ params }: Props) {
   const { locale, id } = await params;
@@ -33,20 +53,26 @@ export default async function ListingPage({ params }: Props) {
   });
   if (!listing) notFound();
 
-  const owner = user?.id === listing.sellerId;
+  const owner = user?.id === listing.sellerId || (!!listing.submittedById && user?.id === listing.submittedById);
   const staff = isStaff(user);
-  // العروض اللي مش منشورة: صاحبها والفريق بس
-  if (!["PUBLISHED", "IN_DEAL", "SOLD"].includes(listing.status) && !owner && !staff) notFound();
+  const lc = listingCtx({ ...listing, deals: [] });
+  // العروض اللي مش منشورة: صاحبها والفريق المسند بس (PERM-02)
+  // PERM-07: عروض البائع الموقوف بتختفي من السجل العام
+  const hidden = !["PUBLISHED", "IN_DEAL", "SOLD"].includes(listing.status) || listing.seller.status === "SUSPENDED";
+  if (hidden && !can(subject(user), "listing.view_private", { listing: lc }).allowed) notFound();
 
   const myDeal = user
     ? await db.deal.findFirst({
         where: { listingId: id, buyerId: user.id, status: { in: ["ACTIVE", "ON_HOLD", "COMPLETED"] } },
-        include: { contracts: true },
+        include: { contracts: true, listing: true, documents: { select: { type: true, status: true } } },
         orderBy: { createdAt: "desc" },
       })
     : null;
-  const canSeeCode = owner || staff || (!!myDeal && buyerCanSeePlotCode(myDeal.stage, myDeal.contracts));
-  const canSeeFiles = owner || staff || (!!myDeal && buyerCanSeeFiles(myDeal.stage, myDeal.contracts));
+  const pc = { listing: lc, ...(myDeal ? { deal: dealCtx(myDeal) } : {}) };
+  const canSeeCode = can(subject(user), "listing.view_code", pc).allowed;
+  // الملفات: نفس قاعدة فتح المستندات (المشتري بعد العقد المبدئي)
+  const canSeeFiles = can(subject(user), "document.view", { ...pc, document: { type: "ALLOCATION_LETTER", ownerId: listing.sellerId, uploadedById: listing.sellerId, status: "APPROVED" } }).allowed;
+  const canInterest = can(subject(user), "deal.create", { listing: lc }).allowed;
 
   const rate = await latestRate();
   const usd = toNum(rate?.sell ?? 50);
@@ -65,10 +91,11 @@ export default async function ListingPage({ params }: Props) {
           { href: `/${locale}/listings`, label: L("سجل العروض", "Listings") },
           { href: `/${locale}/listings/${id}`, label: label(CITY, listing.plot.city, locale) },
         ]}
-        title={`${label(CITY, listing.plot.city, locale)} — ${listing.plot.district}`}
+        title={`${label(CITY, listing.plot.city, locale)} — ${districtName(listing.plot, locale)}`}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
             <Badge tone={toneOf(listing.status)}>{label(LISTING_STATUS, listing.status, locale)}</Badge>
+            {listing.statementExpiredAt && <Badge tone="amber">{L("⚠ محتاج تحديث — إفادة الجهاز انتهت", "⚠ Needs update — authority statement expired")}</Badge>}
             {num(area, locale)} {L("م²", "m²")} · {label(PAYMENT_STATUS, listing.plot.paymentStatus, locale)}
           </span>
         }
@@ -92,7 +119,7 @@ export default async function ListingPage({ params }: Props) {
             <DL
               items={[
                 [L("المدينة", "City"), label(CITY, listing.plot.city, locale)],
-                [L("المرحلة / الحي", "Phase / district"), listing.plot.district],
+                [L("المرحلة / الحي", "Phase / district"), districtName(listing.plot, locale)],
                 [
                   L("كود القطعة", "Plot code"),
                   canSeeCode ? (
@@ -193,6 +220,17 @@ export default async function ListingPage({ params }: Props) {
             </p>
           </Card>
 
+          {/* MKT-05: مشاركة العرض */}
+          <Card title={L("شارك العرض", "Share this listing")}>
+            <ShareButtons
+              base={siteUrl()}
+              path={`/${locale}/listings/${id}`}
+              text={L(`أرض ${num(area, locale)}م² · ${label(CITY, listing.plot.city, locale)} — ${districtName(listing.plot, locale)} · ${money(total, "EGP", locale)}`, `${num(area, locale)} m² plot · ${label(CITY, listing.plot.city, locale)} — ${districtName(listing.plot, locale)} · ${money(total, "EGP", locale)}`)}
+              refCode={user ? await ensureReferralCode(user) : null}
+              ar={locale === "ar"}
+            />
+          </Card>
+
           {listing.status !== "SOLD" && (
             <Card title={L("احسب التكلفة الكاملة", "Full cost calculator")}>
               <CostCalculator
@@ -202,6 +240,7 @@ export default async function ListingPage({ params }: Props) {
                 transferPct={fees.authorityTransferPct ?? null}
                 lawyerFeeEgp={fees.buyerLawyerFeeEgp ?? 0}
                 usdEgp={usd}
+                remainingUsd={listing.remainingUsd ? toNum(listing.remainingUsd) : listing.plot.paymentStatus === "FULLY_PAID" ? 0 : null}
               />
             </Card>
           )}
@@ -236,11 +275,20 @@ export default async function ListingPage({ params }: Props) {
                     "Register your interest and a broker will contact you. After the commission agreement we introduce you to the seller and negotiate with you.",
                   )}
                 </p>
-                <form action={expressInterest.bind(null, locale, id)}>
-                  <button type="submit" className={`${btn.primary} w-full`}>
-                    {user ? L("أنا مهتم بالقطعة دي", "I'm interested in this plot") : L("ادخل وابدي اهتمامك", "Sign in to register interest")}
-                  </button>
-                </form>
+                {user && !canInterest ? (
+                  <Notice tone="amber">
+                    {L("لازم توثّق هويتك الأول عشان تبدي اهتمام بقطعة.", "You need to verify your ID before registering interest in a plot.")}{" "}
+                    <Link href={`/${locale}/account#kyc`} className="font-semibold underline">
+                      {L("وثّق هويتك", "Verify your ID")}
+                    </Link>
+                  </Notice>
+                ) : (
+                  <form action={expressInterest.bind(null, locale, id)}>
+                    <button type="submit" className={`${btn.primary} w-full`}>
+                      {user ? L("أنا مهتم بالقطعة دي", "I'm interested in this plot") : L("ادخل وابدي اهتمامك", "Sign in to register interest")}
+                    </button>
+                  </form>
+                )}
               </>
             ) : (
               <p className="text-muted">{L("القطعة دي في صفقة دلوقتي.", "This plot is currently in a deal.")}</p>

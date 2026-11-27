@@ -12,61 +12,60 @@ const base: DealFacts = {
   hasAuthorityApprovalDoc: false,
 };
 
-describe("مراحل الصفقة", () => {
-  it("بتمشي بالترتيب", () => {
+describe("DATA-05 — شروط الانتقال", () => {
+  it("المراحل بالترتيب", () => {
     expect(nextStage("INTEREST")).toBe("COMMISSION_AGREEMENT");
     expect(nextStage("AUTHORITY_APPROVED")).toBe("CLOSED");
     expect(nextStage("CLOSED")).toBeNull();
   });
 
-  it("الاهتمام محتاج وسيط", () => {
-    expect(blockersToAdvance({ ...base, hasBroker: false })).toEqual(["need_broker"]);
-    expect(blockersToAdvance(base)).toEqual([]);
+  it("في «اهتمام» الشرط = اتفاق العمولة متوقّع من الطرفين (مش «كل الشروط اتحققت»)", () => {
+    expect(blockersToAdvance(base)).toEqual(["need_commission_signed"]);
+    expect(blockersToAdvance({ ...base, hasBroker: false })).toEqual(["need_broker", "need_commission_signed"]);
+    expect(blockersToAdvance({ ...base, contracts: [{ type: "COMMISSION_AGREEMENT", status: "SENT_FOR_SIGNATURE" }] })).toEqual(["need_commission_signed"]);
+    expect(blockersToAdvance({ ...base, contracts: [{ type: "COMMISSION_AGREEMENT", status: "SIGNED" }] })).toEqual([]);
   });
 
-  it("اتفاق العمولة لازم يبقى متوقّع", () => {
+  it("اتفاق السعر: موافقة الطرفين + تسجيل السعر", () => {
     const f = { ...base, stage: "COMMISSION_AGREEMENT" as const };
-    expect(blockersToAdvance(f)).toEqual(["need_commission_signed"]);
-    expect(blockersToAdvance({ ...f, contracts: [{ type: "COMMISSION_AGREEMENT", status: "APPROVED" }] })).toEqual([
-      "need_commission_signed",
-    ]);
-    expect(blockersToAdvance({ ...f, contracts: [{ type: "COMMISSION_AGREEMENT", status: "SIGNED" }] })).toEqual([]);
+    expect(blockersToAdvance(f)).toEqual(["need_price_confirmed", "need_agreed_price"]);
+    expect(blockersToAdvance({ ...f, priceConfirmed: true, agreedPrice: 4_000_000 })).toEqual([]);
   });
 
-  it("العقد المبدئي محتاج توقيع وعربون محفوظ", () => {
+  it("العقد المبدئي لازم يتوقّع", () => {
+    const f = { ...base, stage: "PRICE_AGREED" as const };
+    expect(blockersToAdvance(f)).toEqual(["need_preliminary_signed"]);
+    expect(blockersToAdvance({ ...f, contracts: [{ type: "PRELIMINARY_CONTRACT", status: "SIGNED" }] })).toEqual([]);
+  });
+
+  it("التقديم في الجهاز: عربون محفوظ + مندوب", () => {
     const f = { ...base, stage: "PRELIMINARY_CONTRACT" as const };
-    expect(blockersToAdvance(f)).toEqual(["need_preliminary_signed", "need_deposit_held"]);
-    expect(
-      blockersToAdvance({
-        ...f,
-        contracts: [{ type: "PRELIMINARY_CONTRACT", status: "SIGNED" }],
-        deposits: [{ escrowStatus: "HELD" }],
-      }),
-    ).toEqual([]);
+    expect(blockersToAdvance(f)).toEqual(["need_deposit_held", "need_agent"]);
+    expect(blockersToAdvance({ ...f, deposits: [{ escrowStatus: "HELD" }], hasAgent: true })).toEqual([]);
   });
 
-  it("الصفقة ما تقفلش قبل ما العربون يتصرف", () => {
-    const f = { ...base, stage: "AUTHORITY_APPROVED" as const, deposits: [{ escrowStatus: "HELD" }] };
-    expect(blockersToAdvance(f)).toEqual(["need_deposit_released"]);
+  it("موافقة الجهاز بعد إيصال التقديم، والإغلاق بعد اعتماد خطاب الموافقة", () => {
+    expect(blockersToAdvance({ ...base, stage: "TRANSFER_FILED" })).toEqual(["need_filing_receipt"]);
+    expect(blockersToAdvance({ ...base, stage: "TRANSFER_FILED", hasFilingReceipt: true })).toEqual([]);
+    expect(blockersToAdvance({ ...base, stage: "AUTHORITY_APPROVED" })).toEqual(["need_approval_doc"]);
+    expect(blockersToAdvance({ ...base, stage: "AUTHORITY_APPROVED", hasAuthorityApprovalDoc: true })).toEqual([]);
   });
 
-  it("صفقة متوقفة أو ملغية ما تتحركش", () => {
+  it("صفقة متوقفة أو ملغية أو مقفولة ما تتحركش", () => {
     expect(blockersToAdvance({ ...base, status: "ON_HOLD" })).toEqual(["not_active"]);
     expect(blockersToAdvance({ ...base, status: "CANCELLED" })).toEqual(["not_active"]);
+    expect(blockersToAdvance({ ...base, stage: "CLOSED" })).toEqual(["last_stage"]);
   });
 });
 
-describe("صلاحيات المشتري", () => {
-  it("كود القطعة بعد اتفاق العمولة بس", () => {
+describe("كشف البيانات للمشتري", () => {
+  it("كود القطعة بعد توقيع اتفاق العمولة", () => {
     expect(buyerCanSeePlotCode("INTEREST", [])).toBe(false);
-    expect(buyerCanSeePlotCode("COMMISSION_AGREEMENT", [{ type: "COMMISSION_AGREEMENT", status: "SENT_FOR_SIGNATURE" }])).toBe(false);
+    expect(buyerCanSeePlotCode("INTEREST", [{ type: "COMMISSION_AGREEMENT", status: "SENT_FOR_SIGNATURE" }])).toBe(false);
     expect(buyerCanSeePlotCode("COMMISSION_AGREEMENT", [{ type: "COMMISSION_AGREEMENT", status: "SIGNED" }])).toBe(true);
-    expect(buyerCanSeePlotCode("PRICE_AGREED", [])).toBe(true);
   });
-
-  it("الملفات بعد العقد المبدئي بس", () => {
+  it("الملفات بعد العقد المبدئي", () => {
     expect(buyerCanSeeFiles("PRICE_AGREED", [])).toBe(false);
     expect(buyerCanSeeFiles("PRELIMINARY_CONTRACT", [{ type: "PRELIMINARY_CONTRACT", status: "SIGNED" }])).toBe(true);
-    expect(buyerCanSeeFiles("TRANSFER_FILED", [])).toBe(true);
   });
 });

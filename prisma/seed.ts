@@ -2,6 +2,8 @@
 // التشغيل:  npm run db:seed   — بيتخطى لو البيانات موجودة. للبداية من الأول: npm run db:clean -- --yes
 // كل الأرقام والأسماء وهمية. الإيميلات على example.com (دومين محجوز للأمثلة).
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Prisma, PrismaClient } from "@prisma/client";
 import type {
   City,
@@ -566,11 +568,39 @@ async function seedNotifications() {
   console.log(`${rows.length} إشعار تجريبي اتضاف.`);
 }
 
+/** PERM-04/05: إسناد العروض (نفس SQL الـ migrations) + حسابين تجربة للأدوار الجديدة */
+async function backfillAssignments() {
+  for (const dir of [
+    "20261127030000_permissions",
+    "20261127032000_backfill_assignments",
+    "20261127032500_backfill_lawyers",
+    "20261127033000_fix_locked_rates",
+    "20261127033500_fix_locked_rates_fallback",
+    "20261127042000_districts",
+  ]) {
+    const sql = readFileSync(join(process.cwd(), "prisma", "migrations", dir, "migration.sql"), "utf8");
+    const updates = sql
+      .split(";")
+      .map((s) => s.replace(/^\s*--.*$/gm, "").trim())
+      .filter((s) => /^(UPDATE|WITH)\b/i.test(s));
+    for (const s of updates) await prisma.$executeRawUnsafe(s);
+  }
+  const extra = [
+    { id: "demo-broker-lead", name: "رانيا مختار", phone: "+201000000111", role: "BROKER_LEAD" as const },
+    { id: "demo-partner", name: "شريف الدسوقي", phone: "+201000000222", role: "PARTNER_BROKER" as const, brokerRegNo: "BR-2024-0457", partnerApprovedAt: new Date() },
+  ];
+  for (const u of extra) {
+    if (await prisma.user.findFirst({ where: { OR: [{ id: u.id }, { phone: u.phone }] } })) continue;
+    await prisma.user.create({ data: { ...u, accountLevel: "VERIFIED", locale: "ar", termsAcceptedAt: new Date(), twoFactorEnabled: u.role === "BROKER_LEAD" } });
+  }
+}
+
 async function main() {
   if (await prisma.appSetting.findUnique({ where: { key: "demo.seeded" } })) {
     console.log("البيانات التجريبية موجودة بالفعل — بنكمّل الإضافات بس.");
     await backfillBoundaries();
     await seedNotifications();
+    await backfillAssignments();
     return;
   }
   if ((await prisma.user.count()) > 0) {
@@ -587,7 +617,8 @@ async function main() {
   await prisma.plot.createMany({ data: rows.plots });
   await prisma.listing.createMany({ data: rows.listings });
   await prisma.serviceRequest.createMany({ data: rows.services });
-  await prisma.deal.createMany({ data: rows.deals });
+  // DATA-04: كل صفقات التجربة متعلّمة isDemo — ما تدخلش في المؤشر لما DEMO_MODE مقفول
+  await prisma.deal.createMany({ data: rows.deals.map((d) => ({ ...d, isDemo: true })) });
   await chunk(rows.docs, (d) => prisma.document.createMany({ data: d }));
   await prisma.kycProfile.createMany({ data: rows.kyc });
   await prisma.review.createMany({ data: rows.reviews });
@@ -616,6 +647,7 @@ async function main() {
   });
   await backfillBoundaries();
   await seedNotifications();
+  await backfillAssignments();
   const c = (k: keyof typeof rows) => rows[k].length;
   console.log(
     `تمام في ${((Date.now() - t0) / 1000).toFixed(1)} ث: ${c("users")} مستخدم، ${c("listings")} عرض، ${c("deals")} صفقة، ${c("contracts")} عقد، ${c("docs")} مستند بمرفقاته، ${c("services")} طلب خدمة، ${c("buy")} طلب شراء، ${c("rates")} سعر صرف.`,

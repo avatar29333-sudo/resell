@@ -5,6 +5,7 @@ import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { dateTime, tr } from "@/lib/format";
+import { pageMeta } from "@/lib/meta";
 import { Container, Empty, PageHeader, btn } from "@/components/ui";
 
 async function markAllRead(locale: string) {
@@ -14,6 +15,8 @@ async function markAllRead(locale: string) {
   await db.notification.updateMany({ where: { userId: me.id, readAt: null }, data: { readAt: new Date() } });
   revalidatePath(`/${l}`, "layout");
 }
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "الإشعارات", "Notifications", { noindex: true });
 
 export default async function NotificationsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;

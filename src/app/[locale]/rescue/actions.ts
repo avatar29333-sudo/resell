@@ -8,8 +8,9 @@ import { isValidPhone, normalizePhone } from "@/lib/format";
 import { CITY_KEYS } from "@/lib/labels";
 import type { City } from "@prisma/client";
 import { idsByRole, notify } from "@/lib/notifications";
+import { readAttribution } from "@/lib/attribution";
 
-export type RescueState = { ok?: boolean; error?: string; ref?: string };
+export type RescueState = { ok?: boolean; error?: string; ref?: string; fieldErrors?: Partial<Record<"name" | "phone" | "file", string>> };
 
 export async function submitRescue(locale: string, _prev: RescueState, form: FormData): Promise<RescueState> {
   const ar = locale === "ar";
@@ -21,23 +22,36 @@ export async function submitRescue(locale: string, _prev: RescueState, form: For
   const plotCode = String(form.get("plotCode") ?? "").trim() || null;
   const type = form.get("type") === "SITE_INSPECTION" ? "SITE_INSPECTION" : "DEADLINE_RESCUE";
 
-  if (name.length < 3) return { error: ar ? "اكتب اسمك" : "Enter your name" };
-  if (!isValidPhone(phone)) return { error: ar ? "رقم الواتساب مش صحيح — اكتبه بكود الدولة" : "Invalid WhatsApp number — include the country code" };
-
+  // UX-01: الخطأ بيرجع لكل حقل لوحده عشان يظهر جنبه
+  const fieldErrors: RescueState["fieldErrors"] = {};
+  if (name.length < 3) fieldErrors.name = ar ? "اكتب اسمك بالكامل" : "Enter your full name";
+  if (!isValidPhone(phone)) fieldErrors.phone = ar ? "رقم الواتساب مش صحيح — اكتبه بكود الدولة" : "Invalid WhatsApp number — include the country code";
   const upload = await fileFromForm(form, "file");
-  if ("error" in upload && upload.error)
-    return { error: ar ? "الملف لازم يكون PDF أو صورة وأقل من 4 ميجا" : "The file must be a PDF or image under 4 MB" };
+  if ("error" in upload && upload.error) fieldErrors.file = ar ? "الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا" : "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB";
+  if (Object.keys(fieldErrors).length) return { error: ar ? "راجع الخانات المعلّمة" : "Please check the highlighted fields", fieldErrors };
 
   const user = await getCurrentUser();
+  const source = await readAttribution(); // MKT-10
   const req = await db.serviceRequest.create({
     data: {
+      ...(source ? { source } : {}),
       type,
       contactName: name,
       contactPhone: phone,
       requesterId: user?.id,
       city,
       plotCode,
-      message: [area && `${ar ? "المساحة" : "Area"}: ${area} m²`, String(form.get("message") ?? "").trim()].filter(Boolean).join(" — ") || null,
+      // MKT-01: القيم من الحاسبة (الشريحة والسعر والمبلغ بالدولار) بتوصل للوسيط مع الطلب
+      message:
+        [
+          area && `${ar ? "المساحة" : "Area"}: ${area} ${ar ? "م²" : "m²"}`,
+          form.get("tier") && `${ar ? "الشريحة" : "Tier"}: ${{ a: ">70%", b: "35–70%", c: "<35%" }[String(form.get("tier"))] ?? ""}`,
+          Number(form.get("price")) > 0 && `${ar ? "السعر الحالي" : "Current price"}: ${Number(form.get("price")).toLocaleString("en-US")} EGP`,
+          Number(form.get("feeUsd")) > 0 && `${ar ? "المبلغ التقديري" : "Estimated fee"}: $${Number(form.get("feeUsd")).toLocaleString("en-US")}`,
+          String(form.get("message") ?? "").trim(),
+        ]
+          .filter(Boolean)
+          .join(" — ") || null,
     },
   });
 

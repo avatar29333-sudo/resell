@@ -4,7 +4,10 @@ import { isLocale } from "@/i18n/config";
 import { tr } from "@/lib/format";
 import { getSetting } from "@/lib/settings";
 import { num } from "@/lib/format";
+import { pageMeta } from "@/lib/meta";
 import { Container, Notice, PageHeader } from "@/components/ui";
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "الشروط والأحكام", "Terms and conditions");
 
 export default async function TermsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;

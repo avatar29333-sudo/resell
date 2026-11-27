@@ -27,6 +27,21 @@ enum Role {
   AGENT // مندوب الجهاز
   FINANCE // مالي
   ADMIN // أدمن
+  PARTNER_BROKER // سمسار شريك من برّه (PERM-05)
+  BROKER_LEAD // مسؤول الوسطاء (PERM-05)
+}
+
+/// حالة الحساب (PERM-07)
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+/// طلب صرف محتاج موافقة أدمن — قاعدة الأربع عيون (PERM-09)
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 /// مستويات الحساب — افتراض مبدئي لحد ما نطابقها مع شاشة «مستويات الحساب»
@@ -97,6 +112,7 @@ enum DocumentType {
   CONTRACT_PDF // نسخة عقد
   POWER_OF_ATTORNEY // توكيل
   OTHER
+  FILING_RECEIPT // إيصال تقديم الطلب في الجهاز (المندوب)
 }
 
 enum DocumentStatus {
@@ -189,6 +205,7 @@ enum BuyRequestStatus {
 enum ServiceType {
   DEADLINE_RESCUE // إنقاذ المهلة
   SITE_INSPECTION // معاينة
+  VALUATION // MKT-03: «اعرف قيمة قطعتك»
 }
 
 enum ServiceRequestStatus {
@@ -215,13 +232,41 @@ model User {
   updatedAt        DateTime     @updatedAt
   //حذف بالطلب (قانون 151): البيانات الشخصية بتتمسح والسجل يفضل
   anonymizedAt     DateTime?
+  /// MKT-10: مصدر التسجيل (first/last touch: utm + referrer + كود الإحالة)
+  source           Json?
+  /// MKT-06: كود الإحالة بتاع المستخدم + مين أحاله
+  referralCode     String?   @unique
+  referredById     String?
+  referredBy       User?     @relation("Referral", fields: [referredById], references: [id])
+  referrals        User[]    @relation("Referral")
+  rewardsEarned    ReferralReward[] @relation("RewardReferrer")
+  rewardsAsReferred ReferralReward[] @relation("RewardReferred")
+  /// MKT-07: نصيب السمسار الشريك من العمولة (%)
+  partnerSharePct  Decimal?  @db.Decimal(5, 2)
   // التحقق الثنائي (تطبيق Authenticator) — السر متشفّر بـ AES-GCM
   totpSecret       String?
   totpEnabledAt    DateTime?
   // موافقة صريحة على الشروط وسياسة الخصوصية (قانون 151)
   termsAcceptedAt  DateTime?
+  // PERM-07: إيقاف الحساب
+  status           AccountStatus @default(ACTIVE)
+  suspendedAt      DateTime?
+  suspendReason    String?
+  // PERM-08: بيزيد مع تغيير الدور أو الإيقاف → كل الجلسات القديمة بتتقفل
+  sessionVersion   Int          @default(0)
+  // PERM-05: السمسار الشريك — رقم القيد بيتراجع من الأدمن قبل التفعيل
+  brokerRegNo      String?
+  partnerApprovedAt DateTime?
+  // عدد مرات رفض التوثيق (بعد 3 = مراجعة أدمن)
+  kycRejections    Int          @default(0)
 
   notifications       Notification[]
+  reconciliations        Reconciliation[] @relation("ReconciliationBy")
+  assignedListingsBroker Listing[] @relation("ListingBroker")
+  assignedListingsLawyer Listing[] @relation("ListingLawyer")
+  submittedListings      Listing[] @relation("ListingSubmitter")
+  paymentRequests        PaymentApproval[] @relation("ApprovalRequester")
+  paymentDecisions       PaymentApproval[] @relation("ApprovalDecider")
   kycProfile          KycProfile?      @relation("KycUser")
   kycReviews          KycProfile[]     @relation("KycReviewer")
   listings            Listing[]        @relation("Seller")
@@ -242,6 +287,7 @@ model User {
   createdPlots        Plot[]
 
   @@index([role])
+  @@index([referredById])
 }
 
 /// توثيق الهوية — مراجعة يدوية في المرحلة 1
@@ -270,6 +316,8 @@ model Plot {
   id                 String            @id @default(cuid())
   city               City
   district           String //المرحلة / الحي
+  /// DATA-07: الاسم الإنجليزي للحي (من جدول District)
+  districtEn         String?
   code               String //كود القطعة
   areaSqm            Decimal           @db.Decimal(10, 2)
   //حدود القطعة (PostGIS). Prisma ما بيقراهاش مباشرة — بنكتب ونقرا بـ SQL.
@@ -291,6 +339,19 @@ model Plot {
   @@index([buildDeadline])
 }
 
+/// DATA-07: قايمة الأحياء/المراحل لكل مدينة — الـ wizard بيختار منها بدل النص الحر
+model District {
+  id        String   @id @default(cuid())
+  city      City
+  nameAr    String
+  nameEn    String
+  sort      Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([city, nameAr])
+}
+
 model Listing {
   id            String        @id @default(cuid())
   plotId        String
@@ -305,6 +366,19 @@ model Listing {
   paidAmountUsd Decimal?      @db.Decimal(14, 2)
   status        ListingStatus @default(DRAFT)
   publishedAt   DateTime?
+  // PERM-04: الإسناد — الوسيط والمحامي المسؤولين عن العرض
+  assignedBrokerId String?
+  assignedBroker   User?      @relation("ListingBroker", fields: [assignedBrokerId], references: [id])
+  assignedLawyerId String?
+  assignedLawyer   User?      @relation("ListingLawyer", fields: [assignedLawyerId], references: [id])
+  // PERM-05: السمسار الشريك اللي رفع العرض نيابة عن عميله + موافقة العميل
+  /// MKT-02: الأقساط الباقية للجهاز بالدولار (المشتري بيكمّلها)
+  remainingUsd     Decimal?   @db.Decimal(14, 2)
+  /// DATA-03: إفادة الجهاز انتهت والعرض «محتاج تحديث»
+  statementExpiredAt DateTime?
+  submittedById    String?
+  submittedBy      User?      @relation("ListingSubmitter", fields: [submittedById], references: [id])
+  clientConsentAt  DateTime?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -314,6 +388,26 @@ model Listing {
   @@index([status, publishedAt])
   @@index([plotId])
   @@index([sellerId])
+  @@index([assignedBrokerId])
+}
+
+/// PERM-09: صرف فوق الحد محتاج موافقة أدمن قبل ما يتنفذ
+model PaymentApproval {
+  id            String         @id @default(cuid())
+  depositId     String
+  deposit       Deposit        @relation(fields: [depositId], references: [id])
+  action        String // RELEASED_TO_SELLER أو REFUNDED_TO_BUYER
+  amount        Decimal        @db.Decimal(14, 2)
+  status        ApprovalStatus @default(PENDING)
+  requestedById String
+  requestedBy   User           @relation("ApprovalRequester", fields: [requestedById], references: [id])
+  decidedById   String?
+  decidedBy     User?          @relation("ApprovalDecider", fields: [decidedById], references: [id])
+  note          String?
+  createdAt     DateTime       @default(now())
+  decidedAt     DateTime?
+
+  @@index([status, createdAt])
 }
 
 /// المستندات: كل إصدار بيتحفظ، ومفيش حذف.
@@ -343,6 +437,11 @@ model Document {
   sizeBytes    Int
   sha256       String         @db.Char(64)
   expiresAt    DateTime?      @db.Date //تاريخ انتهاء المستند (لو له)
+  /// OPS-02: مكان ووقت تصوير صورة الموقع
+  geoLat       Float?
+  geoLng       Float?
+  geoAccuracyM Float?
+  takenAt      DateTime?
   createdAt    DateTime       @default(now())
 
   reviews          Review[]
@@ -389,6 +488,12 @@ model Deal {
   status          DealStatus @default(ACTIVE)
   agreedPrice     Decimal?   @db.Decimal(14, 2)
   agreedCurrency  Currency?
+  // السعر المقترح من الوسيط — بيتسجل «متفق» بعد ما الطرفين يوافقوا جوه الغرفة
+  proposedPrice   Decimal?   @db.Decimal(14, 2)
+  buyerPriceOkAt  DateTime?
+  sellerPriceOkAt DateTime?
+  // DATA-01: سعر الصرف بيتثبت مرة واحدة لحظة توقيع العقد المبدئي
+  rateLockedAt    DateTime?
   //سعر الصرف المثبّت وقت اتفاق السعر (نسخة من القيمة + المرجع)
   lockedUsdEgpRate Decimal?  @db.Decimal(12, 4)
   exchangeRateId  String?
@@ -402,6 +507,13 @@ model Deal {
   agent           User?      @relation("DealAgent", fields: [agentId], references: [id])
   stageChangedAt  DateTime   @default(now())
   closedAt        DateTime?
+  /// OPS-02: حالة ملف التنازل في الجهاز (SUBMITTED / NEEDS_INFO / APPROVED / REJECTED)
+  authorityStatus    String?
+  authorityUpdatedAt DateTime?
+  /// MKT-10: مصدر المشتري لما أبدى اهتمام
+  source          Json?
+  /// DATA-04: صفقة من بيانات التجربة — ما تدخلش في المؤشر ولا العدادات لما DEMO_MODE مقفول
+  isDemo          Boolean    @default(false)
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
@@ -410,8 +522,11 @@ model Deal {
   documents  Document[]
   commission Commission?
   deposits   Deposit[]
+  referralReward ReferralReward?
+  story          DealStory?
 
   @@index([stage, status])
+  @@index([status, isDemo])
   @@index([listingId])
   @@index([buyerId])
   @@index([brokerId])
@@ -469,6 +584,8 @@ model Commission {
   currency         Currency         @default(EGP)
   status           CommissionStatus @default(PENDING)
   paidAt           DateTime?
+  /// OPS-01: مرجع التحصيل (تحويل بنكي/إيصال)
+  paymentRef       String?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 }
@@ -482,6 +599,7 @@ model Deposit {
   currency          Currency     @default(EGP)
   receiptDocumentId String?      @unique
   receiptDocument   Document?    @relation(fields: [receiptDocumentId], references: [id])
+  approvals         PaymentApproval[]
   escrowStatus      EscrowStatus @default(AWAITING_TRANSFER)
   bankReference     String?
   heldAt            DateTime?
@@ -490,6 +608,20 @@ model Deposit {
   updatedAt         DateTime     @updatedAt
 
   @@index([dealId])
+}
+
+/// OPS-01: المطابقة الشهرية — إجمالي العرابين المحفوظة في النظام مقابل رقم كشف البنك
+model Reconciliation {
+  id          String   @id @default(cuid())
+  month       String // YYYY-MM
+  systemTotal Decimal  @db.Decimal(14, 2)
+  bankTotal   Decimal  @db.Decimal(14, 2)
+  note        String?
+  enteredById String
+  enteredBy   User     @relation("ReconciliationBy", fields: [enteredById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([month])
 }
 
 /// سعر صرف الدولار بالجنيه
@@ -537,10 +669,99 @@ model BuyRequest {
   budgetMax Decimal?         @db.Decimal(14, 2)
   currency  Currency         @default(EGP)
   status    BuyRequestStatus @default(ACTIVE)
+  /// MKT-13: موافقة صريحة على تنبيهات واتساب/إيميل + رابط إيقاف + آخر تنبيه (رسالة واحدة في اليوم)
+  alertConsentAt DateTime?
+  unsubToken     String?   @unique
+  lastAlertAt    DateTime?
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
   @@index([status])
+}
+
+/// MKT-04: «فكّرني بمهلتي» — من غير حساب كامل
+model DeadlineReminder {
+  id             String    @id @default(cuid())
+  phone          String
+  city           City
+  deadline       DateTime  @db.Date
+  plotCode       String?
+  locale         String    @default("ar")
+  consentAt      DateTime
+  unsubToken     String    @unique
+  unsubscribedAt DateTime?
+  sent90At       DateTime?
+  sent30At       DateTime?
+  sent7At        DateTime?
+  source         Json?
+  createdAt      DateTime  @default(now())
+
+  @@index([city])
+  @@index([deadline])
+}
+
+/// رسايل برّه المنصة (واتساب/إيميل) — بتتسجل هنا وبتتبعت لما المزوّد يتظبط
+model OutboundMessage {
+  id        String    @id @default(cuid())
+  channel   String
+  to        String
+  kind      String
+  body      String
+  status    String    @default("QUEUED")
+  error     String?
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([status, createdAt])
+  @@index([to, kind, createdAt])
+}
+
+/// MKT-06: مكافأة إحالة — بتستحق بس لما صفقة المُحال تتقفل
+model ReferralReward {
+  id         String    @id @default(cuid())
+  referrerId String
+  referrer   User      @relation("RewardReferrer", fields: [referrerId], references: [id])
+  referredId String
+  referred   User      @relation("RewardReferred", fields: [referredId], references: [id])
+  dealId     String    @unique
+  deal       Deal      @relation(fields: [dealId], references: [id])
+  amount     Decimal   @db.Decimal(14, 2)
+  status     String    @default("DUE")
+  paidAt     DateTime?
+  paymentRef String?
+  createdAt  DateTime  @default(now())
+
+  @@index([referrerId])
+}
+
+/// MKT-12: مصروف الحملة في الشهر (إدخال يدوي) → تكلفة العميل
+model CampaignSpend {
+  id          String   @id @default(cuid())
+  channel     String
+  month       String
+  amountEgp   Decimal  @db.Decimal(14, 2)
+  enteredById String
+  createdAt   DateTime @default(now())
+
+  @@unique([channel, month])
+}
+
+/// MKT-14: قصة صفقة حقيقية بموافقة الطرفين — الأدمن بيراجع وينشر
+model DealStory {
+  id              String    @id @default(cuid())
+  dealId          String    @unique
+  deal            Deal      @relation(fields: [dealId], references: [id])
+  buyerConsentAt  DateTime?
+  sellerConsentAt DateTime?
+  showPlotCode    Boolean   @default(false)
+  buyerShowCode   Boolean   @default(false)
+  sellerShowCode  Boolean   @default(false)
+  textAr          String?
+  textEn          String?
+  status          String    @default("PENDING")
+  reviewedById    String?
+  publishedAt     DateTime?
+  createdAt       DateTime  @default(now())
 }
 
 /// أول جدول هيشتغل: فورم صفحة «إنقاذ المهلة».
@@ -561,6 +782,10 @@ model ServiceRequest {
   message      String?
   fee          Decimal?             @db.Decimal(14, 2)
   feeCurrency  Currency?
+  /// OPS-02: تقدير المندوب لنسبة التنفيذ من المعاينة
+  constructionEstimate Int?
+  /// MKT-10: مصدر الطلب
+  source       Json?
   assignedToId String?
   assignedTo   User?                @relation("ServiceAssignee", fields: [assignedToId], references: [id])
   documents    Document[]

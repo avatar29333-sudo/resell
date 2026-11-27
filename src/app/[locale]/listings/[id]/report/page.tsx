@@ -2,17 +2,24 @@ import { notFound, redirect } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { isStaff } from "@/lib/access";
+import { can, listingCtx, subject } from "@/lib/authz";
 import { buyerCanSeeFiles } from "@/lib/deal-machine";
 import { plotGeo } from "@/lib/geo";
 import { audit } from "@/lib/audit";
 import { date, daysUntil, num, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import { CITY, DOC_STATUS, DOC_TYPE, PAYMENT_STATUS, REVIEW_DECISION, label } from "@/lib/labels";
 import { PlotMap } from "@/components/PlotMap";
 import { PrintButton } from "@/components/PrintButton";
 import { Logo } from "@/components/Logo";
 
 // تقرير المعاينة — صفحة مجهّزة للطباعة أو الحفظ PDF من المتصفح
+export async function generateMetadata({ params }: { params: Promise<{ locale: string; id: string }> }) {
+  const { locale, id } = await params;
+  const t = locale === "en" ? "Inspection report" : "تقرير المعاينة";
+  return { title: `${t} #${id.slice(-6).toUpperCase()}`, robots: { index: false, follow: false } };
+}
+
 export default async function InspectionReport({ params }: { params: Promise<{ locale: string; id: string }> }) {
   const { locale, id } = await params;
   if (!isLocale(locale)) notFound();
@@ -33,8 +40,8 @@ export default async function InspectionReport({ params }: { params: Promise<{ l
   });
   if (!listing) notFound();
 
-  // نفس قاعدة المستندات: صاحب القطعة والفريق، والمشتري بعد العقد المبدئي
-  let allowed = isStaff(me) || listing.sellerId === me.id;
+  // نفس قاعدة المستندات (PERM-01): صاحب القطعة والفريق المسند، والمشتري بعد العقد المبدئي
+  let allowed = can(subject(me), "listing.view_private", { listing: listingCtx({ ...listing, deals: [] }) }).allowed;
   if (!allowed) {
     const deals = await db.deal.findMany({ where: { listingId: id, buyerId: me.id }, include: { contracts: true } });
     allowed = deals.some((d) => buyerCanSeeFiles(d.stage, d.contracts));
@@ -68,7 +75,7 @@ export default async function InspectionReport({ params }: { params: Promise<{ l
         {(
           [
             [L("المدينة", "City"), label(CITY, listing.plot.city, locale)],
-            [L("المرحلة / الحي", "Phase / district"), listing.plot.district],
+            [L("المرحلة / الحي", "Phase / district"), districtName(listing.plot, locale)],
             [L("كود القطعة", "Plot code"), listing.plot.code],
             [L("المساحة", "Area"), `${num(listing.plot.areaSqm, locale)} ${L("م²", "m²")}`],
             [L("حالة السداد", "Payment status"), label(PAYMENT_STATUS, listing.plot.paymentStatus, locale)],

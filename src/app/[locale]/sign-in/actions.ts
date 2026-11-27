@@ -7,6 +7,8 @@ import { DEMO_MODE, checkCode, clearPending, createSession, getPending, homeFor,
 import { maskEmail, type Channel } from "@/lib/notify";
 import { decryptSecret, verifyTotp } from "@/lib/totp";
 import { classifyIdentifier } from "@/lib/identifier";
+import { safeNext } from "@/lib/safe-next";
+import { readAttribution, readReferralCode } from "@/lib/attribution";
 import { isValidPhone, maskPhone, normalizePhone } from "@/lib/format";
 import { isLocale, type Locale } from "@/i18n/config";
 
@@ -40,14 +42,12 @@ const M = {
   locked: ["محاولات كتير غلط. استنى 15 دقيقة واطلب رمز جديد", "Too many wrong attempts. Wait 15 minutes and request a new code"],
   wrong: ["الرمز غلط", "Wrong code"],
   terms: ["لازم توافق على الشروط وسياسة الخصوصية", "You must accept the terms and privacy policy"],
+  suspended: ["الحساب ده موقوف. كلّم الدعم لو محتاج مساعدة", "This account is suspended. Contact support if you need help"],
   totpWrong: ["رمز تطبيق التحقق غلط أو خلص — جرّب الرمز اللي ظاهر دلوقتي", "Wrong or expired authenticator code — try the current one"],
 } as const;
 
 const msg = (locale: Locale, k: keyof typeof M) => (locale === "ar" ? M[k][0] : M[k][1]);
 
-function safeNext(locale: Locale, next: string | null) {
-  return next && next.startsWith(`/${locale}/`) && !next.startsWith("//") ? next : null;
-}
 
 const channelOf = (f: FormData): Channel => (f.get("channel") === "email" ? "email" : "whatsapp");
 
@@ -62,6 +62,11 @@ export async function identify(locale: Locale, _prev: SignInState, form: FormDat
   const user = id.kind === "email" ? await db.user.findUnique({ where: { email: id.value } }) : await db.user.findUnique({ where: { phone: id.value } });
 
   if (!user || user.anonymizedAt) return { step: "register", prefill };
+  // PERM-07: الحساب الموقوف ما يدخلش
+  if (user.status === "SUSPENDED") {
+    await audit(user.id, "auth.suspended_attempt", "User", user.id);
+    return { step: "identify", error: msg(locale, "suspended") };
+  }
 
   // دخل بالإيميل؟ يبقى الرمز يروح الإيميل. غير كده واتساب، ويقدر يغيّر بعدين.
   const channel: Channel = id.kind === "email" && user.email ? "email" : "whatsapp";
@@ -126,6 +131,10 @@ export async function verify(locale: Locale, next: string | null, prev: SignInSt
     }
     await audit(user.id, "auth.sign_in", "User", user.id, { channel: prev.channel });
   } else {
+    // MKT-10: مصدر التسجيل — MKT-06: لو جه من رابط إحالة يتربط بصاحبه (مش نفسه)
+    const [source, refCode] = await Promise.all([readAttribution(), readReferralCode()]);
+    const referrer = refCode ? await db.user.findUnique({ where: { referralCode: refCode }, select: { id: true, phone: true, status: true } }) : null;
+    const referredById = referrer && referrer.phone !== pending.phone && referrer.status === "ACTIVE" ? referrer.id : null;
     user = await db.user.create({
       data: {
         name: pending.name,
@@ -134,13 +143,17 @@ export async function verify(locale: Locale, next: string | null, prev: SignInSt
         countryOfResidence: pending.country,
         locale: pending.locale,
         termsAcceptedAt: new Date(),
+        ...(source ? { source } : {}),
+        referredById,
       },
     });
+    if (referredById) await audit(user.id, "referral.signup", "User", user.id, { referredById, code: refCode });
     await audit(user.id, "auth.sign_up", "User", user.id, { country: pending.country, channel: prev.channel });
   }
   await clearPending();
   await createSession(user.id);
-  const fallback = user.role === "CLIENT" ? `account${"signIn" in pending ? "" : "?welcome=1"}` : homeFor(user.role);
+  // MKT-11: حدث «referral_signup» لو التسجيل جه من رابط إحالة
+  const fallback = user.role === "CLIENT" ? `account${"signIn" in pending ? "" : `?welcome=1${user.referredById ? "&ev=referral_signup" : ""}`}` : homeFor(user.role);
   redirect(safeNext(locale, next) ?? `/${locale}/${fallback}`);
 }
 
@@ -170,15 +183,15 @@ export async function resend(locale: Locale, prev: SignInState, channel: Channel
 }
 
 /** دخول سريع بحسابات التجربة — السيرفر بيرفضه لو DEMO_MODE مش true (SEC-01) */
-export async function demoSignIn(locale: string, userId: string) {
+export async function demoSignIn(locale: string, userId: string, next?: string | null) {
   if (!DEMO_MODE) {
     await audit(null, "auth.demo_sign_in_rejected", "User", userId);
     throw new Error("Demo sign-in is disabled");
   }
   const user = await db.user.findUnique({ where: { id: userId } });
-  if (!user) return;
+  if (!user || user.status === "SUSPENDED") return;
   await audit(user.id, "auth.demo_sign_in", "User", user.id);
   await createSession(user.id);
   const loc = isLocale(locale) ? locale : "ar";
-  redirect(`/${loc}/${homeFor(user.role)}`);
+  redirect(safeNext(loc, next) ?? `/${loc}/${homeFor(user.role)}`);
 }

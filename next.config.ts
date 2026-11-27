@@ -7,7 +7,11 @@ const nextConfig: NextConfig = {
   experimental: { serverActions: { bodySizeLimit: "4.5mb" } },
   // اللغة الافتراضية عربي: الصفحة الرئيسية بتحوّل على /ar
   async redirects() {
-    return [{ source: "/", destination: "/ar", permanent: false }];
+    return [
+      { source: "/", destination: "/ar", permanent: false },
+      // UX-11: المتصفحات بتطلب /favicon.ico لوحدها — بدل 404
+      { source: "/favicon.ico", destination: "/icon.svg", permanent: true },
+    ];
   },
 };
 

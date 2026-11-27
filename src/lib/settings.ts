@@ -15,6 +15,22 @@ export type ContractTemplate = { type: string; version: string; updatedAt: strin
 export const DEFAULTS = {
   "commission.rates": { sellerPct: 1.5, buyerPct: 1.5 } as CommissionRates,
   "service.fees": { deadlineRescueEgp: 15000, siteInspectionEgp: 3500 } as ServiceFees,
+  /** PERM-09 — حد الأربع عيون: أي صرف من المالي فوقه محتاج موافقة أدمن */
+  "payments.fourEyes": { limitEgp: 500_000 } as { limitEgp: number },
+  /** OPS-04 — السعر اليدوي ما يبعدش عن آخر سعر آلي أكتر من النسبة دي إلا بتأكيد صريح */
+  "fx.manual": { maxDeviationPct: 5 } as { maxDeviationPct: number },
+  /** MKT-01 — قرار إنقاذ المهلة: تاريخ القرار وآخر موعد للتقديم (بيتعدّل من لوحة الأدمن) */
+  rescue: { decisionDate: "2026-11-16", deadline: "2027-01-16", feePct: 10 } as { decisionDate: string; deadline: string; feePct: number },
+  /** MKT-06 — مكافأة الإحالة: نسبة من عمولة الصفقة أو مبلغ ثابت (ج.م) */
+  "referral.reward": { type: "pct", value: 10 } as { type: "pct" | "fixed"; value: number },
+  /** MKT-15 — رقم القيد في سجل الوسطاء (بيظهر في الفوتر والعقود وصور المشاركة) */
+  brokerRegistrationNumber: { value: "" } as { value: string },
+  /** DATA-04 — أقل عدد صفقات في مدينة/شهر عشان رقم المؤشر يظهر */
+  priceIndex: { minDeals: 5 } as { minDeals: number },
+  /** DATA-03 — صلاحية إفادة الجهاز: الشهور، التنبيه قبلها، والعرض المنتهي يختفي ولا يظهر بشارة */
+  "documents.validity": { authorityStatementMonths: 3, warnDays: 30, expiredListing: "badge" } as { authorityStatementMonths: number; warnDays: number; expiredListing: "badge" | "hide" },
+  /** SEC-05 — الوسطاء غير المسندين: «read» يشوفوا الصفقات، «none» ما يشوفوهاش */
+  "deals.unassignedBrokers": { access: "none" } as { access: "none" | "read" },
   "contract.templates": [
     { type: "COMMISSION_AGREEMENT", version: "v3", updatedAt: "2026-11-01" },
     { type: "PRELIMINARY_CONTRACT", version: "v3", updatedAt: "2026-11-01" },

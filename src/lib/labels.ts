@@ -10,11 +10,18 @@ export function label(map: Map, key: string | null | undefined, locale: Locale) 
 
 export const ROLE: Map = {
   CLIENT: ["عميل", "Client"],
+  PARTNER_BROKER: ["سمسار شريك", "Partner broker"],
   BROKER: ["وسيط", "Broker"],
+  BROKER_LEAD: ["مسؤول الوسطاء", "Broker lead"],
   LAWYER: ["محامي", "Lawyer"],
   AGENT: ["مندوب", "Field agent"],
   FINANCE: ["مالي", "Finance"],
   ADMIN: ["أدمن", "Admin"],
+};
+
+export const ACCOUNT_STATUS: Map = {
+  ACTIVE: ["شغال", "Active"],
+  SUSPENDED: ["موقوف", "Suspended"],
 };
 
 export const ACCOUNT_LEVEL: Map = {
@@ -80,6 +87,7 @@ export const DOC_TYPE: Map = {
   CONTRACT_PDF: ["نسخة عقد", "Contract copy"],
   POWER_OF_ATTORNEY: ["توكيل", "Power of attorney"],
   OTHER: ["مستند آخر", "Other"],
+  FILING_RECEIPT: ["إيصال تقديم الطلب في الجهاز", "Authority filing receipt"],
 };
 
 export const DOC_STATUS: Map = {
@@ -171,6 +179,7 @@ export const BUY_REQUEST_STATUS: Map = {
 export const SERVICE_TYPE: Map = {
   DEADLINE_RESCUE: ["إنقاذ المهلة", "Deadline rescue"],
   SITE_INSPECTION: ["معاينة", "Site inspection"],
+  VALUATION: ["تقييم قطعة", "Plot valuation"],
 };
 
 export const SERVICE_STATUS: Map = {

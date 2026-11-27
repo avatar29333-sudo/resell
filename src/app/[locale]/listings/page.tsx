@@ -4,14 +4,24 @@ import type { City } from "@prisma/client";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { latestRate, totalEgp } from "@/lib/listing";
+import { getSetting } from "@/lib/settings";
+import { arrangeListings, registerHref } from "@/lib/register";
+import { getCurrentUser } from "@/lib/auth";
+import { ensureReferralCode } from "@/lib/referral";
+import { siteUrl } from "@/lib/meta";
+import { ShareButtons } from "@/components/ShareButtons";
 import { daysUntil, money, num, toNum, tr } from "@/lib/format";
+import { districtName } from "@/lib/district";
 import { CITY, CITY_KEYS, LISTING_STATUS, PAYMENT_STATUS, PRICE_TYPE, label, toneOf } from "@/lib/labels";
+import { pageMeta } from "@/lib/meta";
 import { Badge, Container, Empty, PageHeader, btn, field, labelCls } from "@/components/ui";
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ city?: string; area?: string; budget?: string; sort?: string; paid?: string }>;
+  searchParams: Promise<{ city?: string; area?: string; budget?: string; sort?: string; paid?: string; inDeal?: string; page?: string }>;
 };
+
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "سجل العروض", "Listings register");
 
 export default async function ListingsPage({ params, searchParams }: Props) {
   const { locale } = await params;
@@ -25,10 +35,14 @@ export default async function ListingsPage({ params, searchParams }: Props) {
 
   const rate = await latestRate();
   const usd = toNum(rate?.sell ?? 50);
+  const validity = await getSetting("documents.validity");
 
   const rows = await db.listing.findMany({
     where: {
       status: { in: ["PUBLISHED", "IN_DEAL"] },
+      seller: { status: "ACTIVE" },
+      // DATA-03: العرض اللي إفادته انتهت يختفي (لو الإعداد «hide») أو يظهر بشارة
+      ...(validity.expiredListing === "hide" ? { statementExpiredAt: null } : {}),
       plot: {
         ...(city ? { city } : {}),
         ...(minArea ? { areaSqm: { gte: minArea } } : {}),
@@ -39,10 +53,17 @@ export default async function ListingsPage({ params, searchParams }: Props) {
     orderBy: { publishedAt: "desc" },
   });
 
-  let listings = rows.map((l) => ({ ...l, total: totalEgp(l, usd) }));
-  if (budget) listings = listings.filter((l) => l.total <= budget);
-  if (sp.sort === "price") listings.sort((a, b) => a.total - b.total);
-  if (sp.sort === "sqm") listings.sort((a, b) => a.total / toNum(a.plot.areaSqm) - b.total / toNum(b.plot.areaSqm));
+  // UX-07: اللي في صفقة في الآخر (أو مستخبي)، و24 عرض في الصفحة، والفلاتر في الرابط
+  const inDeal = sp.inDeal === "1";
+  const arranged = arrangeListings(
+    rows.map((l) => ({ ...l, total: totalEgp(l, usd), areaSqm: toNum(l.plot.areaSqm) })),
+    { sort: sp.sort, inDeal, budget, page: Number(sp.page) || 1 },
+  );
+  const listings = arranged.items;
+  const viewer = await getCurrentUser();
+  const refCode = viewer ? await ensureReferralCode(viewer) : null;
+  const base = `/${locale}/listings`;
+  const keep = { city: sp.city, area: sp.area, budget: sp.budget, sort: sp.sort, paid: sp.paid, inDeal: sp.inDeal };
 
   return (
     <>
@@ -86,13 +107,17 @@ export default async function ListingsPage({ params, searchParams }: Props) {
             <input type="checkbox" name="paid" value="1" defaultChecked={sp.paid === "1"} className="size-5" />
             {L("مسدد بالكامل بس", "Fully paid only")}
           </label>
+          <label className="flex min-h-11 items-center gap-2 text-sm font-medium text-muted">
+            <input type="checkbox" name="inDeal" value="1" defaultChecked={inDeal} className="size-5" />
+            {L("اعرض اللي في صفقة كمان", "Also show listings in a deal")}
+          </label>
           <button type="submit" className={btn.primary}>
             {L("ابحث", "Search")}
           </button>
         </form>
 
         <p className="text-muted">
-          {L(`${num(listings.length, locale)} عرض`, `${listings.length} listings`)} ·{" "}
+          {L(`${num(arranged.total, locale)} عرض`, `${arranged.total} listings`)} ·{" "}
           {L(`سعر الدولار المستخدم: ${num(usd, locale, 2)} ج.م`, `USD rate used: EGP ${num(usd, locale, 2)}`)}
         </p>
 
@@ -112,7 +137,7 @@ export default async function ListingsPage({ params, searchParams }: Props) {
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex flex-col">
                         <span className="text-lg font-bold">{label(CITY, l.plot.city, locale)}</span>
-                        <span className="text-sm text-muted">{l.plot.district}</span>
+                        <span className="text-sm text-muted">{districtName(l.plot, locale)}</span>
                       </div>
                       <Badge tone={toneOf(l.status)}>{label(LISTING_STATUS, l.status, locale)}</Badge>
                     </div>
@@ -143,13 +168,53 @@ export default async function ListingsPage({ params, searchParams }: Props) {
                     </dl>
                     <div className="mt-auto flex flex-wrap gap-1.5">
                       {verified.has("ALLOCATION_LETTER") && <Badge tone="green">{L("✓ خطاب التخصيص", "✓ Allocation letter")}</Badge>}
-                      {verified.has("AUTHORITY_STATEMENT") && <Badge tone="green">{L("✓ إفادة الجهاز", "✓ Authority statement")}</Badge>}
+                      {l.statementExpiredAt ? (
+                        <Badge tone="amber">{L("⚠ محتاج تحديث — إفادة الجهاز انتهت", "⚠ Needs update — authority statement expired")}</Badge>
+                      ) : (
+                        verified.has("AUTHORITY_STATEMENT") && <Badge tone="green">{L("✓ إفادة الجهاز", "✓ Authority statement")}</Badge>
+                      )}
                     </div>
                   </Link>
+                  {/* MKT-05 */}
+                  <div className="border-x border-b border-line bg-paper px-3 py-2">
+                    <ShareButtons
+                      base={siteUrl()}
+                      path={`/${locale}/listings/${l.id}`}
+                      text={L(`أرض ${num(l.plot.areaSqm, locale)}م² · ${label(CITY, l.plot.city, locale)} — ${districtName(l.plot, locale)} · ${money(l.total, "EGP", locale)}`, `${num(l.plot.areaSqm, locale)} m² plot · ${label(CITY, l.plot.city, locale)} — ${districtName(l.plot, locale)} · ${money(l.total, "EGP", locale)}`)}
+                      refCode={refCode}
+                      ar={locale === "ar"}
+                      compact
+                    />
+                  </div>
                 </li>
               );
             })}
           </ul>
+        )}
+
+        {arranged.pages > 1 && (
+          <nav aria-label={L("صفحات العروض", "Listing pages")} className="flex flex-wrap items-center justify-center gap-2">
+            {arranged.page > 1 && (
+              <Link href={registerHref(base, keep, { page: String(arranged.page - 1) })} className={btn.secondary}>
+                {L("السابق", "Previous")}
+              </Link>
+            )}
+            {Array.from({ length: arranged.pages }, (_, i) => i + 1).map((p) => (
+              <Link
+                key={p}
+                href={registerHref(base, keep, { page: p === 1 ? undefined : String(p) })}
+                aria-current={p === arranged.page ? "page" : undefined}
+                className={`inline-flex min-h-11 min-w-11 items-center justify-center border px-3 font-semibold ${p === arranged.page ? "border-navy bg-navy text-white" : "border-line hover:border-navy"}`}
+              >
+                {num(p, locale)}
+              </Link>
+            ))}
+            {arranged.page < arranged.pages && (
+              <Link href={registerHref(base, keep, { page: String(arranged.page + 1) })} className={btn.secondary}>
+                {L("التالي", "Next")}
+              </Link>
+            )}
+          </nav>
         )}
       </Container>
     </>

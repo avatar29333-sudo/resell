@@ -1,16 +1,26 @@
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { date, daysUntil, num, tr } from "@/lib/format";
+import { pageMeta } from "@/lib/meta";
+import { getSetting } from "@/lib/settings";
+import { latestRate } from "@/lib/listing";
+import { loadIndex } from "@/lib/price-index-data";
+import { toNum } from "@/lib/format";
 import { RescueCalculator, RescueForm } from "./RescueParts";
 
-// قرار مجلس الإدارة رقم 220 بتاريخ 16 نوفمبر 2026 — التقديم خلال شهرين
-const DECISION_DATE = new Date("2026-11-16");
-const DEADLINE = new Date("2027-01-16");
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "إنقاذ مهلة البناء", "Build deadline rescue");
 
 export default async function RescuePage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const L = tr(locale);
+  // MKT-01: تاريخ القرار وآخر موعد من إعدادات الأدمن (مش محسوب تقريباً)
+  const [cfg, rate, index] = await Promise.all([getSetting("rescue"), latestRate(), loadIndex()]);
+  const DECISION_DATE = new Date(`${cfg.decisionDate}T00:00:00Z`);
+  const DEADLINE = new Date(`${cfg.deadline}T23:59:59Z`);
+  // آخر متوسط حقيقي لسعر المتر في كل مدينة (لو البيانات كافية)
+  const perSqm: Record<string, number | null> = {};
+  for (const p of index.points) if (p.avgPerSqm !== null) perSqm[p.city] = p.avgPerSqm;
   const left = Math.max(0, daysUntil(DEADLINE) ?? 0);
   const total = Math.round((DEADLINE.getTime() - DECISION_DATE.getTime()) / 86_400_000);
   const steps = [
@@ -52,7 +62,7 @@ export default async function RescuePage({ params }: { params: Promise<{ locale:
             </div>
           </div>
           <div className="flex flex-col gap-4 bg-white p-7 text-ink">
-            <div className="text-sm text-muted">{L("آخر موعد لتقديم الطلبات (تقريباً)", "Application deadline (approx.)")}</div>
+            <div className="text-sm text-muted">{L("آخر موعد لتقديم الطلبات", "Application deadline")}</div>
             <div className="flex items-baseline gap-2.5">
               <span className="text-[64px] leading-none font-bold text-navy">{num(left, locale)}</span>
               <span className="text-[22px] font-semibold">{L("يوم باقيين", "days left")}</span>
@@ -61,7 +71,7 @@ export default async function RescuePage({ params }: { params: Promise<{ locale:
               <div className="h-2 bg-brand-bright" style={{ width: `${Math.min(100, ((total - left) / total) * 100)}%` }} />
             </div>
             <p className="text-[15px] leading-7 text-muted">
-              {L("القرار بيقول: التقديم خلال شهرين من الإعلان، ومش هيتقبل أي طلب بعدها. آخر يوم تقريباً: ", "Applications within two months of the announcement; none accepted after. Approximate last day: ")}
+              {L("القرار بيقول: التقديم خلال المدة المحددة، ومش هيتقبل أي طلب بعدها. آخر يوم: ", "Applications within the set window; none accepted after. Last day: ")}
               <strong className="text-ink">{date(DEADLINE, locale)}</strong>
             </p>
             <p className="border-t border-[#E6E9F2] pt-3.5 text-sm text-muted">
@@ -103,7 +113,7 @@ export default async function RescuePage({ params }: { params: Promise<{ locale:
       </section>
 
       <section id="check" className="mx-auto max-w-6xl px-5 py-[72px] md:px-8">
-        <RescueCalculator locale={locale} />
+        <RescueCalculator locale={locale} usdRate={toNum(rate?.sell ?? 50)} perSqm={perSqm} feePct={cfg.feePct} />
       </section>
 
       <section id="how" className="bg-paper py-[72px]">

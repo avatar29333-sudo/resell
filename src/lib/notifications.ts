@@ -31,6 +31,6 @@ export async function notify(userIds: (string | null | undefined)[], msg: Messag
 }
 
 /** كل الناس في دور معيّن (مثلاً كل الوسطاء) */
-export async function idsByRole(role: "BROKER" | "LAWYER" | "AGENT" | "FINANCE" | "ADMIN") {
-  return (await db.user.findMany({ where: { role, anonymizedAt: null }, select: { id: true } })).map((u) => u.id);
+export async function idsByRole(role: "BROKER" | "BROKER_LEAD" | "LAWYER" | "AGENT" | "FINANCE" | "ADMIN") {
+  return (await db.user.findMany({ where: { role, anonymizedAt: null, status: "ACTIVE" }, select: { id: true } })).map((u) => u.id);
 }

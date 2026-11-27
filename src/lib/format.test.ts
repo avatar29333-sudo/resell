@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { isValidPhone, maskPhone, normalizePhone } from "./format";
+import { dateTime, isValidPhone, maskPhone, normalizePhone } from "./format";
+
+describe("UX-05 times are shown in Cairo time and say so", () => {
+  it("converts to Cairo and labels the zone", () => {
+    const t = dateTime("2026-11-27T10:00:00Z", "en");
+    expect(t).toContain("12:00");
+    expect(t).toContain("Cairo time");
+    expect(dateTime("2026-11-27T10:00:00Z", "ar")).toContain("بتوقيت القاهرة");
+  });
+});
 
 describe("أرقام الموبايل في التسجيل", () => {
   it("بيوحّد الصيغ المختلفة لنفس الرقم", () => {

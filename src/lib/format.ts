@@ -33,9 +33,13 @@ export function date(d: Date | string | null | undefined, locale: Locale) {
 /** كل التواريخ بتوقيت القاهرة مهما كان السيرفر فين */
 const TZ = "Africa/Cairo";
 
+/**
+ * UX-05: أي وقت (ساعة) بيتعرض بتوقيت القاهرة ومكتوب جنبه صراحة «بتوقيت القاهرة» —
+ * عشان العميل اللي في الخليج أو أوروبا ما يتلخبطش.
+ */
 export function dateTime(d: Date | string | null | undefined, locale: Locale) {
   if (!d) return "—";
-  return new Intl.DateTimeFormat(intl(locale), {
+  const s = new Intl.DateTimeFormat(intl(locale), {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -43,6 +47,14 @@ export function dateTime(d: Date | string | null | undefined, locale: Locale) {
     minute: "2-digit",
     timeZone: TZ,
   }).format(new Date(d));
+  return `${s} ${locale === "ar" ? "بتوقيت القاهرة" : "Cairo time"}`;
+}
+
+/** الساعة بس (لنفس اليوم) — برضه بتوقيت القاهرة ومكتوب */
+export function timeOnly(d: Date | string | null | undefined, locale: Locale) {
+  if (!d) return "—";
+  const s = new Intl.DateTimeFormat(intl(locale), { hour: "2-digit", minute: "2-digit", timeZone: TZ }).format(new Date(d));
+  return `${s} ${locale === "ar" ? "بتوقيت القاهرة" : "Cairo time"}`;
 }
 
 export function daysUntil(d: Date | string | null | undefined) {

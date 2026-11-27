@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/dictionaries";
 import { CITY, CITY_KEYS, label } from "@/lib/labels";
+import { db } from "@/lib/db";
+import { num, tr } from "@/lib/format";
 
 type Params = Promise<{ locale: string }>;
 
@@ -10,6 +12,12 @@ export default async function HomePage({ params }: { params: Params }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const t = getDictionary(locale);
+  const L = tr(locale);
+  // MKT-14: العداد من الصفقات الحقيقية بس (isDemo=false)، والقصص المنشورة بموافقة الطرفين
+  const [closedSafely, stories] = await Promise.all([
+    db.deal.count({ where: { status: "COMPLETED", isDemo: false } }),
+    db.dealStory.findMany({ where: { status: "PUBLISHED" }, orderBy: { publishedAt: "desc" }, take: 6 }),
+  ]);
 
   const steps = [
     { n: 1, title: t.steps.s1Title, body: t.steps.s1Body },
@@ -87,6 +95,39 @@ export default async function HomePage({ params }: { params: Params }) {
             className="inline-flex min-h-12 items-center bg-brand px-7 font-semibold text-white hover:bg-navy"
           >
             {t.cta.button}
+          </Link>
+        </div>
+      </section>
+
+      {/* MKT-14: قصص صفقات حقيقية (بموافقة الطرفين) + عداد من البيانات الحقيقية بس */}
+      <section className="mx-auto flex max-w-6xl flex-col gap-6 px-5 py-16 md:px-8">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <h2 className="text-2xl font-bold">{L("صفقات اتقفلت بأمان", "Deals closed safely")}</h2>
+          <div className="flex items-baseline gap-2">
+            <span className="text-4xl font-bold text-navy">{num(closedSafely, locale)}</span>
+            <span className="text-sm text-muted">{L("صفقة حقيقية على المنصة", "real deals on the platform")}</span>
+          </div>
+        </div>
+        {stories.length > 0 ? (
+          <ul className="grid gap-4 md:grid-cols-3">
+            {stories.map((s) => (
+              <li key={s.id} className="border-s-[3px] border-brand bg-paper p-5 leading-7">
+                {(locale === "ar" ? s.textAr : s.textEn) ?? s.textAr}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted">{L("أول القصص هتظهر هنا بعد موافقة أصحابها.", "The first stories will appear here once their owners agree.")}</p>
+        )}
+        <div className="flex flex-wrap gap-3">
+          <Link href={`/${locale}/valuation`} className="inline-flex min-h-11 items-center border border-line px-5 font-semibold hover:border-navy">
+            {L("اعرف قيمة قطعتك", "What's my plot worth?")}
+          </Link>
+          <Link href={`/${locale}/remind-me`} className="inline-flex min-h-11 items-center border border-line px-5 font-semibold hover:border-navy">
+            {L("فكّرني بمهلتي", "Remind me of my deadline")}
+          </Link>
+          <Link href={`/${locale}/guides`} className="inline-flex min-h-11 items-center border border-line px-5 font-semibold hover:border-navy">
+            {L("الأدلة", "Guides")}
           </Link>
         </div>
       </section>

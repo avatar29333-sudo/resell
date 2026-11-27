@@ -2,9 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { City } from "@prisma/client";
 import { isLocale, type Locale } from "@/i18n/config";
-import { db } from "@/lib/db";
-import { money, num, toNum, tr } from "@/lib/format";
+import { loadIndex } from "@/lib/price-index-data";
+import { money, num, tr } from "@/lib/format";
 import { CITY, CITY_KEYS, label } from "@/lib/labels";
+import { pageMeta } from "@/lib/meta";
 import { Card, Container, Empty, PageHeader, Table } from "@/components/ui";
 
 type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ city?: string }> };
@@ -56,6 +57,8 @@ function LineChart({ points, locale }: { points: { x: Date; y: number; n: number
   );
 }
 
+export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "مؤشر أسعار بيت الوطن", "Beit El Watan price index");
+
 export default async function PriceIndexPage({ params, searchParams }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
@@ -63,18 +66,22 @@ export default async function PriceIndexPage({ params, searchParams }: Props) {
   const sp = await searchParams;
   const city = (CITY_KEYS.includes(sp.city as never) ? sp.city : "NEW_CAIRO") as City;
 
-  const all = await db.priceIndex.findMany({ where: { district: "" }, orderBy: { periodStart: "asc" } });
-  const series = all.filter((r) => r.city === city).map((r) => ({ x: r.periodStart, y: toNum(r.avgPricePerSqm), n: r.dealCount }));
+  // DATA-04: من الصفقات المقفولة فعلاً بس، والشهر اللي صفقاته أقل من الحد ما بيظهرش له رقم
+  const { points, minDeals } = await loadIndex();
+  const toDate = (m: string) => new Date(`${m}-01T00:00:00Z`);
+  const cityPoints = points.filter((p) => p.city === city);
+  const series = cityPoints.filter((p) => p.avgPerSqm !== null).map((p) => ({ x: toDate(p.month), y: p.avgPerSqm!, n: p.deals }));
 
   const latestByCity = CITY_KEYS.map((c) => {
-    const rows = all.filter((r) => r.city === c);
+    const rows = points.filter((p) => p.city === c && p.avgPerSqm !== null);
     const last = rows[rows.length - 1];
-    const yearAgo = rows[rows.length - 13] ?? rows[0];
+    const yearAgo = rows.find((p) => last && p.month <= `${Number(last.month.slice(0, 4)) - 1}${last.month.slice(4)}`) ?? null;
     return {
       city: c,
-      last: last ? toNum(last.avgPricePerSqm) : null,
-      change: last && yearAgo ? (toNum(last.avgPricePerSqm) / toNum(yearAgo.avgPricePerSqm) - 1) * 100 : null,
-      deals: rows.reduce((s, r) => s + r.dealCount, 0),
+      last: last?.avgPerSqm ?? null,
+      lastMonth: last?.month ?? null,
+      change: last && yearAgo ? (last.avgPerSqm! / yearAgo.avgPerSqm! - 1) * 100 : null,
+      deals: points.filter((p) => p.city === c).reduce((s, r) => s + r.deals, 0),
     };
   });
 
@@ -102,14 +109,26 @@ export default async function PriceIndexPage({ params, searchParams }: Props) {
         </nav>
 
         <Card title={L(`${label(CITY, city, locale)} — متوسط سعر المتر بالشهر (ج.م)`, `${label(CITY, city, locale)} — average price per m² by month (EGP)`)}>
-          {series.length > 1 ? <LineChart points={series} locale={locale} /> : <Empty>{L("مفيش صفقات كفاية لسه.", "Not enough deals yet.")}</Empty>}
+          {series.length > 1 ? (
+            <LineChart points={series} locale={locale} />
+          ) : (
+            <Empty>
+              {L(
+                `بيانات غير كافية — المؤشر بيظهر لما يبقى فيه ${num(minDeals, locale)} صفقات مقفولة على الأقل في الشهر.`,
+                `Insufficient data — the index appears once there are at least ${minDeals} closed deals in a month.`,
+              )}
+            </Empty>
+          )}
+          {cityPoints.some((p) => p.avgPerSqm === null) && series.length > 1 && (
+            <p className="text-sm text-muted">{L(`الشهور اللي فيها أقل من ${num(minDeals, locale)} صفقات مش ظاهرة (بيانات غير كافية).`, `Months with fewer than ${minDeals} deals are not shown (insufficient data).`)}</p>
+          )}
         </Card>
 
         <Table head={[L("المدينة", "City"), L("آخر متوسط للمتر", "Latest avg / m²"), L("التغيير في سنة", "1-year change"), L("عدد الصفقات", "Deals")]}>
           {latestByCity.map((r) => (
             <tr key={r.city}>
               <td className="font-semibold">{label(CITY, r.city, locale)}</td>
-              <td>{r.last ? money(r.last, "EGP", locale) : "—"}</td>
+              <td>{r.last ? money(r.last, "EGP", locale) : <span className="text-muted">{L("بيانات غير كافية", "Insufficient data")}</span>}</td>
               <td className={r.change !== null && r.change >= 0 ? "text-ok" : "text-[#A32020]"}>
                 {r.change === null ? "—" : `${r.change >= 0 ? "+" : ""}${num(r.change, locale, 1)}%`}
               </td>

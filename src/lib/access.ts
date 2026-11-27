@@ -2,40 +2,68 @@ import "server-only";
 import type { User } from "@prisma/client";
 import { db } from "./db";
 import { STAFF_ROLES } from "./auth";
-import { buyerCanSeeFiles, type DealFacts, type Stage } from "./deal-machine";
+import { type DealFacts, type Stage } from "./deal-machine";
+import { can, dealCtx, listingCtx, subject } from "./authz";
+import type { Ctx } from "./authz/policy";
+import { audit } from "./audit";
+import { getSetting } from "./settings";
 
 export const isStaff = (u: User | null) => !!u && STAFF_ROLES.includes(u.role);
 
-/** مين يقدر يفتح مستند — بيتفحص في الخادم قبل ما الملف يطلع */
+const KYC_TYPES = ["NATIONAL_ID", "PASSPORT", "SELFIE"];
+
+/**
+ * مين يقدر يفتح مستند — كل القرار من سياسة الصلاحيات (SEC-06 / PERM-01).
+ * صور الهوية: الأدمن + الوسيط وهو بيراجع التوثيق. باقي المستندات: حسب العلاقة والمرحلة.
+ */
 export async function canViewDocument(user: User | null, docId: string) {
   const doc = await db.document.findUnique({
     where: { id: docId },
-    include: { listing: true, deal: { include: { contracts: true } } },
+    include: {
+      listing: { include: { documents: { select: { type: true, status: true } }, deals: { select: { stage: true, status: true } } } },
+      deal: { include: { contracts: true, documents: { select: { type: true, status: true } }, listing: true, events: { where: { type: "CANCELLED" } } } },
+    },
   });
   if (!doc) return null;
   // صور الموقع المعتمدة لعرض منشور = صور تسويقية، أي حد يشوفها
   if (doc.type === "SITE_PHOTO" && doc.status === "APPROVED" && ["PUBLISHED", "IN_DEAL"].includes(doc.listing?.status ?? "")) return doc;
   if (!user) return null;
-  if (isStaff(user) || doc.ownerId === user.id || doc.uploadedById === user.id) return doc;
 
-  // المشتري: ملفات القطعة بعد العقد المبدئي بس
-  const listingId = doc.listingId ?? doc.deal?.listingId;
-  if (listingId) {
+  const base: Ctx = { document: { type: doc.type, ownerId: doc.ownerId, uploadedById: doc.uploadedById, status: doc.status } };
+  if (doc.listing) base.listing = listingCtx(doc.listing);
+
+  // ملفات الهوية: مربوطة بملف توثيق
+  if (KYC_TYPES.includes(doc.type)) {
+    const kyc = await db.kycProfile.findFirst({ where: { OR: [{ idDocumentId: doc.id }, { selfieDocumentId: doc.id }] } });
+    const targetId = kyc?.userId ?? doc.ownerId;
+    base.target = { id: targetId, kycPending: kyc?.status === "PENDING" };
+    // تعارض مصالح (7.3): الوسيط اللي عنده صفقة شغالة الشخص ده طرف فيها
+    if (user && (user.role === "BROKER" || user.role === "BROKER_LEAD")) {
+      base.conflict = !!(await db.deal.findFirst({
+        where: { brokerId: user.id, status: { in: ["ACTIVE", "ON_HOLD"] }, OR: [{ buyerId: targetId }, { listing: { sellerId: targetId } }] },
+        select: { id: true },
+      }));
+    }
+  }
+
+  const contexts: Ctx[] = [];
+  if (doc.deal) contexts.push({ ...base, deal: dealCtx(doc.deal) });
+  // مستند قطعة: نجرب كل صفقة المستخدم طرف فيها على نفس العرض
+  if (doc.listingId && !doc.deal) {
     const deals = await db.deal.findMany({
-      where: { listingId, buyerId: user.id, status: { in: ["ACTIVE", "ON_HOLD", "COMPLETED"] } },
-      include: { contracts: true },
+      where: { listingId: doc.listingId, OR: [{ buyerId: user.id }, { brokerId: user.id }, { lawyerId: user.id }, { agentId: user.id }] },
+      include: { contracts: true, documents: { select: { type: true, status: true } }, listing: true, events: { where: { type: "CANCELLED" } } },
     });
-    if (deals.some((d) => buyerCanSeeFiles(d.stage, d.contracts))) return doc;
+    for (const d of deals) contexts.push({ ...base, deal: dealCtx(d) });
   }
-  // البائع يشوف مستندات صفقات قطعته
-  if (doc.deal) {
-    const listing = await db.listing.findUnique({ where: { id: doc.deal.listingId } });
-    if (listing?.sellerId === user.id || doc.deal.buyerId === user.id) return doc;
-  }
+  contexts.push(base);
+
+  if (contexts.some((c) => can(subject(user), "document.view", c).allowed)) return doc;
+  await audit(user.id, "authz.denied", "Document", doc.id, { action: "document.view", type: doc.type });
   return null;
 }
 
-export type LoadedDeal = NonNullable<Awaited<ReturnType<typeof loadDealFor>>>;
+export type LoadedDeal = NonNullable<Awaited<ReturnType<typeof loadDeal>>>;
 
 /** الحقايق اللي محتاجها الـ state machine من صفقة محمّلة */
 export function factsOf(deal: LoadedDeal): DealFacts {
@@ -47,13 +75,14 @@ export function factsOf(deal: LoadedDeal): DealFacts {
     agreedPrice: deal.agreedPrice ? Number(deal.agreedPrice.toString()) : null,
     contracts: deal.contracts.map((c) => ({ type: c.type, status: c.status })),
     deposits: deal.deposits.map((d) => ({ escrowStatus: d.escrowStatus })),
-    hasAuthorityApprovalDoc: deal.documents.some((d) => d.type === "AUTHORITY_STATEMENT" && d.status !== "REJECTED"),
+    hasAuthorityApprovalDoc: deal.documents.some((d) => d.type === "AUTHORITY_STATEMENT" && d.status === "APPROVED"),
+    hasFilingReceipt: deal.documents.some((d) => d.type === "FILING_RECEIPT" && d.status !== "REJECTED"),
+    priceConfirmed: !!deal.buyerPriceOkAt && !!deal.sellerPriceOkAt,
   };
 }
 
-/** مين يدخل غرفة الصفقة */
-export async function loadDealFor(user: User, dealId: string) {
-  const deal = await db.deal.findUnique({
+async function loadDeal(dealId: string) {
+  return db.deal.findUnique({
     where: { id: dealId },
     include: {
       listing: { include: { plot: true, seller: true, documents: { where: { status: { not: "SUPERSEDED" } } } } },
@@ -64,12 +93,22 @@ export async function loadDealFor(user: User, dealId: string) {
       exchangeRate: true,
       contracts: { orderBy: { createdAt: "asc" }, include: { approvedBy: true } },
       documents: { orderBy: { createdAt: "desc" }, include: { uploadedBy: true } },
-      deposits: { orderBy: { createdAt: "asc" }, include: { receiptDocument: true } },
+      deposits: { orderBy: { createdAt: "asc" }, include: { receiptDocument: true, approvals: { where: { status: "PENDING" } } } },
       commission: true,
       events: { orderBy: { createdAt: "desc" }, include: { actor: true } },
     },
   });
+}
+
+/** مين يدخل غرفة الصفقة — حسب السياسة (deal.view) */
+export async function loadDealFor(user: User, dealId: string) {
+  const deal = await loadDeal(dealId);
   if (!deal) return null;
-  const allowed = isStaff(user) || deal.buyerId === user.id || deal.listing.sellerId === user.id;
-  return allowed ? deal : null;
+  const brokersCanReadAll = user.role === "BROKER" && (await getSetting("deals.unassignedBrokers")).access === "read";
+  const allowed = can(subject(user), "deal.view", { deal: dealCtx(deal), brokersCanReadAll }).allowed;
+  if (!allowed) {
+    await audit(user.id, "authz.denied", "Deal", dealId, { action: "deal.view" });
+    return null;
+  }
+  return deal;
 }
