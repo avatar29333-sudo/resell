@@ -205,6 +205,7 @@ enum BuyRequestStatus {
 enum ServiceType {
   DEADLINE_RESCUE // إنقاذ المهلة
   SITE_INSPECTION // معاينة
+  VALUATION // MKT-03: «اعرف قيمة قطعتك»
 }
 
 enum ServiceRequestStatus {
@@ -231,6 +232,13 @@ model User {
   updatedAt        DateTime     @updatedAt
   //حذف بالطلب (قانون 151): البيانات الشخصية بتتمسح والسجل يفضل
   anonymizedAt     DateTime?
+  /// MKT-10: مصدر التسجيل (first/last touch: utm + referrer + كود الإحالة)
+  source           Json?
+  /// MKT-06: كود الإحالة بتاع المستخدم + مين أحاله
+  referralCode     String?   @unique
+  referredById     String?
+  referredBy       User?     @relation("Referral", fields: [referredById], references: [id])
+  referrals        User[]    @relation("Referral")
   // التحقق الثنائي (تطبيق Authenticator) — السر متشفّر بـ AES-GCM
   totpSecret       String?
   totpEnabledAt    DateTime?
@@ -497,6 +505,8 @@ model Deal {
   /// OPS-02: حالة ملف التنازل في الجهاز (SUBMITTED / NEEDS_INFO / APPROVED / REJECTED)
   authorityStatus    String?
   authorityUpdatedAt DateTime?
+  /// MKT-10: مصدر المشتري لما أبدى اهتمام
+  source          Json?
   /// DATA-04: صفقة من بيانات التجربة — ما تدخلش في المؤشر ولا العدادات لما DEMO_MODE مقفول
   isDemo          Boolean    @default(false)
   createdAt       DateTime   @default(now())
@@ -678,6 +688,8 @@ model ServiceRequest {
   feeCurrency  Currency?
   /// OPS-02: تقدير المندوب لنسبة التنفيذ من المعاينة
   constructionEstimate Int?
+  /// MKT-10: مصدر الطلب
+  source       Json?
   assignedToId String?
   assignedTo   User?                @relation("ServiceAssignee", fields: [assignedToId], references: [id])
   documents    Document[]

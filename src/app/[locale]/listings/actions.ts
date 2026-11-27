@@ -8,6 +8,7 @@ import { authorize, listingCtx } from "@/lib/authz";
 import { leastLoaded } from "@/lib/assign";
 import { isLocale } from "@/i18n/config";
 import { notify } from "@/lib/notifications";
+import { readAttribution } from "@/lib/attribution";
 
 /** المشتري بيبدي اهتمام → صفقة جديدة في مرحلة «اهتمام» مع وسيط العرض (5.4 + القسم 8) */
 export async function expressInterest(locale: string, listingId: string) {
@@ -24,8 +25,10 @@ export async function expressInterest(locale: string, listingId: string) {
 
   // وسيط الصفقة = وسيط العرض افتراضياً، أو أقل وسيط عنده شغل (مش طرف)
   const brokerId = listing!.assignedBrokerId ?? (await leastLoaded("BROKER", [user.id, listing!.sellerId]));
+  const source = await readAttribution(); // MKT-10
   const deal = await db.deal.create({
     data: {
+      ...(source ? { source } : {}),
       listingId,
       buyerId: user.id,
       brokerId,

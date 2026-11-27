@@ -8,6 +8,7 @@ import { isValidPhone, normalizePhone } from "@/lib/format";
 import { CITY_KEYS } from "@/lib/labels";
 import type { City } from "@prisma/client";
 import { idsByRole, notify } from "@/lib/notifications";
+import { readAttribution } from "@/lib/attribution";
 
 export type RescueState = { ok?: boolean; error?: string; ref?: string; fieldErrors?: Partial<Record<"name" | "phone" | "file", string>> };
 
@@ -30,8 +31,10 @@ export async function submitRescue(locale: string, _prev: RescueState, form: For
   if (Object.keys(fieldErrors).length) return { error: ar ? "راجع الخانات المعلّمة" : "Please check the highlighted fields", fieldErrors };
 
   const user = await getCurrentUser();
+  const source = await readAttribution(); // MKT-10
   const req = await db.serviceRequest.create({
     data: {
+      ...(source ? { source } : {}),
       type,
       contactName: name,
       contactPhone: phone,

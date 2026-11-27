@@ -8,6 +8,7 @@ import { maskEmail, type Channel } from "@/lib/notify";
 import { decryptSecret, verifyTotp } from "@/lib/totp";
 import { classifyIdentifier } from "@/lib/identifier";
 import { safeNext } from "@/lib/safe-next";
+import { readAttribution, readReferralCode } from "@/lib/attribution";
 import { isValidPhone, maskPhone, normalizePhone } from "@/lib/format";
 import { isLocale, type Locale } from "@/i18n/config";
 
@@ -130,6 +131,10 @@ export async function verify(locale: Locale, next: string | null, prev: SignInSt
     }
     await audit(user.id, "auth.sign_in", "User", user.id, { channel: prev.channel });
   } else {
+    // MKT-10: مصدر التسجيل — MKT-06: لو جه من رابط إحالة يتربط بصاحبه (مش نفسه)
+    const [source, refCode] = await Promise.all([readAttribution(), readReferralCode()]);
+    const referrer = refCode ? await db.user.findUnique({ where: { referralCode: refCode }, select: { id: true, phone: true, status: true } }) : null;
+    const referredById = referrer && referrer.phone !== pending.phone && referrer.status === "ACTIVE" ? referrer.id : null;
     user = await db.user.create({
       data: {
         name: pending.name,
@@ -138,8 +143,11 @@ export async function verify(locale: Locale, next: string | null, prev: SignInSt
         countryOfResidence: pending.country,
         locale: pending.locale,
         termsAcceptedAt: new Date(),
+        ...(source ? { source } : {}),
+        referredById,
       },
     });
+    if (referredById) await audit(user.id, "referral.signup", "User", user.id, { referredById, code: refCode });
     await audit(user.id, "auth.sign_up", "User", user.id, { country: pending.country, channel: prev.channel });
   }
   await clearPending();

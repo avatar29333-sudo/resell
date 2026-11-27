@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SECURITY_HEADERS, buildCsp } from "@/lib/csp";
 import { isPrivatePath } from "@/lib/meta";
+import { FT_COOKIE, LT_COOKIE, REF_COOKIE, REF_MAX_AGE, TOUCH_MAX_AGE, encodeTouch, touchFrom } from "@/lib/attribution-core";
 
 /** SEC-08: هيدرز الأمان لكل الصفحات (ملفات /api/files ليها هيدرز خاصة بيها ومش داخلة هنا) */
 export function middleware(req: NextRequest) {
@@ -30,6 +31,16 @@ export function middleware(req: NextRequest) {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
   // UX-08: الصفحات الخاصة noindex حتى لو حد لقى رابطها
   if (isPrivatePath(req.nextUrl.pathname)) res.headers.set("X-Robots-Tag", "noindex, nofollow");
+
+  // MKT-10: أول لمسة وآخر لمسة (utm + الموقع اللي جه منه + كود الإحالة) — كوكي من نفس الموقع بس
+  const touch = req.method === "GET" ? touchFrom(req.nextUrl, req.headers.get("referer"), req.nextUrl.hostname) : null;
+  if (touch) {
+    const opts = { httpOnly: true, sameSite: "lax" as const, secure: req.nextUrl.protocol === "https:", path: "/", maxAge: TOUCH_MAX_AGE };
+    if (!req.cookies.get(FT_COOKIE)) res.cookies.set(FT_COOKIE, encodeTouch(touch), opts);
+    res.cookies.set(LT_COOKIE, encodeTouch(touch), opts);
+    // MKT-06: كود الإحالة بيفضل 60 يوم
+    if (touch.ref) res.cookies.set(REF_COOKIE, touch.ref, { ...opts, maxAge: REF_MAX_AGE });
+  }
   return res;
 }
 
