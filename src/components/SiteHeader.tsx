@@ -42,6 +42,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
     { href: `${base}/lawyer`, label: ar ? "شاشة المحامي" : "Lawyer", roles: ["ADMIN", "LAWYER"] },
     { href: `${base}/finance`, label: ar ? "المالية" : "Finance", roles: ["ADMIN", "FINANCE"] },
     { href: `${base}/reports`, label: ar ? "التقارير" : "Reports", roles: ["ADMIN", "FINANCE", "BROKER", "BROKER_LEAD", "LAWYER"] },
+    { href: `${base}/marketing`, label: ar ? "التسويق" : "Marketing", roles: ["ADMIN"] },
     { href: `${base}/settings`, label: ar ? "الإعدادات" : "Settings", roles: ["ADMIN", "FINANCE"] },
   ].filter((l) => role && l.roles.includes(role));
   const menuLink = "flex min-h-11 items-center border-b border-navy-soft py-2 text-[#D6DCEE] hover:text-white";
