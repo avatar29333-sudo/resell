@@ -15,6 +15,12 @@ export type ContractTemplate = { type: string; version: string; updatedAt: strin
 export const DEFAULTS = {
   "commission.rates": { sellerPct: 1.5, buyerPct: 1.5 } as CommissionRates,
   "service.fees": { deadlineRescueEgp: 15000, siteInspectionEgp: 3500 } as ServiceFees,
+  /** PERM-09 — حد الأربع عيون: أي صرف من المالي فوقه محتاج موافقة أدمن */
+  "payments.fourEyes": { limitEgp: 500_000 } as { limitEgp: number },
+  /** OPS-04 — السعر اليدوي ما يبعدش عن آخر سعر آلي أكتر من النسبة دي إلا بتأكيد صريح */
+  "fx.manual": { maxDeviationPct: 5 } as { maxDeviationPct: number },
+  /** SEC-05 — الوسطاء غير المسندين: «read» يشوفوا الصفقات، «none» ما يشوفوهاش */
+  "deals.unassignedBrokers": { access: "none" } as { access: "none" | "read" },
   "contract.templates": [
     { type: "COMMISSION_AGREEMENT", version: "v3", updatedAt: "2026-11-01" },
     { type: "PRELIMINARY_CONTRACT", version: "v3", updatedAt: "2026-11-01" },
