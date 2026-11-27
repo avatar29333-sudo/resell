@@ -64,11 +64,13 @@
   - ممنوع شيل أو إيقاف آخر أدمن في المنصة.
   - قائمة المستخدمين: بحث + تقسيم صفحات (50 في الصفحة).
 
-- [ ] **SEC-08 — Security headers للصفحات**
+- [x] **SEC-08 — Security headers للصفحات**
+  - ✔ اتعمل: src/middleware.ts بيحط CSP بـ nonce لكل طلب + strict-dynamic و frame-ancestors 'none' و X-Frame-Options DENY و nosniff و Referrer-Policy و Permissions-Policy؛ /api/files سايب هيدرزه زي ما هي (اختبار csp.test).
   - إضافة: `Content-Security-Policy` (مناسب لـ Next.js)، `X-Frame-Options: DENY` (أو `frame-ancestors 'none'`)، `Referrer-Policy: strict-origin-when-cross-origin`، `Permissions-Policy`، `X-Content-Type-Options: nosniff`.
   - ملفات `/api/files` حالتها كويسة (sandbox + nosniff) — سيبها.
 
-- [ ] **SEC-09 — منع رفع SVG من المستخدمين**
+- [x] **SEC-09 — منع رفع SVG من المستخدمين**
+  - ✔ اتعمل: السيرفر بيحدد النوع من أول بايتات الملف (PDF/JPEG/PNG/WebP بس) ومش بيصدّق الامتداد ولا المتصفح، وحقول الرفع مقفولة على نفس الأنواع (اختبار file-sniff.test).
   - حقول الرفع بتقبل `image/*` (يعني SVG). اسمح بـ PDF و JPEG و PNG و WebP بس، وافحص نوع الملف الحقيقي (magic bytes) في السيرفر مش الامتداد.
 
 ---
