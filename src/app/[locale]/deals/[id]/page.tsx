@@ -378,7 +378,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                       <li key={c.id} id={`contract-${c.id}`} className="flex scroll-mt-24 flex-col gap-2 py-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="font-semibold">
-                            {label(CONTRACT_TYPE, c.type, locale)} <span className="text-xs text-muted">{c.templateVersion}</span>
+                            {label(CONTRACT_TYPE, c.type, locale)} <span className="text-[13px] text-muted">{c.templateVersion}</span>
                           </span>
                           <Badge tone={toneOf(c.status)}>{statusText}</Badge>
                         </div>
@@ -451,7 +451,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                     <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                       <span className="flex flex-col">
                         {d.canOpen ? <FileLink id={d.id}>{label(DOC_TYPE, d.type, locale)}</FileLink> : <span>{label(DOC_TYPE, d.type, locale)}</span>}
-                        <span className="text-xs text-muted">
+                        <span className="text-[13px] text-muted">
                           {d.scope === "listing" ? L("ورق القطعة", "Plot papers") : d.uploadedBy?.name} · {date(d.createdAt, locale)}
                           {d.version > 1 && ` · v${d.version}`}
                           {!d.canOpen && side === "BUYER" && L(" · بيتفتح بعد توقيع العقد المبدئي", " · opens after the preliminary contract is signed")}
@@ -698,7 +698,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                       {typeof data.reason === "string" && e.type === "CANCELLED" && (
                         <span>{CANCEL_REASONS.find((r) => r[0] === data.reason)?.[ar ? 1 : 2] ?? (data.reason === "sold_to_other" ? L("القطعة اتباعت لمشتري تاني", "Sold to another buyer") : "")}</span>
                       )}
-                      <span className="text-xs text-muted">
+                      <span className="text-[13px] text-muted">
                         {e.actor && (namesVisible || !side || e.actorId === me.id || [deal.brokerId, deal.lawyerId, deal.agentId].includes(e.actorId)) ? e.actor.name : L("طرف في الصفقة", "A party")} ·{" "}
                         {dateTime(e.createdAt, locale)}
                       </span>
@@ -852,7 +852,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                         <strong>{money(d.amount, d.currency, locale)}</strong>
                         <Badge tone={toneOf(d.escrowStatus)}>{status}</Badge>
                       </div>
-                      <div className="text-xs text-muted">
+                      <div className="text-[13px] text-muted">
                         {d.bankReference && <span dir="ltr">{d.bankReference} · </span>}
                         {d.receiptDocument ? <FileLink id={d.receiptDocument.id}>{L("إيصال التحويل", "Transfer receipt")}</FileLink> : L("مفيش إيصال لسه", "No receipt yet")}
                       </div>
@@ -874,7 +874,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                           {L(`طلب ${pending.action === "RELEASED_TO_SELLER" ? "صرف للبائع" : "رد للمشتري"} مستني موافقة الأدمن`, `${pending.action === "RELEASED_TO_SELLER" ? "Release" : "Refund"} request awaiting admin approval`)}
                           {p["payment.approve"].allowed && pending.requestedById !== me.id && (
                             <form action={decidePayment.bind(null, locale, id, pending.id)} className="mt-2 flex flex-wrap gap-2">
-                              <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-9 w-36`} />
+                              <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-11 w-36`} />
                               <button name="decision" value="APPROVED" className={`${btn.small} bg-ok text-white`}>{L("وافق ونفّذ", "Approve and execute")}</button>
                               <button name="decision" value="REJECTED" className={`${btn.small} border border-[#A32020] text-[#A32020]`}>{L("ارفض", "Reject")}</button>
                             </form>
@@ -891,21 +891,21 @@ export default async function DealRoom({ params, searchParams }: Props) {
                         <div className="flex flex-wrap gap-1.5">
                           {p["deposit.confirm"].allowed && d.escrowStatus === "AWAITING_TRANSFER" && (
                             <form action={confirmDeposit.bind(null, locale, id, d.id)} className="flex flex-wrap gap-1.5">
-                              <input aria-label={L("رقم مرجع البنك", "Bank reference")} name="bankReference" required minLength={4} dir="ltr" placeholder={L("رقم مرجع البنك", "Bank reference")} className={`${field} min-h-9 w-40`} />
+                              <input aria-label={L("رقم مرجع البنك", "Bank reference")} name="bankReference" required minLength={4} dir="ltr" placeholder={L("رقم مرجع البنك", "Bank reference")} className={`${field} min-h-11 w-40`} />
                               <AdminReason show={ov("deposit.confirm")} ar={ar} />
                               <button className={`${btn.small} border border-ok text-ok`}>{L("البنك أكّد الاستلام", "Bank confirmed")}</button>
                             </form>
                           )}
                           {p["deposit.release"].allowed && d.escrowStatus === "HELD" && (
                             <form action={settleDeposit.bind(null, locale, id, d.id, "RELEASED_TO_SELLER")} className="flex flex-wrap gap-1.5">
-                              <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-9 w-36`} />
+                              <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-11 w-36`} />
                               <AdminReason show={ov("deposit.release")} ar={ar} />
                               <button className={`${btn.small} border border-ok text-ok`}>{L("اصرف للبائع", "Release to seller")}</button>
                             </form>
                           )}
                           {p["deposit.refund"].allowed && d.escrowStatus === "HELD" && (
                             <form action={settleDeposit.bind(null, locale, id, d.id, "REFUNDED_TO_BUYER")} className="flex flex-wrap gap-1.5">
-                              <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-9 w-36`} />
+                              <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-11 w-36`} />
                               <AdminReason show={ov("deposit.refund")} ar={ar} />
                               <button className={`${btn.small} border border-[#A32020] text-[#A32020]`}>{L("رد للمشتري", "Refund buyer")}</button>
                             </form>
@@ -949,7 +949,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                       .filter((s) => s !== deal.commission!.status)
                       .map((s) => (
                         <form key={s} action={setCommissionStatus.bind(null, locale, id, s)} className="flex gap-1">
-                          {s === "PAID" && <input aria-label={L("مرجع التحصيل", "Payment reference")} name="reference" placeholder={L("مرجع التحصيل", "Payment reference")} className={`${field} min-h-9 w-36`} />}
+                          {s === "PAID" && <input aria-label={L("مرجع التحصيل", "Payment reference")} name="reference" placeholder={L("مرجع التحصيل", "Payment reference")} className={`${field} min-h-11 w-36`} />}
                           <AdminReason show={ov("commission.collect")} ar={ar} />
                           <button className={`${btn.small} border border-line`}>{label(COMMISSION_STATUS, s, locale)}</button>
                         </form>

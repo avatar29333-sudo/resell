@@ -110,7 +110,7 @@ export default async function MarketingPage({ params, searchParams }: Props) {
                 {L("الرسالة بالإنجليزي (اختياري)", "Message in English (optional)")}
                 <textarea name="textEn" rows={2} className={`${field} py-2`} dir="ltr" />
               </label>
-              <p className="text-xs text-muted">{L("رابط الإيقاف بيتضاف لوحده في آخر كل رسالة.", "The stop link is added automatically to every message.")}</p>
+              <p className="text-[13px] text-muted">{L("رابط الإيقاف بيتضاف لوحده في آخر كل رسالة.", "The stop link is added automatically to every message.")}</p>
               <ConfirmButton message={L("تبعت الرسالة لكل المشتركين في المدينة دي؟", "Send this to every subscriber in this city?")} className={`${btn.primary} self-start`}>
                 {L("ابعت للمشتركين", "Send to subscribers")}
               </ConfirmButton>
@@ -127,11 +127,11 @@ export default async function MarketingPage({ params, searchParams }: Props) {
               <Table head={[L("الوقت", "Time"), L("لمين", "To"), L("النوع", "Kind"), L("الحالة", "Status")]}>
                 {outbox.map((m) => (
                   <tr key={m.id}>
-                    <td className="text-xs">{dateTime(m.createdAt, locale)}</td>
-                    <td dir="ltr" className="text-start text-xs">
+                    <td className="text-[13px]">{dateTime(m.createdAt, locale)}</td>
+                    <td dir="ltr" className="text-start text-[13px]">
                       {m.to.slice(0, 5)}•••{m.to.slice(-3)}
                     </td>
-                    <td className="text-xs">
+                    <td className="text-[13px]">
                       {m.kind}
                       <div className="max-w-xs truncate text-muted" title={m.body}>
                         {m.body}

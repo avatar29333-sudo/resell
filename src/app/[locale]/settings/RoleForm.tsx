@@ -33,7 +33,7 @@ export function RoleForm({
       className="flex flex-wrap items-center gap-1.5"
     >
       <input type="hidden" name="confirmed" value={`${current}>${role}`} />
-      <select name="role" value={role} onChange={(e) => setRole(e.target.value)} className="min-h-9 w-36 border border-line px-2 text-sm" aria-label={ar ? "الدور" : "Role"}>
+      <select name="role" value={role} onChange={(e) => setRole(e.target.value)} className="min-h-11 w-36 border border-line px-2 text-sm" aria-label={ar ? "الدور" : "Role"}>
         {roles.map((r) => (
           <option key={r.key} value={r.key}>
             {r.label}
@@ -46,11 +46,11 @@ export function RoleForm({
           defaultValue={brokerRegNo ?? ""}
           required={!brokerRegNo}
           placeholder={ar ? "رقم القيد في سجل الوسطاء" : "Broker registry number"}
-          className="min-h-9 w-44 border border-line px-2 text-sm"
+          className="min-h-11 w-44 border border-line px-2 text-sm"
           dir="ltr"
         />
       )}
-      <button disabled={role === current} className="inline-flex min-h-9 items-center border border-brand px-3 text-sm font-semibold text-brand disabled:opacity-40">
+      <button disabled={role === current} className="inline-flex min-h-11 items-center border border-brand px-3 text-sm font-semibold text-brand disabled:opacity-40">
         {ar ? "حفظ" : "Save"}
       </button>
     </form>

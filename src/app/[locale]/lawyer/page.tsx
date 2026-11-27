@@ -140,7 +140,7 @@ export default async function LawyerPage({ params, searchParams }: Props) {
               {contracts.map((c) => (
                 <tr key={c.id}>
                   <td className="font-semibold">
-                    {label(CONTRACT_TYPE, c.type, locale)} <span className="text-xs text-muted">{c.templateVersion}</span>
+                    {label(CONTRACT_TYPE, c.type, locale)} <span className="text-[13px] text-muted">{c.templateVersion}</span>
                   </td>
                   <td>
                     #{c.dealId.slice(-6).toUpperCase()} · {label(CITY, c.deal.listing.plot.city, locale)}

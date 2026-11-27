@@ -78,7 +78,7 @@ export function RescueCalculator({ locale, usdRate, perSqm, feePct, cities }: { 
             <label className={`${labelCls} sm:col-span-2`}>
               {L("سعر القطعة الحالي (ج.م)", "Current plot price (EGP)")}
               <input type="number" min={0} inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder={suggestion ? String(suggestion) : ""} aria-label={L("سعر القطعة الحالي (ج.م)", "Current plot price (EGP)")} className={field} />
-              <span className="text-xs">
+              <span className="text-[13px]">
                 {suggestion
                   ? L(`مقترح من مؤشر الأسعار الحقيقي: ${money(suggestion, "EGP", locale)} — اكتب سعرك لو تعرفه.`, `Suggested from the real price index: ${money(suggestion, "EGP", locale)} — enter your own if you know it.`)
                   : L("مفيش بيانات صفقات كفاية للمدينة دي عشان نقترح سعر — اكتب السعر اللي تعرفه.", "Not enough deal data in this city to suggest a price — enter the price you know.")}

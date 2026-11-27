@@ -59,7 +59,7 @@ export default async function SignInPage({ params, searchParams }: Props) {
                       className="flex min-h-14 w-full flex-col items-start justify-center border border-line px-3 py-2 text-start hover:border-brand hover:bg-paper"
                     >
                       <span className="font-semibold">{u.name}</span>
-                      <span className="text-xs text-muted">
+                      <span className="text-[13px] text-muted">
                         {u.role === "CLIENT" ? (u.id === client1?.id ? L("عميل ١ · عنده عرض بيع", "Client 1 · has a listing") : L("عميل ٢ · مشتري في صفقة", "Client 2 · buying in a deal")) : label(ROLE, u.role, locale)}
                       </span>
                     </button>

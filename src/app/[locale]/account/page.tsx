@@ -255,7 +255,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                       {label(CITY, d.listing.plot.city, locale)} — {districtName(d.listing.plot, locale)} · {num(d.listing.plot.areaSqm, locale)} {L("م²", "m²")}
                     </Link>
                     <span className={`text-sm ${d.status === "COMPLETED" ? "text-ok" : "text-[#A32020]"}`}>{endReason(d)}</span>
-                    <span className="text-xs text-muted">
+                    <span className="text-[13px] text-muted">
                       {L(`وقفت عند: ${label(DEAL_STAGE, d.stage, locale)}`, `Stopped at: ${label(DEAL_STAGE, d.stage, locale)}`)} · {date(d.updatedAt, locale)}
                       {d.deposits.some((x) => x.escrowStatus === "REFUNDED_TO_BUYER") && L(" · العربون اترد لك", " · your deposit was refunded")}
                     </span>
@@ -400,7 +400,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                           ? L(`اتباعت لـ ${d.buyer.name} بـ ${money(d.agreedPrice, "EGP", locale)}`, `Sold to ${d.buyer.name} for ${money(d.agreedPrice, "EGP", locale)}`)
                           : endReason(d)}
                       </span>
-                      <span className="text-xs text-muted">
+                      <span className="text-[13px] text-muted">
                         {d.closedAt ? L(`اتقفلت ${date(d.closedAt, locale)}`, `Closed ${date(d.closedAt, locale)}`) : L(`اتلغت عند: ${label(DEAL_STAGE, d.stage, locale)}`, `Cancelled at: ${label(DEAL_STAGE, d.stage, locale)}`)}
                         {released && L(` · العربون اتصرف لك (${money(released.amount, "EGP", locale)})`, ` · deposit released to you (${money(released.amount, "EGP", locale)})`)}
                         {d.listing.status === "PUBLISHED" && d.status === "CANCELLED" && L(" · العرض رجع منشور", " · listing is published again")}

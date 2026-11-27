@@ -61,7 +61,7 @@ export default async function NotificationsPage({ params }: { params: Promise<{ 
                     <span className="font-semibold">{n.title}</span>
                   )}
                   {n.body && <span className="text-sm text-muted">{n.body}</span>}
-                  <span className="text-xs text-muted">
+                  <span className="text-[13px] text-muted">
                     {dateTime(n.createdAt, locale)}
                     {n.sentVia && ` · ${n.sentVia === "whatsapp" ? L("اتبعت واتساب", "sent on WhatsApp") : L("اتبعت إيميل", "sent by email")}`}
                   </span>

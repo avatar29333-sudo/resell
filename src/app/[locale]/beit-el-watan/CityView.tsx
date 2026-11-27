@@ -46,7 +46,7 @@ export async function CityView({ locale, city, district }: { locale: "ar" | "en"
         <div className="grid gap-3 md:grid-cols-3">
           <Card title={L("متوسط سعر المتر", "Average price per m²")}>
             <div className="text-2xl font-bold text-navy">{last ? money(last.avgPerSqm!, "EGP", locale) : L("بيانات غير كافية", "Insufficient data")}</div>
-            {last && <div className="text-xs text-muted">{L(`صفقات ${last.month} في المدينة`, `${last.month} deals in the city`)}</div>}
+            {last && <div className="text-[13px] text-muted">{L(`صفقات ${last.month} في المدينة`, `${last.month} deals in the city`)}</div>}
           </Card>
           <Card title={L("عروض منشورة", "Published listings")}>
             <div className="text-2xl font-bold text-navy">{num(rows.length, locale)}</div>
@@ -66,7 +66,7 @@ export async function CityView({ locale, city, district }: { locale: "ar" | "en"
         {districts.length > 0 && (
           <nav className="flex flex-wrap gap-2" aria-label={L("الأحياء", "Districts")}>
             {districts.map((d) => (
-              <Link key={d.id} href={`/${locale}/beit-el-watan/${CITY_SLUG[city]}/${slugify(d.nameEn)}`} className="inline-flex min-h-10 items-center border border-line px-3 hover:border-navy">
+              <Link key={d.id} href={`/${locale}/beit-el-watan/${CITY_SLUG[city]}/${slugify(d.nameEn)}`} className="inline-flex min-h-11 items-center border border-line px-3 hover:border-navy">
                 {locale === "ar" ? d.nameAr : d.nameEn}
               </Link>
             ))}

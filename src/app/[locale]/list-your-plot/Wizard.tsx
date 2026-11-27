@@ -241,7 +241,7 @@ export function Wizard({
           <label className={labelCls}>
             {L("كود القطعة (من خطاب التخصيص)", "Plot code (from the allocation letter)")}
             <input name="code" value={v.code ?? ""} onChange={set("code")} dir="ltr" placeholder={hint.example} className={`${field} text-start`} {...inv("code")} />
-            <span className="text-xs">
+            <span className="text-[13px]">
               {L(`الشكل: ${hint.words} — مثلاً ${hint.example}. مش هيظهر لأي مشتري قبل اتفاق العمولة.`, `Format: ${hint.words} — e.g. ${hint.example}. Hidden from buyers until the commission agreement.`)}
             </span>
             <Err name="code" />
@@ -261,7 +261,7 @@ export function Wizard({
           <label className={labelCls}>
             {L("نهاية مهلة البناء", "Build deadline")}
             <input name="deadline" type="date" value={v.deadline ?? ""} onChange={set("deadline")} className={field} {...inv("deadline")} />
-            <span className="text-xs">{L("لو المهلة خلصت، اكتب تاريخها برضه — هنعرض عليك «إنقاذ المهلة».", "If the deadline has passed, enter it anyway — we'll offer a deadline rescue.")}</span>
+            <span className="text-[13px]">{L("لو المهلة خلصت، اكتب تاريخها برضه — هنعرض عليك «إنقاذ المهلة».", "If the deadline has passed, enter it anyway — we'll offer a deadline rescue.")}</span>
             <Err name="deadline" />
           </label>
           <label className={labelCls}>
@@ -301,7 +301,7 @@ export function Wizard({
             <label className={labelCls}>
               {L("الأقساط الباقية للجهاز (دولار) — اختياري", "Remaining authority instalments (USD) — optional")}
               <input name="remainingUsd" type="number" min={0} inputMode="decimal" value={v.remainingUsd ?? ""} onChange={set("remainingUsd")} className={field} />
-              <span className="text-xs">{L("بتظهر للمشتري في حاسبة التكلفة الكاملة بسعر دولار النهارده.", "Shown to buyers in the full-cost calculator at today's USD rate.")}</span>
+              <span className="text-[13px]">{L("بتظهر للمشتري في حاسبة التكلفة الكاملة بسعر دولار النهارده.", "Shown to buyers in the full-cost calculator at today's USD rate.")}</span>
             </label>
           )}
         </div>
@@ -330,7 +330,7 @@ export function Wizard({
                 ) : (
                   <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" aria-label={title} onChange={(e) => pick(f.name, e)} disabled={uploading === f.name} className="border border-dashed border-line p-2.5" {...inv(f.name)} />
                 )}
-                {uploading === f.name && <span className="text-xs text-muted">{L("بنرفع الملف…", "Uploading…")}</span>}
+                {uploading === f.name && <span className="text-[13px] text-muted">{L("بنرفع الملف…", "Uploading…")}</span>}
                 <Err name={f.name} />
               </div>
             );

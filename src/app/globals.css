@@ -25,6 +25,14 @@ body {
   font-family: var(--font-sans);
 }
 
+/* UX-31: الأرقام والأكواد والمبالغ بعرض ثابت (ما بتتهزش في الجداول) */
+td,
+dd,
+[dir="ltr"],
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
 :focus-visible {
   outline: 3px solid var(--color-brand-bright);
   outline-offset: 2px;

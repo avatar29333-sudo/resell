@@ -62,7 +62,7 @@ export function SiteReportForm({ action, ar, adminReason }: { action: (f: FormDa
         {L("صور الموقع (لحد 10)", "Site photos (up to 10)")}
         <input ref={input} name="photos" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple required onChange={onPick} className="border border-dashed border-line p-2" />
       </label>
-      <span className="text-xs text-muted">
+      <span className="text-[13px] text-muted">
         {geoState === "ok" && geo
           ? L(`المكان اتسجل (دقة ${Math.round(geo.accuracy)} متر)`, `Location captured (±${Math.round(geo.accuracy)} m)`)
           : geoState === "asking"
@@ -80,7 +80,7 @@ export function SiteReportForm({ action, ar, adminReason }: { action: (f: FormDa
         {L("تقدير نسبة التنفيذ (%)", "Estimated construction (%)")}
         <input name="estimate" type="number" min={0} max={100} step={1} inputMode="numeric" className="min-h-11 w-32 border border-line px-2" />
       </label>
-      {adminReason && <input aria-label={L("سبب تدخّل الأدمن (إجباري)", "Admin override reason (required)")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن (إجباري)", "Admin override reason (required)")} className="min-h-9 border border-[#F0D9A8] bg-[#FDF3E1] px-2 text-sm" />}
+      {adminReason && <input aria-label={L("سبب تدخّل الأدمن (إجباري)", "Admin override reason (required)")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن (إجباري)", "Admin override reason (required)")} className="min-h-11 border border-[#F0D9A8] bg-[#FDF3E1] px-2 text-sm" />}
       <button disabled={busy} className="inline-flex min-h-11 items-center justify-center self-start bg-brand px-4 font-semibold text-white disabled:opacity-50">
         {busy ? L("بنجهّز الصور…", "Preparing photos…") : count ? L(`ابعت التقرير (${count} صورة)`, `Send report (${count} photos)`) : L("ابعت التقرير", "Send report")}
       </button>

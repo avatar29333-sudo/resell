@@ -174,7 +174,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
                   {u.name}
                 </Link>
                 {u.brokerRegNo && (
-                  <div className="text-xs font-normal text-muted" dir="ltr">
+                  <div className="text-[13px] font-normal text-muted" dir="ltr">
                     #{u.brokerRegNo}
                   </div>
                 )}
@@ -199,14 +199,14 @@ export default async function SettingsPage({ params, searchParams }: Props) {
                 {u.id !== meId &&
                   (u.status === "SUSPENDED" ? (
                     <form action={unsuspendUser.bind(null, locale, u.id)} className="mt-1">
-                      {u.suspendReason && <div className="text-xs text-muted">{u.suspendReason}</div>}
+                      {u.suspendReason && <div className="text-[13px] text-muted">{u.suspendReason}</div>}
                       <button className={`${btn.small} border border-line`}>{L("فعّل الحساب", "Reactivate")}</button>
                     </form>
                   ) : (
                     <details className="mt-1">
-                      <summary className="cursor-pointer text-xs text-[#A32020]">{L("إيقاف…", "Suspend…")}</summary>
+                      <summary className="cursor-pointer text-[13px] text-[#A32020]">{L("إيقاف…", "Suspend…")}</summary>
                       <form action={suspendUser.bind(null, locale, u.id)} className="mt-1 flex flex-col gap-1">
-                        <input aria-label={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} name="reason" required minLength={10} placeholder={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} className={`${field} min-h-9 w-56`} />
+                        <input aria-label={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} name="reason" required minLength={10} placeholder={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} className={`${field} min-h-11 w-56`} />
                         <button className={`${btn.small} self-start border border-[#A32020] text-[#A32020]`}>{L("أوقف الحساب", "Suspend account")}</button>
                       </form>
                     </details>
@@ -267,7 +267,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             </label>
           )}
           <button className={btn.primary}>{L("سجّل سعر يدوي", "Add manual rate")}</button>
-          <p className="w-full text-xs text-muted">{L("هيطلب منك تأكيد هويتك قبل الحفظ.", "You'll be asked to confirm your identity before saving.")}</p>
+          <p className="w-full text-[13px] text-muted">{L("هيطلب منك تأكيد هويتك قبل الحفظ.", "You'll be asked to confirm your identity before saving.")}</p>
         </form>
         <Table head={[L("التاريخ", "Date"), L("شراء", "Buy"), L("بيع", "Sell"), L("المصدر", "Source"), L("بواسطة", "By")]}>
           {rates.map((r) => (
@@ -375,7 +375,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             <label className={labelCls}>
               {L("حد الأربع عيون للصرف (ج.م)", "Four-eyes payout limit (EGP)")}
               <input name="fourEyesLimit" type="number" min={0} step={1000} defaultValue={fourEyes.limitEgp} className={`${field} w-44`} />
-              <span className="text-xs text-muted">{money(fourEyes.limitEgp, "EGP", locale)}</span>
+              <span className="text-[13px] text-muted">{money(fourEyes.limitEgp, "EGP", locale)}</span>
             </label>
             <label className={labelCls}>
               {L("رسوم التنازل التقديرية على المشتري (ج.م، 0 = بتتحدد من الجهاز)", "Estimated buyer transfer fee (EGP, 0 = set by the authority)")}
@@ -454,7 +454,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
       <Card title={L("الأحياء (المكان) — اختيارات معالج إضافة القطعة", "Districts (place) — choices in the add-plot wizard")}>
         <nav className="flex flex-wrap gap-1.5">
           {CITY_KEYS.map((c) => (
-            <Link key={c} href={`${base}?tab=districts&city=${c}`} className={`inline-flex min-h-9 items-center border px-2.5 text-sm ${c === city ? "border-navy bg-navy text-white" : "border-line"}`}>
+            <Link key={c} href={`${base}?tab=districts&city=${c}`} className={`inline-flex min-h-11 items-center border px-2.5 text-sm ${c === city ? "border-navy bg-navy text-white" : "border-line"}`}>
               {label(CITY, c, locale)}
             </Link>
           ))}
@@ -766,7 +766,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             <a
               key={t ?? "all"}
               href={`/${locale}/settings?tab=audit${t ? `&entity=${t}` : ""}${sp.from ? `&from=${sp.from}` : ""}${sp.to ? `&to=${sp.to}` : ""}${sp.actor ? `&actor=${encodeURIComponent(sp.actor)}` : ""}${sp.group ? `&group=${sp.group}` : ""}`}
-              className={`inline-flex min-h-9 items-center border px-2.5 text-sm ${t === entity ? "border-navy bg-navy text-white" : "border-line"}`}
+              className={`inline-flex min-h-11 items-center border px-2.5 text-sm ${t === entity ? "border-navy bg-navy text-white" : "border-line"}`}
             >
               {t ?? L("الكل", "All")}
             </a>
@@ -779,14 +779,14 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               <td>{a.actor?.name ?? (a.action.startsWith("cron.") || a.action.startsWith("listing.statement") ? L("النظام", "System") : L("زائر", "Visitor"))}</td>
               <td>
                 {auditLabel(a.action, locale)}
-                <div dir="ltr" className="text-start font-mono text-[11px] text-muted">
+                <div dir="ltr" className="text-start font-mono text-[13px] text-muted">
                   {a.action}
                 </div>
               </td>
-              <td className="text-xs">
+              <td className="text-[13px]">
                 {a.entityType} <span className="text-muted">…{a.entityId.slice(-6)}</span>
               </td>
-              <td dir="ltr" className="text-start text-xs text-muted">
+              <td dir="ltr" className="text-start text-[13px] text-muted">
                 {a.ip ?? "—"}
               </td>
             </tr>

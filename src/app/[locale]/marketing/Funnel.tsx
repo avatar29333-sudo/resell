@@ -63,7 +63,7 @@ export async function Funnel({ locale, from, to }: { locale: "ar" | "en"; from?:
             <td dir="ltr" className="text-start font-semibold">
               {r.channel === "direct" ? L("مباشر", "Direct") : r.channel === "referral" ? L("إحالة", "Referral") : r.channel}
             </td>
-            <td className="text-xs text-muted">{L("مش متاح", "N/A")}</td>
+            <td className="text-[13px] text-muted">{L("مش متاح", "N/A")}</td>
             <td>{num(r.leads, locale)}</td>
             <td>{num(r.verified, locale)}</td>
             <td>{num(r.agreements, locale)}</td>
@@ -75,7 +75,7 @@ export async function Funnel({ locale, from, to }: { locale: "ar" | "en"; from?:
           </tr>
         ))}
       </Table>
-      <p className="text-xs text-muted">
+      <p className="text-[13px] text-muted">
         {L("الزيارات مش متاحة لحد ما أدوات التحليلات تتربط (MKT-11). المصدر = أول لمسة (utm أو الموقع اللي جه منه).", "Visits aren't available until analytics are connected (MKT-11). Source = first touch (utm or referring site).")}
       </p>
       <form action={saveSpend.bind(null, locale)} className="flex flex-wrap items-end gap-2 border-t border-line pt-3">

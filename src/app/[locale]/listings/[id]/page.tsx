@@ -185,7 +185,7 @@ export default async function ListingPage({ params, searchParams }: Props) {
                 <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                   <span className="flex items-center gap-2">
                     {canSeeFiles ? <FileLink id={d.id}>{label(DOC_TYPE, d.type, locale)}</FileLink> : <span>{label(DOC_TYPE, d.type, locale)}</span>}
-                    {d.version > 1 && <span className="text-xs text-muted">v{d.version}</span>}
+                    {d.version > 1 && <span className="text-[13px] text-muted">v{d.version}</span>}
                   </span>
                   <Badge tone={toneOf(d.status)}>{label(DOC_STATUS, d.status, locale)}</Badge>
                 </li>

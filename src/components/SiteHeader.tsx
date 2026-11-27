@@ -20,7 +20,7 @@ function Bell({ href, unread, ar }: { href: string; unread: number; ar: boolean 
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
         <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0" />
       </svg>
-      {unread > 0 && <span className="absolute top-1 end-0 min-w-5 bg-[#D9480F] px-1 text-center text-xs font-bold text-white">{unread > 99 ? "99+" : unread}</span>}
+      {unread > 0 && <span className="absolute top-1 end-0 min-w-5 bg-[#D9480F] px-1 text-center text-[13px] font-bold text-white">{unread > 99 ? "99+" : unread}</span>}
     </Link>
   );
 }
@@ -52,7 +52,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
 
   return (
     <header className="bg-navy text-white print:hidden">
-      <div className="bg-[#FDF3E1] px-5 py-1 text-center text-xs text-[#5C3D00] md:py-1.5 md:text-sm">{t.demo.banner}</div>
+      <div className="bg-[#FDF3E1] px-5 py-1 text-center text-[13px] text-[#5C3D00] md:py-1.5 md:text-sm">{t.demo.banner}</div>
 
       {/* UX-06: الموبايل (تحت 768px) — لوجو + «اعرض قطعتك» + ☰ وبس، والهيدر ≤ 72px */}
       <div className="relative flex h-[64px] items-center justify-between gap-2 px-4 md:hidden">
@@ -127,7 +127,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
               <Bell href={`${base}/notifications`} unread={unread} ar={ar} />
               <Link href={dash!} className="flex flex-col px-2 py-1 leading-tight text-white hover:text-[#D6DCEE]">
                 <span className="font-semibold">{user.name}</span>
-                <span className="text-xs text-[#B9C3DE]">{label(ROLE, user.role, locale)}</span>
+                <span className="text-[13px] text-[#B9C3DE]">{label(ROLE, user.role, locale)}</span>
               </Link>
               {user.role !== "CLIENT" && (
                 <Link href={`${base}/account`} className="text-[#D6DCEE] hover:text-white">
@@ -153,7 +153,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
         {staffLinks.length > 0 && (
           <nav aria-label={ar ? "لوحات الفريق" : "Team dashboards"} className="flex w-full flex-wrap gap-1 border-t border-navy-soft pt-2 text-sm">
             {staffLinks.map((l) => (
-              <Link key={l.href} href={l.href} className="inline-flex min-h-9 items-center bg-navy-soft px-3 text-[#D6DCEE] hover:text-white">
+              <Link key={l.href} href={l.href} className="inline-flex min-h-11 items-center bg-navy-soft px-3 text-[#D6DCEE] hover:text-white">
                 {l.label}
               </Link>
             ))}

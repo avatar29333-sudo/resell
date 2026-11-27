@@ -24,7 +24,7 @@ export default async function GuidesPage({ params }: { params: Promise<{ locale:
               <Link href={`/${locale}/guides/${g.slug}`} className="flex h-full flex-col gap-2 border border-line p-5 hover:border-brand">
                 <span className="text-lg font-bold text-navy">{g.title[i]}</span>
                 <span className="text-muted">{g.description[i]}</span>
-                <span className="text-xs text-muted">{L(`آخر مراجعة: ${date(g.reviewedAt, locale)}`, `Last reviewed: ${date(g.reviewedAt, locale)}`)}</span>
+                <span className="text-[13px] text-muted">{L(`آخر مراجعة: ${date(g.reviewedAt, locale)}`, `Last reviewed: ${date(g.reviewedAt, locale)}`)}</span>
               </Link>
             </li>
           ))}

@@ -168,19 +168,19 @@ async function Queue({ locale, me, scope: scopeRaw }: { locale: "ar" | "en"; me:
                     <Link href={`/${locale}/listings/${l.id}`} className="font-semibold text-brand">
                       {label(CITY, l.plot.city, locale)} — {districtName(l.plot, locale)}
                     </Link>
-                    <div className="text-xs text-muted" dir="ltr">
+                    <div className="text-[13px] text-muted" dir="ltr">
                       {l.plot.code}
                     </div>
-                    <div className="text-xs text-muted">
+                    <div className="text-[13px] text-muted">
                       {num(l.plot.areaSqm, locale)} {L("م²", "m²")}
                     </div>
-                    <div className="text-xs text-muted">
+                    <div className="text-[13px] text-muted">
                       {L("الوسيط:", "Broker:")} {l.assignedBroker?.name ?? L("مش متسند", "Unassigned")}
                     </div>
                   </td>
                   <td>
                     {l.seller.name}
-                    <div className="text-xs text-muted">{date(l.createdAt, locale)}</div>
+                    <div className="text-[13px] text-muted">{date(l.createdAt, locale)}</div>
                   </td>
                   <td>
                     <ul className="flex flex-col gap-1">
@@ -229,7 +229,7 @@ async function Queue({ locale, me, scope: scopeRaw }: { locale: "ar" | "en"; me:
                       )}
                       {canAssign && (
                         <form action={assignListingBroker.bind(null, locale, l.id)} className="flex flex-wrap items-center gap-1">
-                          <select name="brokerId" defaultValue={l.assignedBrokerId ?? ""} className={`${field} min-h-9 w-36`} aria-label={L("وسيط العرض", "Listing broker")}>
+                          <select name="brokerId" defaultValue={l.assignedBrokerId ?? ""} className={`${field} min-h-11 w-36`} aria-label={L("وسيط العرض", "Listing broker")}>
                             <option value="">{L("مش متسند", "Unassigned")}</option>
                             {brokers.map((b) => (
                               <option key={b.id} value={b.id}>
@@ -260,11 +260,11 @@ async function Queue({ locale, me, scope: scopeRaw }: { locale: "ar" | "en"; me:
                 <tr key={k.id}>
                   <td>
                     <div className="font-semibold">{k.user.name}</div>
-                    <div className="text-xs text-muted">
+                    <div className="text-[13px] text-muted">
                       <span dir="ltr">{k.user.phone}</span> · {label(COUNTRY, k.user.countryOfResidence, locale)}
                     </div>
                     {k.user.kycRejections > 0 && (
-                      <div className="text-xs text-[#A32020]">{L(`اترفض قبل كده ${num(k.user.kycRejections, locale)} مرة`, `Rejected ${k.user.kycRejections} time(s) before`)}</div>
+                      <div className="text-[13px] text-[#A32020]">{L(`اترفض قبل كده ${num(k.user.kycRejections, locale)} مرة`, `Rejected ${k.user.kycRejections} time(s) before`)}</div>
                     )}
                   </td>
                   <td className="flex flex-col gap-1">
@@ -273,13 +273,13 @@ async function Queue({ locale, me, scope: scopeRaw }: { locale: "ar" | "en"; me:
                   </td>
                   <td>
                     {adminOnly ? (
-                      <span className="text-xs text-muted">{L("محتاج قرار الأدمن (3 رفضات)", "Needs an admin decision (3 rejections)")}</span>
+                      <span className="text-[13px] text-muted">{L("محتاج قرار الأدمن (3 رفضات)", "Needs an admin decision (3 rejections)")}</span>
                     ) : (
                       <form action={kycDecision.bind(null, locale, k.id)} className="flex flex-wrap items-center gap-1.5">
                         <button name="decision" value="APPROVED" className={`${btn.small} bg-ok text-white`}>
                           {L("قبول", "Approve")}
                         </button>
-                        <input aria-label={L("سبب الرفض (10 حروف على الأقل)", "Rejection reason (10+ chars)")} name="reason" minLength={10} placeholder={L("سبب الرفض (10 حروف على الأقل)", "Rejection reason (10+ chars)")} className={`${field} min-h-9 w-48`} />
+                        <input aria-label={L("سبب الرفض (10 حروف على الأقل)", "Rejection reason (10+ chars)")} name="reason" minLength={10} placeholder={L("سبب الرفض (10 حروف على الأقل)", "Rejection reason (10+ chars)")} className={`${field} min-h-11 w-48`} />
                         <button name="decision" value="REJECTED" className={`${btn.small} border border-[#A32020] text-[#A32020]`}>
                           {L("رفض", "Reject")}
                         </button>
@@ -313,7 +313,7 @@ async function Deals({ locale, me, counts, status }: { locale: "ar" | "en"; me: 
             key={s}
             href={`/${locale}/broker?tab=deals&status=${s}`}
             aria-current={s === st ? "page" : undefined}
-            className={`inline-flex min-h-10 items-center border px-3 text-sm font-semibold ${s === st ? "border-navy bg-navy text-white" : "border-line"}`}
+            className={`inline-flex min-h-11 items-center border px-3 text-sm font-semibold ${s === st ? "border-navy bg-navy text-white" : "border-line"}`}
           >
             {label(DEAL_STATUS, s, locale)}
           </Link>
@@ -326,7 +326,7 @@ async function Deals({ locale, me, counts, status }: { locale: "ar" | "en"; me: 
             <section key={stage} className="flex min-w-52 flex-col gap-2 bg-paper p-2">
               <h3 className="flex items-center justify-between px-1 text-sm font-bold">
                 {label(DEAL_STAGE, stage, locale)}
-                <span className="bg-white px-1.5 text-xs text-muted">{num(st === "ACTIVE" ? (counts.find((c) => c.stage === stage)?._count ?? 0) : items.length, locale)}</span>
+                <span className="bg-white px-1.5 text-[13px] text-muted">{num(st === "ACTIVE" ? (counts.find((c) => c.stage === stage)?._count ?? 0) : items.length, locale)}</span>
               </h3>
               {items.map((d) => {
                 const waited = -(daysUntil(d.stageChangedAt) ?? 0);
@@ -336,8 +336,8 @@ async function Deals({ locale, me, counts, status }: { locale: "ar" | "en"; me: 
                       {label(CITY, d.listing.plot.city, locale)} · #{d.id.slice(-6).toUpperCase()}
                     </span>
                     <span className="text-muted">{d.buyer.name}</span>
-                    {me.role !== "BROKER" && d.broker && <span className="text-xs text-muted">{d.broker.name}</span>}
-                    <span className={`text-xs ${waited > 14 ? "font-semibold text-[#A32020]" : "text-muted"}`}>
+                    {me.role !== "BROKER" && d.broker && <span className="text-[13px] text-muted">{d.broker.name}</span>}
+                    <span className={`text-[13px] ${waited > 14 ? "font-semibold text-[#A32020]" : "text-muted"}`}>
                       {L(`في المرحلة من ${num(waited, locale)} يوم`, `${waited} days in stage`)}
                     </span>
                   </Link>
@@ -367,10 +367,10 @@ async function Services({ locale, me, converted }: { locale: "ar" | "en"; me: Us
         <tr key={r.id}>
           <td>
             <div className="font-semibold">{r.contactName}</div>
-            <div className="text-xs text-muted" dir="ltr">
+            <div className="text-[13px] text-muted" dir="ltr">
               {r.contactPhone}
             </div>
-            <div className="text-xs text-muted">{date(r.createdAt, locale)}</div>
+            <div className="text-[13px] text-muted">{date(r.createdAt, locale)}</div>
           </td>
           <td>
             {label(SERVICE_TYPE, r.type, locale)}
@@ -381,7 +381,7 @@ async function Services({ locale, me, converted }: { locale: "ar" | "en"; me: Us
               </form>
             )}
             {converted === r.id && (
-              <div className="mt-1 text-xs">
+              <div className="mt-1 text-[13px]">
                 {r.requesterId ? L("وصل لصاحب الطلب إشعار بالرابط.", "The requester was notified with the link.") : L("ابعت الرابط ده لصاحب الطلب على واتساب:", "Send this link to the requester on WhatsApp:")}
                 <div dir="ltr" className="select-all font-mono">{`${siteUrl()}/${locale}/list-your-plot?from=${r.id}`}</div>
               </div>
@@ -390,11 +390,11 @@ async function Services({ locale, me, converted }: { locale: "ar" | "en"; me: Us
           <td>
             {r.city ? label(CITY, r.city, locale) : "—"} {r.district && `· ${r.district}`}
             {r.plotCode && (
-              <div className="text-xs text-muted" dir="ltr">
+              <div className="text-[13px] text-muted" dir="ltr">
                 {r.plotCode}
               </div>
             )}
-            {r.message && <div className="text-xs text-muted">{r.message}</div>}
+            {r.message && <div className="text-[13px] text-muted">{r.message}</div>}
           </td>
           <td>
             {r.documents.length === 0
@@ -408,7 +408,7 @@ async function Services({ locale, me, converted }: { locale: "ar" | "en"; me: Us
           <td>
             <form action={updateServiceRequest.bind(null, locale, r.id)} className="flex flex-wrap items-center gap-1.5">
               <Badge tone={toneOf(r.status)}>{label(SERVICE_STATUS, r.status, locale)}</Badge>
-              <select name="status" defaultValue={r.status} className={`${field} min-h-9 w-32`} aria-label={L("الحالة", "Status")}>
+              <select name="status" defaultValue={r.status} className={`${field} min-h-11 w-32`} aria-label={L("الحالة", "Status")}>
                 {Object.keys(SERVICE_STATUS).map((s) => (
                   <option key={s} value={s}>
                     {label(SERVICE_STATUS, s, locale)}
@@ -416,7 +416,7 @@ async function Services({ locale, me, converted }: { locale: "ar" | "en"; me: Us
                 ))}
               </select>
               {canAssign.allowed ? (
-                <select name="assignedToId" defaultValue={r.assignedToId ?? ""} className={`${field} min-h-9 w-36`} aria-label={L("المسؤول", "Owner")}>
+                <select name="assignedToId" defaultValue={r.assignedToId ?? ""} className={`${field} min-h-11 w-36`} aria-label={L("المسؤول", "Owner")}>
                   <option value="">{L("مش متسند", "Unassigned")}</option>
                   {team.map((u) => (
                     <option key={u.id} value={u.id}>
@@ -425,7 +425,7 @@ async function Services({ locale, me, converted }: { locale: "ar" | "en"; me: Us
                   ))}
                 </select>
               ) : (
-                <span className="text-xs text-muted">{r.assignedTo?.name ?? L("مش متسند", "Unassigned")}</span>
+                <span className="text-[13px] text-muted">{r.assignedTo?.name ?? L("مش متسند", "Unassigned")}</span>
               )}
               <AdminReason show={canAssign.override} ar={ar} />
               <button className={`${btn.small} border border-brand text-brand`}>{L("حفظ", "Save")}</button>
@@ -462,10 +462,10 @@ async function Commissions({ locale, me }: { locale: "ar" | "en"; me: User }) {
             </td>
             <td>{label(DEAL_STAGE, r.deal.stage, locale)}</td>
             <td>
-              {money(r.sellerAmount, r.currency, locale)} <span className="text-xs text-muted">({num(r.sellerRatePct, locale, 2)}%)</span>
+              {money(r.sellerAmount, r.currency, locale)} <span className="text-[13px] text-muted">({num(r.sellerRatePct, locale, 2)}%)</span>
             </td>
             <td>
-              {money(r.buyerAmount, r.currency, locale)} <span className="text-xs text-muted">({num(r.buyerRatePct, locale, 2)}%)</span>
+              {money(r.buyerAmount, r.currency, locale)} <span className="text-[13px] text-muted">({num(r.buyerRatePct, locale, 2)}%)</span>
             </td>
             <td>
               <Badge tone={toneOf(r.status)}>{label(COMMISSION_STATUS, r.status, locale)}</Badge>

@@ -132,7 +132,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
                 <Link href={`/${locale}/deals/${d.dealId}`} className="font-semibold text-brand">
                   #{d.dealId.slice(-6).toUpperCase()} · {label(CITY, d.deal.listing.plot.city, locale)}
                 </Link>
-                <div className="text-xs text-muted">
+                <div className="text-[13px] text-muted">
                   {label(DEAL_STAGE, d.deal.stage, locale)} · {label(DEAL_STATUS, d.deal.status, locale)}
                 </div>
               </td>
@@ -145,14 +145,14 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     {L("محفوظ في البنك", "Held at the bank")} {d.bankReference && <span dir="ltr">· {d.bankReference}</span>}
                   </Badge>
                 )}
-                {d.approvals.length > 0 && <div className="mt-1 text-xs text-[#8A5A00]">{L("طلب صرف مستني موافقة الأدمن", "Payout awaiting admin approval")}</div>}
+                {d.approvals.length > 0 && <div className="mt-1 text-[13px] text-[#8A5A00]">{L("طلب صرف مستني موافقة الأدمن", "Payout awaiting admin approval")}</div>}
               </td>
               <td>
                 {d.escrowStatus === "AWAITING_TRANSFER" && confirm.allowed && (
                   <form action={confirmDeposit.bind(null, locale, d.dealId, d.id)} className="flex flex-wrap items-center gap-1.5">
                     <input type="hidden" name="returnTo" value={ret} />
-                    <input aria-label={L("رقم مرجع البنك", "Bank reference")} name="bankReference" required minLength={4} placeholder={L("رقم مرجع البنك", "Bank reference")} dir="ltr" className={`${field} min-h-9 w-40`} />
-                    {confirm.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                    <input aria-label={L("رقم مرجع البنك", "Bank reference")} name="bankReference" required minLength={4} placeholder={L("رقم مرجع البنك", "Bank reference")} dir="ltr" className={`${field} min-h-11 w-40`} />
+                    {confirm.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-11 w-44`} />}
                     <ConfirmButton message={L(`تأكيد وصول ${amount} للبنك؟`, `Confirm ${amount} arrived at the bank?`)} className={`${btn.small} bg-ok text-white`}>
                       {L("أكّد الوصول", "Confirm arrival")}
                     </ConfirmButton>
@@ -163,8 +163,8 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     {release.allowed && (
                       <form action={settleDeposit.bind(null, locale, d.dealId, d.id, "RELEASED_TO_SELLER")} className="flex flex-wrap gap-1">
                         <input type="hidden" name="returnTo" value={ret} />
-                        <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-9 w-32`} />
-                        {release.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                        <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-11 w-32`} />
+                        {release.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-11 w-44`} />}
                         <ConfirmButton message={L(`صرف ${amount} للبائع؟ الفعل ده مش بيترجع.`, `Release ${amount} to the seller? This can't be undone.`)} className={`${btn.small} bg-brand text-white`}>
                           {L("صرف للبائع", "Release to seller")}
                         </ConfirmButton>
@@ -173,8 +173,8 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     {refund.allowed && (
                       <form action={settleDeposit.bind(null, locale, d.dealId, d.id, "REFUNDED_TO_BUYER")} className="flex flex-wrap gap-1">
                         <input type="hidden" name="returnTo" value={ret} />
-                        <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-9 w-32`} />
-                        {refund.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                        <input aria-label={L("مصاريف التحويل الفعلية — على المستلم (ج.م)", "Actual transfer fee — paid by the recipient (EGP)")} name="payoutFeeEgp" type="number" min={0} step="0.01" placeholder={L("مصاريف التحويل (ج.م)", "Transfer fee (EGP)")} className={`${field} min-h-11 w-32`} />
+                        {refund.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-11 w-44`} />}
                         <ConfirmButton message={L(`رد ${amount} للمشتري؟ الفعل ده مش بيترجع.`, `Refund ${amount} to the buyer? This can't be undone.`)} className={`${btn.small} border border-[#A32020] text-[#A32020]`}>
                           {L("رد للمشتري", "Refund to buyer")}
                         </ConfirmButton>
@@ -183,7 +183,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
                   </div>
                 )}
                 {d.escrowStatus === "HELD" && !release.allowed && !refund.allowed && d.approvals.length === 0 && (
-                  <span className="text-xs text-muted">{L("الصرف بعد قفل الصفقة واعتماد خطاب الجهاز، والرد لو اتلغت لسبب يستحق الرد.", "Release after closing with the approval letter; refund if cancelled for a refundable reason.")}</span>
+                  <span className="text-[13px] text-muted">{L("الصرف بعد قفل الصفقة واعتماد خطاب الجهاز، والرد لو اتلغت لسبب يستحق الرد.", "Release after closing with the approval letter; refund if cancelled for a refundable reason.")}</span>
                 )}
               </td>
             </tr>
@@ -214,7 +214,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
       >
         <nav className="flex flex-wrap gap-1.5">
           {[undefined, "PENDING", "INVOICED", "PAID", "WAIVED"].map((s) => (
-            <Link key={s ?? "all"} href={`${base}?tab=commissions${s ? `&status=${s}` : ""}`} className={`inline-flex min-h-9 items-center border px-2.5 text-sm ${s === status ? "border-navy bg-navy text-white" : "border-line"}`}>
+            <Link key={s ?? "all"} href={`${base}?tab=commissions${s ? `&status=${s}` : ""}`} className={`inline-flex min-h-11 items-center border px-2.5 text-sm ${s === status ? "border-navy bg-navy text-white" : "border-line"}`}>
               {s ? label(COMMISSION_STATUS, s, locale) : L("الكل", "All")}
             </Link>
           ))}
@@ -231,18 +231,18 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     <Link href={`/${locale}/deals/${r.dealId}`} className="font-semibold text-brand">
                       #{r.dealId.slice(-6).toUpperCase()} · {label(CITY, r.deal.listing.plot.city, locale)}
                     </Link>
-                    <div className="text-xs text-muted">{label(DEAL_STAGE, r.deal.stage, locale)}</div>
+                    <div className="text-[13px] text-muted">{label(DEAL_STAGE, r.deal.stage, locale)}</div>
                   </td>
                   <td>
                     {money(total, r.currency, locale)}
-                    <div className="text-xs text-muted">
+                    <div className="text-[13px] text-muted">
                       {L("بائع", "Seller")} {num(r.sellerRatePct, locale, 2)}% · {L("مشتري", "Buyer")} {num(r.buyerRatePct, locale, 2)}%
                     </div>
                   </td>
                   <td>
                     <Badge tone={toneOf(r.status)}>{label(COMMISSION_STATUS, r.status, locale)}</Badge>
                     {r.paidAt && (
-                      <div className="text-xs text-muted">
+                      <div className="text-[13px] text-muted">
                         {date(r.paidAt, locale)} {r.paymentRef && <span dir="ltr">· {r.paymentRef}</span>}
                       </div>
                     )}
@@ -251,9 +251,9 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     {(r.status === "PENDING" || r.status === "INVOICED") && total > 0 && (
                       <form action={setCommissionStatus.bind(null, locale, r.dealId, "PAID")} className="flex flex-wrap items-center gap-1.5">
                         <input type="hidden" name="returnTo" value={ret} />
-                        <input name="paidOn" type="date" defaultValue={today} max={today} required className={`${field} min-h-9 w-40`} aria-label={L("تاريخ التحصيل", "Collection date")} />
-                        <input aria-label={L("مرجع التحويل/الإيصال", "Transfer / receipt ref")} name="reference" required minLength={3} placeholder={L("مرجع التحويل/الإيصال", "Transfer / receipt ref")} dir="ltr" className={`${field} min-h-9 w-40`} />
-                        {me.role === "ADMIN" && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                        <input name="paidOn" type="date" defaultValue={today} max={today} required className={`${field} min-h-11 w-40`} aria-label={L("تاريخ التحصيل", "Collection date")} />
+                        <input aria-label={L("مرجع التحويل/الإيصال", "Transfer / receipt ref")} name="reference" required minLength={3} placeholder={L("مرجع التحويل/الإيصال", "Transfer / receipt ref")} dir="ltr" className={`${field} min-h-11 w-40`} />
+                        {me.role === "ADMIN" && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-11 w-44`} />}
                         <ConfirmButton message={L(`تسجيل تحصيل ${money(total, r.currency, locale)}؟`, `Record collection of ${money(total, r.currency, locale)}?`)} className={`${btn.small} bg-ok text-white`}>
                           {L("اتحصّلت", "Collected")}
                         </ConfirmButton>
@@ -279,7 +279,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
           <tr key={r.id}>
             <td>
               {r.referrer.name}
-              <div dir="ltr" className="text-xs text-muted">
+              <div dir="ltr" className="text-[13px] text-muted">
                 {r.referrer.phone}
               </div>
             </td>
@@ -297,7 +297,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
                 </Badge>
               ) : (
                 <form action={payReferral.bind(null, locale, r.id)} className="flex flex-wrap items-center gap-1.5">
-                  <input name="reference" required minLength={3} dir="ltr" placeholder={L("مرجع التحويل", "Transfer ref")} aria-label={L("مرجع التحويل", "Transfer ref")} className={`${field} min-h-9 w-36`} />
+                  <input name="reference" required minLength={3} dir="ltr" placeholder={L("مرجع التحويل", "Transfer ref")} aria-label={L("مرجع التحويل", "Transfer ref")} className={`${field} min-h-11 w-36`} />
                   <ConfirmButton message={L(`صرف ${money(r.amount, "EGP", locale)} لـ ${r.referrer.name}؟`, `Pay ${money(r.amount, "EGP", locale)} to ${r.referrer.name}?`)} className={`${btn.small} bg-ok text-white`}>
                     {L("اتصرفت", "Mark paid")}
                   </ConfirmButton>
@@ -446,9 +446,9 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     <td>{money(h.bankTotal, "EGP", locale)}</td>
                     <td>
                       <Badge tone={matched ? "green" : "red"}>{matched ? L("مطابق", "Matched") : money(diff, "EGP", locale)}</Badge>
-                      {h.note && <div className="text-xs text-muted">{h.note}</div>}
+                      {h.note && <div className="text-[13px] text-muted">{h.note}</div>}
                     </td>
-                    <td className="text-xs">
+                    <td className="text-[13px]">
                       {h.enteredBy.name}
                       <div className="text-muted">{date(h.createdAt, locale)}</div>
                     </td>

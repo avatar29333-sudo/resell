@@ -88,12 +88,7 @@ export function MultiUpload({ locale, single = false, label, titleRequired = tru
   const busy = items.some((x) => x.status === "uploading" || x.status === "converting");
   return (
     <div className="flex flex-col gap-2">
-      <div
-        role="button"
-        tabIndex={0}
-        aria-label={label ?? L("اختار ملفات أو اسحبها هنا", "Choose files or drop them here")}
-        onClick={() => input.current?.click()}
-        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && input.current?.click()}
+      <label
         onDragOver={(e) => {
           e.preventDefault();
           setDrag(true);
@@ -104,13 +99,13 @@ export function MultiUpload({ locale, single = false, label, titleRequired = tru
           setDrag(false);
           add(e.dataTransfer.files);
         }}
-        className={`flex min-h-24 cursor-pointer flex-col items-center justify-center gap-1 border-2 border-dashed p-4 text-center text-sm ${drag ? "border-brand bg-[#EEF3FC]" : "border-line"}`}
+        className={`flex min-h-24 cursor-pointer flex-col items-center justify-center gap-1 border-2 border-dashed p-4 text-center text-sm focus-within:outline focus-within:outline-3 focus-within:outline-brand-bright ${drag ? "border-brand bg-[#EEF3FC]" : "border-line"}`}
       >
         <span className="font-semibold">{label ?? (single ? L("اختار ملف أو اسحبه هنا", "Choose a file or drop it here") : L("اختار ملفات أو اسحبها هنا", "Choose files or drop them here"))}</span>
         <span className="text-[13px] text-muted">{L("PDF أو JPG أو PNG أو HEIC — لحد 20 ميجا للملف", "PDF, JPG, PNG or HEIC — up to 20 MB each")}</span>
         <span className="text-[13px] text-muted">{L("🔒 ملفاتك سرية: ما بتتعرضش غير بموافقتك، ومش بتتباع لأي جهة.", "🔒 Your files are confidential: shown only with your consent, never sold.")}</span>
-        <input ref={input} type="file" multiple={!single} accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" className="sr-only" tabIndex={-1} onChange={(e) => add(e.target.files)} />
-      </div>
+        <input ref={input} type="file" multiple={!single} aria-label={label ?? L("اختار ملفات أو اسحبها هنا", "Choose files or drop them here")} accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" className="sr-only" onChange={(e) => add(e.target.files)} />
+      </label>
       {items.length > 0 && (
         <ul className="flex flex-col gap-2">
           {items.map((x) => (

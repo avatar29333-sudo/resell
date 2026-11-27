@@ -66,7 +66,7 @@ export default async function PartnerPage({ params }: { params: Promise<{ locale
                     <Link href={`/${locale}/listings/${l.id}`} className="font-semibold text-brand">
                       {label(CITY, l.plot.city, locale)} — {districtName(l.plot, locale)}
                     </Link>
-                    <div className="text-xs text-muted">
+                    <div className="text-[13px] text-muted">
                       {num(l.plot.areaSqm, locale)} {L("م²", "m²")} · {date(l.createdAt, locale)}
                       {me.role === "ADMIN" && ` · ${l.submittedBy?.name ?? ""}`}
                     </div>

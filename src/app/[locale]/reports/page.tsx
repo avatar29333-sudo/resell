@@ -128,7 +128,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
                 </tr>
               ))}
           </Table>
-          <p className="text-xs text-muted">
+          <p className="text-[13px] text-muted">
             {L(`من الصفقات المقفولة بس؛ أقل من ${num(index.minDeals, locale)} صفقات في الشهر = بيانات غير كافية.`, `Closed deals only; fewer than ${index.minDeals} deals in a month = insufficient data.`)}
           </p>
         </Card>

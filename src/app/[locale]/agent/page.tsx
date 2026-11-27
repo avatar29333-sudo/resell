@@ -97,11 +97,11 @@ export default async function AgentPage({ params, searchParams }: Props) {
                           · {r.city ? label(CITY, r.city, locale) : "—"} {r.district && `· ${r.district}`} {r.plotCode && <span dir="ltr">· {r.plotCode}</span>}
                         </div>
                         {r.message && <div className="text-sm text-muted">{r.message}</div>}
-                        {isAdmin && <div className="text-xs text-muted">{r.assignedTo?.name}</div>}
+                        {isAdmin && <div className="text-[13px] text-muted">{r.assignedTo?.name}</div>}
                       </div>
                       <form action={updateServiceRequest.bind(null, locale, r.id)} className="flex flex-wrap items-center gap-1.5">
                         <Badge tone={toneOf(r.status)}>{label(SERVICE_STATUS, r.status, locale)}</Badge>
-                        <select name="status" defaultValue={r.status} className={`${field} min-h-9 w-32`} aria-label={L("الحالة", "Status")}>
+                        <select name="status" defaultValue={r.status} className={`${field} min-h-11 w-32`} aria-label={L("الحالة", "Status")}>
                           {Object.keys(SERVICE_STATUS).map((s) => (
                             <option key={s} value={s}>
                               {label(SERVICE_STATUS, s, locale)}
@@ -117,11 +117,11 @@ export default async function AgentPage({ params, searchParams }: Props) {
                           <span key={d.id} className="flex items-center gap-1">
                             <FileLink id={d.id}>{L(`صورة ${num(i + 1, locale)}`, `Photo ${i + 1}`)}</FileLink>
                             {d.geoLat !== null && d.geoLng !== null && (
-                              <a href={`https://www.openstreetmap.org/?mlat=${d.geoLat}&mlon=${d.geoLng}#map=18/${d.geoLat}/${d.geoLng}`} target="_blank" rel="noopener" className="text-xs text-muted underline" dir="ltr">
+                              <a href={`https://www.openstreetmap.org/?mlat=${d.geoLat}&mlon=${d.geoLng}#map=18/${d.geoLat}/${d.geoLng}`} target="_blank" rel="noopener" className="text-[13px] text-muted underline" dir="ltr">
                                 📍 {d.geoLat.toFixed(5)}, {d.geoLng.toFixed(5)}
                               </a>
                             )}
-                            {d.takenAt && <span className="text-xs text-muted">{dateTime(d.takenAt, locale)}</span>}
+                            {d.takenAt && <span className="text-[13px] text-muted">{dateTime(d.takenAt, locale)}</span>}
                           </span>
                         ))}
                         {r.constructionEstimate !== null && <Badge tone="blue">{L(`تقدير التنفيذ ${num(r.constructionEstimate, locale)}%`, `Construction est. ${r.constructionEstimate}%`)}</Badge>}
@@ -155,10 +155,10 @@ export default async function AgentPage({ params, searchParams }: Props) {
                             {L("الجهاز:", "Authority:")} {AUTH_STATUS[d.authorityStatus]?.[ar ? 0 : 1] ?? d.authorityStatus}
                           </Badge>
                         )}
-                        <span className="text-xs text-muted">{date(d.authorityUpdatedAt ?? d.stageChangedAt, locale)}</span>
+                        <span className="text-[13px] text-muted">{date(d.authorityUpdatedAt ?? d.stageChangedAt, locale)}</span>
                       </span>
                     </div>
-                    {isAdmin && <div className="text-xs text-muted">{d.agent?.name}</div>}
+                    {isAdmin && <div className="text-[13px] text-muted">{d.agent?.name}</div>}
                     {upd.allowed && (
                       <form action={updateAuthorityStatus.bind(null, locale, d.id)} className="flex flex-wrap items-end gap-2 border-t border-line pt-2">
                         <label className="flex flex-col gap-1 text-sm font-medium">
