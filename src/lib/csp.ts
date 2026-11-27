@@ -2,8 +2,10 @@
  * SEC-08 — سياسة أمان المحتوى (CSP) للصفحات. السكريبتات بـ nonce لكل طلب + strict-dynamic،
  * فأي سكريبت متحقن من برّه ما يشتغلش. الصور: الموقع نفسه + خرائط OpenStreetMap + خزنة الملفات (R2/S3).
  */
-export function buildCsp(nonce: string, opts: { dev?: boolean; s3Origin?: string | null } = {}) {
+export function buildCsp(nonce: string, opts: { dev?: boolean; s3Origin?: string | null; vercelPreview?: boolean } = {}) {
   const files = ["https://*.r2.cloudflarestorage.com", opts.s3Origin].filter(Boolean).join(" ");
+  // شريط تعليقات Vercel بيظهر في نسخ المعاينة (preview) بس — مش في الموقع الحقيقي
+  const live = opts.vercelPreview ? " https://vercel.live" : "";
   const directives: Record<string, string> = {
     "default-src": "'self'",
     "script-src": `'self' 'nonce-${nonce}' 'strict-dynamic'${opts.dev ? " 'unsafe-eval'" : ""}`,
@@ -13,7 +15,7 @@ export function buildCsp(nonce: string, opts: { dev?: boolean; s3Origin?: string
     "font-src": "'self'",
     "connect-src": `'self' https://*.ingest.sentry.io https://*.ingest.de.sentry.io${opts.dev ? " ws:" : ""}`,
     // عارض الـ PDF جوه شاشة المحامي (نفس الموقع أو الخزنة)
-    "frame-src": `'self' ${files}`,
+    "frame-src": `'self' ${files}${live}`,
     "object-src": "'none'",
     "base-uri": "'self'",
     "form-action": "'self'",

@@ -12,6 +12,10 @@ describe("SEC-08 security headers", () => {
   it("allows map tiles and the file vault for images", () => {
     expect(buildCsp("n", { s3Origin: "https://acc.r2.cloudflarestorage.com" })).toContain("https://*.tile.openstreetmap.org");
   });
+  it("allows the Vercel toolbar only on preview deployments", () => {
+    expect(buildCsp("n")).not.toContain("vercel.live");
+    expect(buildCsp("n", { vercelPreview: true })).toContain("frame-src 'self' https://*.r2.cloudflarestorage.com https://vercel.live");
+  });
   it("sets the other required headers", () => {
     expect(SECURITY_HEADERS["X-Frame-Options"]).toBe("DENY");
     expect(SECURITY_HEADERS["X-Content-Type-Options"]).toBe("nosniff");

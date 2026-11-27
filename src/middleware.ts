@@ -10,7 +10,7 @@ export function middleware(req: NextRequest) {
   } catch {
     s3Origin = null;
   }
-  const csp = buildCsp(nonce, { dev: process.env.NODE_ENV !== "production", s3Origin });
+  const csp = buildCsp(nonce, { dev: process.env.NODE_ENV !== "production", s3Origin, vercelPreview: process.env.VERCEL_ENV === "preview" });
 
   // Next.js بياخد الـ nonce من هيدر الطلب ويحطه على سكريبتاته
   const requestHeaders = new Headers(req.headers);
