@@ -61,13 +61,6 @@ enum Currency {
 }
 
 /// نفس المدن اللي في src/i18n/messages
-enum City {
-  NEW_CAIRO
-  SHEIKH_ZAYED
-  OCTOBER
-  NEW_OCTOBER
-  NEW_DAMIETTA
-}
 
 enum VerificationStatus {
   PENDING
@@ -327,8 +320,14 @@ model KycProfile {
 
 /// القطعة: ثابتة بكودها. الكود مخفي عن المشتري لحد اتفاق العمولة (بيتفحص في الخادم).
 model Plot {
+  // GEO-02: الحي (المكان) والطرح (مرحلة بيت الوطن) منفصلين
+  districtId          String?
+  districtRef         District?                                    @relation(fields: [districtId], references: [id])
+  offeringRoundId     String?
+  offeringRound       OfferingRound?                               @relation(fields: [offeringRoundId], references: [id])
   id                  String                                       @id @default(cuid())
-  city                City
+  city                String
+  cityRef             City                                         @relation(fields: [city], references: [id])
   district            String //المرحلة / الحي
   /// DATA-07: الاسم الإنجليزي للحي (من جدول District)
   districtEn          String?
@@ -351,12 +350,16 @@ model Plot {
   //نفس القطعة ما تتسجلش مرتين — ده أساس كشف العروض المكررة
   @@unique([city, district, code])
   @@index([buildDeadline])
+  @@index([districtId])
+  @@index([offeringRoundId])
 }
 
 /// DATA-07: قايمة الأحياء/المراحل لكل مدينة — الـ wizard بيختار منها بدل النص الحر
 model District {
+  plots     Plot[]
   id        String   @id @default(cuid())
-  city      City
+  city      String
+  cityRef   City     @relation(fields: [city], references: [id])
   nameAr    String
   nameEn    String
   sort      Int      @default(0)
@@ -673,7 +676,8 @@ model ExchangeRate {
 /// مؤشر الأسعار — من الصفقات المقفولة بس
 model PriceIndex {
   id             String   @id @default(cuid())
-  city           City
+  city           String
+  cityRef        City     @relation(fields: [city], references: [id])
   district       String   @default("") //فاضي = المدينة كلها
   periodStart    DateTime @db.Date
   periodEnd      DateTime @db.Date
@@ -690,7 +694,7 @@ model BuyRequest {
   id             String           @id @default(cuid())
   buyerId        String
   buyer          User             @relation(fields: [buyerId], references: [id])
-  cities         City[]
+  cities         String[]
   minAreaSqm     Decimal?         @db.Decimal(10, 2)
   maxAreaSqm     Decimal?         @db.Decimal(10, 2)
   budgetMax      Decimal?         @db.Decimal(14, 2)
@@ -710,7 +714,8 @@ model BuyRequest {
 model DeadlineReminder {
   id             String    @id @default(cuid())
   phone          String
-  city           City
+  city           String
+  cityRef        City      @relation(fields: [city], references: [id])
   deadline       DateTime  @db.Date
   plotCode       String?
   locale         String    @default("ar")
@@ -803,7 +808,8 @@ model ServiceRequest {
   requester            User?                @relation("ServiceRequester", fields: [requesterId], references: [id])
   plotId               String?
   plot                 Plot?                @relation(fields: [plotId], references: [id])
-  city                 City?
+  city                 String?
+  cityRef              City?                @relation(fields: [city], references: [id], onDelete: Restrict)
   district             String?
   plotCode             String?
   message              String?
@@ -963,4 +969,47 @@ model IssuedDocument {
 
   @@index([dealId])
   @@index([contractId])
+}
+
+/// GEO-01: المدن جدول (الأدمن بيضيف/يعدّل/يوقف — ممنوع الحذف لو عليها قطع). الـ id نص ثابت (NEW_CAIRO…)
+model City {
+  id              String   @id
+  nameAr          String
+  nameEn          String
+  slug            String   @unique
+  codePrefix      String   @unique
+  /// GEO-04: مثلاً {prefix}-{block}-{number}
+  plotCodePattern String   @default("{prefix}-{block}-{number}")
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  plots           Plot[]
+  districts       District[]
+  priceIndex      PriceIndex[]
+  reminders       DeadlineReminder[]
+  serviceRequests ServiceRequest[]
+  rounds          OfferingRound[]
+
+  @@map("Cities")
+}
+
+/// GEO-02: الطرح (رقمه، سنته، شروطه، مهلة البناء الافتراضية)
+model OfferingRound {
+  id                         String   @id @default(cuid())
+  cityId                     String?
+  city                       City?    @relation(fields: [cityId], references: [id])
+  nameAr                     String
+  nameEn                     String
+  number                     Int
+  year                       Int?
+  terms                      String?
+  defaultBuildDeadlineMonths Int?
+  installmentCurrency        String   @default("USD")
+  isActive                   Boolean  @default(true)
+  createdAt                  DateTime @default(now())
+
+  plots Plot[]
+
+  @@index([cityId])
 }

@@ -1,3 +1,4 @@
+import { allCities } from "@/lib/cities";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Prisma } from "@prisma/client";
@@ -14,6 +15,8 @@ import { date, dateTime, money, num, tr } from "@/lib/format";
 import { ACCOUNT_LEVEL, ACCOUNT_STATUS, CITY, CITY_KEYS, CONTRACT_TYPE, RATE_SOURCE, ROLE, label } from "@/lib/labels";
 import { Badge, Card, Container, DL, Notice, PageHeader, Table, Tabs, btn, field, labelCls } from "@/components/ui";
 import { saveMarketing, setPartnerShare } from "./actions";
+import { saveCity, saveRound, toggleCity, toggleRound } from "./actions";
+import { codeHint } from "@/lib/plot-code";
 import { addDistrict, addManualRate, bumpTemplate, fetchRateNow, moveFilesToS3, saveCommission, saveFees, saveOps, setUserRole, suspendUser, toggleDistrict, unsuspendUser } from "./actions";
 import { RoleForm } from "./RoleForm";
 import { pageMeta } from "@/lib/meta";
@@ -28,7 +31,11 @@ const PAGE = 50;
 const SETTINGS_ERRORS: Record<string, [string, string]> = {
   reg_no: ["السمسار الشريك لازم يكون ليه رقم قيد في سجل الوسطاء.", "A partner broker needs a broker registry number."],
   confirm: ["لازم تأكد تغيير الدور من رسالة التأكيد.", "Please confirm the role change in the dialog."],
-  district: ["اكتب اسم الحي بالعربي والإنجليزي.", "Enter the district name in Arabic and English."],
+  district: ["اكتب اسم الحي بالعربي، والاسم الإنجليزي بحروف لاتيني بس (مثلاً District 9).", "Enter the district name in Arabic, and the English name in Latin letters only (e.g. District 9)."],
+  city: ["راجع بيانات المدينة: الاسم الإنجليزي لاتيني، البادئة 2–4 حروف كبيرة، والصيغة فيها {prefix} و{number} وفواصلها شرطة.", "Check the city: Latin English name, a 2–4 capital-letter prefix, and a pattern with {prefix} and {number} separated by dashes."],
+  city_prefix: ["البادئة دي مستخدمة لمدينة تانية.", "That prefix is used by another city."],
+  city_exists: ["المدينة دي موجودة بالفعل.", "That city already exists."],
+  round: ["اكتب اسم الطرح بالعربي والإنجليزي (لاتيني) ورقمه.", "Enter the round's Arabic and Latin English names and its number."],
   rate_invalid: ["سعر البيع لازم يكون أكبر من أو يساوي سعر الشراء.", "The sell rate must be greater than or equal to the buy rate."],
   rate_deviation: ["السعر بعيد عن آخر سعر آلي أكتر من الحد المسموح — علّم على «متأكد» لو ده مقصود.", "The rate is further from the last automatic rate than allowed — tick “I'm sure” if intended."],
 };
@@ -36,6 +43,7 @@ const SETTINGS_ERRORS: Record<string, [string, string]> = {
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "الإعدادات", "Settings", { noindex: true });
 
 export default async function SettingsPage({ params, searchParams }: Props) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const sp = await searchParams;
@@ -48,6 +56,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
     fx: can(s, "fx.manual").allowed,
     commission: can(s, "commission.rates").allowed,
     templates: can(s, "template.edit").allowed,
+    cities: can(s, "settings.fees").allowed,
     districts: can(s, "settings.fees").allowed,
     storage: can(s, "storage.manage").allowed,
     audit: can(s, "audit.view").allowed || can(s, "audit.view_money").allowed,
@@ -60,6 +69,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
     role: ["الدور اتغيّر، وجلسات المستخدم القديمة اتقفلت.", "Role changed; the user's old sessions were signed out."],
     suspended: ["الحساب اتوقف، وصفقاته الشغالة اتعلّقت.", "Account suspended; its active deals were put on hold."],
     unsuspended: ["الحساب اتفعّل تاني.", "Account reactivated."],
+    city: ["المدينة اتحفظت وظهرت في المعالج والفلاتر.", "City saved; it now shows in the wizard and filters."],
   };
 
   return (
@@ -87,7 +97,8 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             { key: "fx", label: L("سعر الصرف", "Exchange rate"), href: `${base}?tab=fx` },
             { key: "commission", label: L("العمولة والرسوم", "Commission and fees"), href: `${base}?tab=commission` },
             { key: "templates", label: L("نماذج العقود", "Contract templates"), href: `${base}?tab=templates` },
-            { key: "districts", label: L("الأحياء والمراحل", "Districts"), href: `${base}?tab=districts` },
+            { key: "cities", label: L("المدن", "Cities"), href: `${base}?tab=cities` },
+            { key: "districts", label: L("الأحياء والطروحات", "Districts & rounds"), href: `${base}?tab=districts` },
             { key: "storage", label: L("خزنة الملفات", "File vault"), href: `${base}?tab=storage` },
             { key: "audit", label: L("سجل التدقيق", "Audit log"), href: `${base}?tab=audit` },
           ].filter((t) => tabs.includes(t.key as never))}
@@ -96,6 +107,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         {tab === "fx" && <Fx locale={locale} />}
         {tab === "commission" && <Commission locale={locale} />}
         {tab === "templates" && <Templates locale={locale} />}
+        {tab === "cities" && <Cities locale={locale} />}
         {tab === "districts" && <Districts locale={locale} />}
         {tab === "storage" && <Storage locale={locale} />}
         {tab === "audit" && <Audit locale={locale} entity={sp.entity} />}
@@ -418,9 +430,17 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   async function Districts({ locale }: { locale: "ar" | "en" }) {
     const city = (CITY_KEYS as string[]).includes(sp.city ?? "") ? sp.city! : CITY_KEYS[0];
     const rows = await db.district.findMany({ where: { city: city as never }, orderBy: [{ sort: "asc" }, { nameAr: "asc" }] });
-    const counts = await db.plot.groupBy({ by: ["district"], where: { city: city as never }, _count: true });
+    // GEO-03: عدد القطع على كل حي (بالربط الجديد، ولو قديم بالاسم)
+    const [byId, byName, rounds, roundCounts] = await Promise.all([
+      db.plot.groupBy({ by: ["districtId"], where: { city }, _count: true }),
+      db.plot.groupBy({ by: ["district"], where: { city, districtId: null }, _count: true }),
+      db.offeringRound.findMany({ where: { OR: [{ cityId: city }, { cityId: null }] }, orderBy: { number: "asc" } }),
+      db.plot.groupBy({ by: ["offeringRoundId"], where: { city }, _count: true }),
+    ]);
+    const plotsOf = (d: { id: string; nameAr: string }) => (byId.find((c) => c.districtId === d.id)?._count ?? 0) + (byName.find((c) => c.district === d.nameAr)?._count ?? 0);
     return (
-      <Card title={L("الأحياء والمراحل (اختيارات wizard إضافة القطعة)", "Districts (choices in the add-plot wizard)")}>
+      <>
+      <Card title={L("الأحياء (المكان) — اختيارات معالج إضافة القطعة", "Districts (place) — choices in the add-plot wizard")}>
         <nav className="flex flex-wrap gap-1.5">
           {CITY_KEYS.map((c) => (
             <Link key={c} href={`${base}?tab=districts&city=${c}`} className={`inline-flex min-h-9 items-center border px-2.5 text-sm ${c === city ? "border-navy bg-navy text-white" : "border-line"}`}>
@@ -433,7 +453,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             <tr key={d.id}>
               <td className="font-semibold">{d.nameAr}</td>
               <td>{d.nameEn}</td>
-              <td>{num(counts.find((c) => c.district === d.nameAr)?._count ?? 0, locale)}</td>
+              <td className="tabular-nums">{num(plotsOf(d), locale)}</td>
               <td>
                 <form action={toggleDistrict.bind(null, locale, d.id)} className="flex items-center gap-2">
                   <Badge tone={d.active ? "green" : "gray"}>{d.active ? L("ظاهر", "Shown") : L("موقوف", "Hidden")}</Badge>
@@ -455,7 +475,138 @@ export default async function SettingsPage({ params, searchParams }: Props) {
           </label>
           <button className={btn.primary}>{L("أضف / حدّث", "Add / update")}</button>
         </form>
-        <p className="text-xs text-muted">{L("الحي ما بيتمسحش عشان القطع القديمة — بيتوقف بس فيختفي من الاختيارات.", "Districts are never deleted (older plots use them) — hiding removes them from the choices.")}</p>
+        <p className="text-sm text-muted">{L("الحي ما بيتمسحش عشان القطع القديمة — بيتوقف بس فيختفي من الاختيارات. الاسم الإنجليزي لازم يبقى حروف لاتيني.", "Districts are never deleted (older plots use them) — hiding removes them from the choices. English names must be Latin letters.")}</p>
+      </Card>
+      <Card title={L("الطروحات (مراحل بيت الوطن) — منفصلة عن الحي", "Offering rounds (Beit El Watan phases) — separate from districts")}>
+        <Table head={[L("الطرح", "Round"), L("بالإنجليزي", "English"), L("السنة", "Year"), L("مهلة البناء (شهور)", "Build deadline (months)"), L("عملة الأقساط", "Installments"), L("قطع", "Plots"), L("الحالة", "Status")]}>
+          {rounds.map((r) => (
+            <tr key={r.id}>
+              <td className="font-semibold">
+                {num(r.number, locale)}. {r.nameAr}
+              </td>
+              <td>{r.nameEn}</td>
+              <td className="tabular-nums">{r.year ?? "—"}</td>
+              <td className="tabular-nums">{r.defaultBuildDeadlineMonths ?? "—"}</td>
+              <td>{r.installmentCurrency}</td>
+              <td className="tabular-nums">{num(roundCounts.find((c) => c.offeringRoundId === r.id)?._count ?? 0, locale)}</td>
+              <td>
+                <form action={toggleRound.bind(null, locale, r.id)} className="flex items-center gap-2">
+                  <Badge tone={r.isActive ? "green" : "gray"}>{r.isActive ? L("ظاهر", "Shown") : L("موقوف", "Hidden")}</Badge>
+                  <button className={`${btn.small} border border-line`}>{r.isActive ? L("أوقفه", "Hide") : L("رجّعه", "Show")}</button>
+                </form>
+              </td>
+            </tr>
+          ))}
+        </Table>
+        <form action={saveRound.bind(null, locale)} className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="cityId" value={city} />
+          <label className={labelCls}>
+            {L("رقم الطرح", "Number")}
+            <input name="number" type="number" min={1} max={99} required className={`${field} w-24`} />
+          </label>
+          <label className={labelCls}>
+            {L("الاسم بالعربي", "Arabic name")}
+            <input name="nameAr" required minLength={2} placeholder="المرحلة الخامسة" className={`${field} w-44`} />
+          </label>
+          <label className={labelCls}>
+            {L("الاسم بالإنجليزي", "English name")}
+            <input name="nameEn" required dir="ltr" placeholder="Round 5" pattern="[A-Za-z0-9][A-Za-z0-9 .,'()&-]+" className={`${field} w-40`} />
+          </label>
+          <label className={labelCls}>
+            {L("السنة", "Year")}
+            <input name="year" type="number" min={2001} max={2099} className={`${field} w-28`} />
+          </label>
+          <label className={labelCls}>
+            {L("مهلة البناء الافتراضية (شهور)", "Default build deadline (months)")}
+            <input name="defaultBuildDeadlineMonths" type="number" min={1} max={239} className={`${field} w-28`} />
+          </label>
+          <label className={labelCls}>
+            {L("عملة الأقساط", "Installment currency")}
+            <select name="installmentCurrency" className={field}>
+              <option value="USD">USD</option>
+              <option value="EGP">EGP</option>
+            </select>
+          </label>
+          <label className={`${labelCls} w-full`}>
+            {L("الشروط (اختياري)", "Terms (optional)")}
+            <textarea name="terms" rows={2} className={field} />
+          </label>
+          <button className={btn.primary}>{L("أضف طرح", "Add round")}</button>
+        </form>
+      </Card>
+      </>
+    );
+  }
+
+  /** GEO-01 / GEO-04: المدن — إضافة / تعديل / إيقاف (ممنوع الحذف)، والبادئة وصيغة كود القطعة */
+  async function Cities({ locale }: { locale: "ar" | "en" }) {
+    const rows = await allCities(true);
+    const counts = await db.plot.groupBy({ by: ["city"], _count: true });
+    const cityForm = (c?: (typeof rows)[number]) => (
+      <form action={saveCity.bind(null, locale)} className="flex flex-wrap items-end gap-2">
+        {c && <input type="hidden" name="id" value={c.id} />}
+        <label className={labelCls}>
+          {L("الاسم بالعربي", "Arabic name")}
+          <input name="nameAr" required minLength={2} defaultValue={c?.nameAr} placeholder="العاشر من رمضان" className={`${field} w-44`} />
+        </label>
+        <label className={labelCls}>
+          {L("الاسم بالإنجليزي (لاتيني)", "English name (Latin)")}
+          <input name="nameEn" required dir="ltr" defaultValue={c?.nameEn} placeholder="10th of Ramadan" pattern="[A-Za-z0-9][A-Za-z0-9 .,'()&-]+" className={`${field} w-44`} />
+        </label>
+        <label className={labelCls}>
+          {L("بادئة الكود", "Code prefix")}
+          <input name="codePrefix" required dir="ltr" defaultValue={c?.codePrefix} placeholder="TR" pattern="[A-Za-z]{2,4}" className={`${field} w-24 uppercase`} />
+        </label>
+        <label className={labelCls}>
+          {L("صيغة كود القطعة", "Plot code pattern")}
+          <input name="plotCodePattern" dir="ltr" defaultValue={c?.plotCodePattern ?? "{prefix}-{block}-{number}"} className={`${field} w-64`} />
+        </label>
+        <label className={labelCls}>
+          {L("الترتيب", "Order")}
+          <input name="sortOrder" type="number" min={0} max={999} defaultValue={c?.sortOrder ?? 50} className={`${field} w-24`} />
+        </label>
+        <button className={c ? btn.secondary : btn.primary}>{c ? L("احفظ", "Save") : L("أضف مدينة", "Add city")}</button>
+      </form>
+    );
+    return (
+      <Card title={L("المدن", "Cities")}>
+        <p className="text-sm text-muted">
+          {L(
+            "أي مدينة تضيفها بتظهر فوراً في معالج العرض والفلاتر وطلبات الشراء. المدينة ما بتتمسحش لو عليها قطع — بتتوقف بس، فتختفي من الإضافة الجديدة وتفضل ظاهرة على القديم.",
+            "A city you add shows immediately in the listing wizard, filters and buy requests. Cities with plots are never deleted — deactivating hides them from new entries while old records keep showing them.",
+          )}
+        </p>
+        <ul className="flex flex-col divide-y divide-line">
+          {rows.map((c) => {
+            const h = codeHint(c, ar);
+            return (
+              <li key={c.id} className="flex flex-col gap-2 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold">
+                    {c.nameAr} · <span dir="ltr">{c.nameEn}</span>
+                  </span>
+                  <span className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="text-muted">
+                      {L("مثال الكود", "Code example")}: <code dir="ltr">{h.example}</code>
+                    </span>
+                    <span className="tabular-nums">{L(`${num(counts.find((x) => x.city === c.id)?._count ?? 0, locale)} قطعة`, `${counts.find((x) => x.city === c.id)?._count ?? 0} plots`)}</span>
+                    <Badge tone={c.isActive ? "green" : "gray"}>{c.isActive ? L("شغالة", "Active") : L("موقوفة", "Inactive")}</Badge>
+                    <form action={toggleCity.bind(null, locale, c.id)}>
+                      <button className={`${btn.small} border border-line`}>{c.isActive ? L("أوقفها", "Deactivate") : L("شغّلها", "Activate")}</button>
+                    </form>
+                  </span>
+                </div>
+                <details>
+                  <summary className="min-h-11 cursor-pointer py-2 text-sm text-brand">{L("تعديل", "Edit")}</summary>
+                  {cityForm(c)}
+                </details>
+              </li>
+            );
+          })}
+        </ul>
+        <h3 className="font-bold">{L("مدينة جديدة", "New city")}</h3>
+        {cityForm()}
+        <p className="text-sm text-muted">{L("الصيغة: {prefix} البادئة، {block} البلوك، {number} الرقم — والفاصل شرطة.", "Pattern: {prefix} the prefix, {block} the block, {number} the number — separated by dashes.")}</p>
       </Card>
     );
   }

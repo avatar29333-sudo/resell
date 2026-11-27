@@ -1,3 +1,4 @@
+import { activeCities, cityOptions } from "@/lib/cities";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { date, daysUntil, num, tr } from "@/lib/format";
@@ -113,7 +114,7 @@ export default async function RescuePage({ params }: { params: Promise<{ locale:
       </section>
 
       <section id="check" className="mx-auto max-w-6xl px-5 py-[72px] md:px-8">
-        <RescueCalculator locale={locale} usdRate={toNum(rate?.sell ?? 50)} perSqm={perSqm} feePct={cfg.feePct} />
+        <RescueCalculator locale={locale} cities={cityOptions(await activeCities())} usdRate={toNum(rate?.sell ?? 50)} perSqm={perSqm} feePct={cfg.feePct} />
       </section>
 
       <section id="how" className="bg-paper py-[72px]">
@@ -137,7 +138,7 @@ export default async function RescuePage({ params }: { params: Promise<{ locale:
           <p className="text-lg leading-8 text-muted">{L("سيب بياناتك ونرد عليك خلال يوم عمل.", "Leave your details and we'll reply within one working day.")}</p>
           <p className="leading-7 text-muted">{L("رقمك وورقك ما بيظهروش لأي حد غير الوسيط والمحامي المسؤولين عن ملفك.", "Only the broker and lawyer handling your file see your number and papers.")}</p>
         </div>
-        <RescueForm locale={locale} />
+        <RescueForm locale={locale} cities={cityOptions(await activeCities())} />
       </section>
 
       <section id="faq" className="bg-paper py-[72px]">

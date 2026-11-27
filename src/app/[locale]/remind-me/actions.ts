@@ -1,6 +1,8 @@
 "use server";
 
-import type { City } from "@prisma/client";
+/** GEO-01: المدينة = مفتاح نصي من جدول المدن */
+type City = string;
+import { allCities } from "@/lib/cities";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { isValidPhone, normalizePhone } from "@/lib/format";
@@ -12,6 +14,7 @@ export type RemindState = { ok?: boolean; error?: string; fieldErrors?: Partial<
 
 /** MKT-04: «فكّرني بمهلتي» — رقم واتساب + مدينة + تاريخ نهاية المهلة، بموافقة صريحة */
 export async function subscribeReminder(locale: string, _p: RemindState, form: FormData): Promise<RemindState> {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const ar = locale !== "en";
   const phone = normalizePhone(String(form.get("phone") ?? ""));
   const city = String(form.get("city") ?? "");

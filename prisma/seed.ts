@@ -5,8 +5,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Prisma, PrismaClient } from "@prisma/client";
+/** GEO-01: المدينة = مفتاح نصي من جدول المدن (الخمس مدن الأولى بتتضاف في الـ migration) */
+type City = string;
 import type {
-  City,
   ContractStatus,
   ContractType,
   DealStage,

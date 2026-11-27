@@ -1,3 +1,4 @@
+import { activeCities, cityOptions } from "@/lib/cities";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
@@ -47,7 +48,9 @@ export default async function ListYourPlotPage({ params, searchParams }: { param
               locale={locale}
               partner={user.role === "PARTNER_BROKER"}
               initial={initial}
+              cities={cityOptions(await activeCities())}
               districts={await db.district.findMany({ where: { active: true }, orderBy: [{ city: "asc" }, { sort: "asc" }], select: { id: true, city: true, nameAr: true, nameEn: true } })}
+              rounds={await db.offeringRound.findMany({ where: { isActive: true }, orderBy: [{ cityId: "asc" }, { number: "asc" }], select: { id: true, cityId: true, nameAr: true, nameEn: true } })}
             />
           </Card>
         ) : staff ? (

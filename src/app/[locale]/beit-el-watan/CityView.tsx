@@ -1,5 +1,6 @@
 import Link from "next/link";
-import type { City } from "@prisma/client";
+/** GEO-01: المدينة = مفتاح نصي من جدول المدن */
+type City = string;
 import { db } from "@/lib/db";
 import { latestRate, totalEgp } from "@/lib/listing";
 import { loadIndex } from "@/lib/price-index-data";

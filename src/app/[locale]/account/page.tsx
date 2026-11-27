@@ -1,3 +1,4 @@
+import { allCities } from "@/lib/cities";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale, type Locale } from "@/i18n/config";
@@ -44,6 +45,7 @@ const LISTING_FLOW = ["DRAFT", "IN_REVIEW", "VERIFIED", "PUBLISHED", "IN_DEAL", 
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "حسابي", "My account", { noindex: true });
 
 export default async function AccountPage({ params, searchParams }: Props) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const sp = await searchParams;

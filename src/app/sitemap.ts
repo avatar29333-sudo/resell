@@ -1,3 +1,4 @@
+import { activeCities, allCities } from "@/lib/cities";
 import type { MetadataRoute } from "next";
 import { db } from "@/lib/db";
 import { siteUrl } from "@/lib/meta";
@@ -21,7 +22,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     "/privacy",
     "/terms",
     // MKT-08: صفحات المدن والأحياء
-    ...Object.values(CITY_SLUG).map((s) => `/beit-el-watan/${s}`),
+    ...(await activeCities()).map((c) => `/beit-el-watan/${c.slug}`),
     ...districts.map((d) => `/beit-el-watan/${CITY_SLUG[d.city]}/${slugify(d.nameEn)}`),
     // MKT-09: الأدلة
     ...GUIDES.map((g) => `/guides/${g.slug}`),

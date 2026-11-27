@@ -1,3 +1,4 @@
+import { allCities } from "@/lib/cities";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
@@ -9,6 +10,7 @@ import { num, tr } from "@/lib/format";
 type Params = Promise<{ locale: string }>;
 
 export default async function HomePage({ params }: { params: Params }) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const t = getDictionary(locale);

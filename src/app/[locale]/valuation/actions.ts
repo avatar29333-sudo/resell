@@ -1,6 +1,8 @@
 "use server";
 
-import type { City } from "@prisma/client";
+/** GEO-01: المدينة = مفتاح نصي من جدول المدن */
+type City = string;
+import { allCities } from "@/lib/cities";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
@@ -13,6 +15,7 @@ export type ValuationState = { ok?: boolean; ref?: string; error?: string; field
 
 /** MKT-03: «اعرف قيمة قطعتك» → طلب خدمة نوع VALUATION في طابور الوسيط */
 export async function submitValuation(locale: string, _prev: ValuationState, form: FormData): Promise<ValuationState> {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const ar = locale !== "en";
   const s = (k: string) => String(form.get(k) ?? "").trim();
   const name = s("name");

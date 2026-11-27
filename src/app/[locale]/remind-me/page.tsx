@@ -1,3 +1,4 @@
+import { activeCities, cityOptions } from "@/lib/cities";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { tr } from "@/lib/format";
@@ -22,7 +23,7 @@ export default async function RemindMePage({ params }: { params: Promise<{ local
         subtitle={L("من غير حساب: رقمك ومدينتك وتاريخ نهاية المهلة، ونفكّرك قبلها بـ 90 و30 و7 أيام — وأول ما يصدر قرار تسهيلات جديد.", "No account needed: your number, city and deadline, and we'll remind you 90, 30 and 7 days before — and as soon as new relief is announced.")}
       />
       <Container className="max-w-2xl">
-        <RemindForm locale={locale} />
+        <RemindForm locale={locale} cities={cityOptions(await activeCities())} />
       </Container>
     </>
   );

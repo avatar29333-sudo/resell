@@ -1,6 +1,8 @@
+import { activeCities, allCities } from "@/lib/cities";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import type { City } from "@prisma/client";
+/** GEO-01: المدينة = مفتاح نصي من جدول المدن */
+type City = string;
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { CITY, label } from "@/lib/labels";
@@ -10,6 +12,7 @@ import { CityView } from "../../CityView";
 type Props = { params: Promise<{ locale: string; city: string; district: string }> };
 
 async function find(citySlug: string, districtSlug: string) {
+  await allCities();
   const city = cityFromSlug(citySlug);
   if (!city) return null;
   const ds = await db.district.findMany({ where: { city: city as City, active: true } });

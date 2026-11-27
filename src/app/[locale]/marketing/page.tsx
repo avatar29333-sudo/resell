@@ -1,3 +1,4 @@
+import { allCities } from "@/lib/cities";
 import { notFound } from "next/navigation";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
@@ -17,6 +18,7 @@ type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ ok?:
 
 /** MKT-04 + MKT-12: لوحة التسويق للأدمن */
 export default async function MarketingPage({ params, searchParams }: Props) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw;

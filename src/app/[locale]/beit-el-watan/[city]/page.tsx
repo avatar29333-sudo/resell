@@ -1,6 +1,8 @@
+import { activeCities, allCities } from "@/lib/cities";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import type { City } from "@prisma/client";
+/** GEO-01: المدينة = مفتاح نصي من جدول المدن */
+type City = string;
 import { isLocale } from "@/i18n/config";
 import { CITY, label } from "@/lib/labels";
 import { cityFromSlug } from "@/lib/slugs";
@@ -10,6 +12,7 @@ type Props = { params: Promise<{ locale: string; city: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale, city } = await params;
+  await allCities();
   const c = cityFromSlug(city);
   if (!isLocale(locale) || !c) return {};
   const name = label(CITY, c, locale);
@@ -22,6 +25,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 /** MKT-08: /[locale]/beit-el-watan/[city] */
 export default async function CityPage({ params }: Props) {
   const { locale, city } = await params;
+  await allCities();
   const c = cityFromSlug(city);
   if (!isLocale(locale) || !c) notFound();
   return <CityView locale={locale} city={c as City} />;

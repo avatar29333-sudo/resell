@@ -1,7 +1,9 @@
 "use server";
 
+import { allCities } from "@/lib/cities";
 import { redirect } from "next/navigation";
-import type { City, DocumentType } from "@prisma/client";
+import type { DocumentType } from "@prisma/client";
+type City = string;
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
@@ -59,6 +61,7 @@ const FIELD_MSG: Record<string, Record<string, [string, string]>> = {
 };
 
 export async function createListing(locale: string, _prev: ListState, form: FormData): Promise<ListState> {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const l = isLocale(locale) ? locale : "ar";
   const ar = l === "ar";
   const user = await requireUser(l, `/${l}/list-your-plot`);
@@ -85,6 +88,9 @@ export async function createListing(locale: string, _prev: ListState, form: Form
     return { error: FIELD_MSG[first]?.[v.errors[first] ?? ""]?.[ar ? 0 : 1] ?? (ar ? "كمّل بيانات القطعة" : "Complete the plot details"), fieldErrors: v.errors };
   }
   const { code, area, construction, price, paidUsd } = v.values;
+  // GEO-02: الطرح لازم يكون تبع نفس المدينة (أو عام)
+  const roundId = s("offeringRoundId");
+  const round = roundId ? await db.offeringRound.findFirst({ where: { id: roundId, isActive: true, OR: [{ cityId: city }, { cityId: null }] } }) : null;
   const district = v.values.district!.nameAr;
   const districtEn = v.values.district!.nameEn;
   const deadline = v.values.deadline;
@@ -128,6 +134,8 @@ export async function createListing(locale: string, _prev: ListState, form: Form
         city: city as City,
         district,
         districtEn,
+        districtId: v.values.district!.id,
+        offeringRoundId: round?.id ?? null,
         code,
         areaSqm: area,
         paymentStatus: form.get("paymentStatus") === "FULLY_PAID" ? "FULLY_PAID" : "INSTALLMENTS",

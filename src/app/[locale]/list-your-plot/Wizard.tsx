@@ -3,15 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import type { Locale } from "@/i18n/config";
 import { tr } from "@/lib/format";
-import { CITY, CITY_KEYS, label } from "@/lib/labels";
 import { btn, field, labelCls } from "@/components/ui";
 import { useKeptAction } from "@/components/useKeptAction";
-import { CITY_PREFIX } from "@/lib/plot-code";
+import { codeHint } from "@/lib/plot-code";
+import type { CityOption } from "@/lib/cities";
 import { DRAFT_KEY, stepErrors, type Draft } from "./wizard-rules";
 import { createListing, uploadDraftFile, type ListState } from "./actions";
 
 type District = { id: string; city: string; nameAr: string; nameEn: string };
-const TEXT_FIELDS = ["city", "districtId", "code", "area", "paymentStatus", "deadline", "construction", "priceType", "paidUsd", "price", "remainingUsd"] as const;
+type Round = { id: string; cityId: string | null; nameAr: string; nameEn: string };
+const TEXT_FIELDS = ["city", "districtId", "offeringRoundId", "code", "area", "paymentStatus", "deadline", "construction", "priceType", "paidUsd", "price", "remainingUsd"] as const;
 const FILES = [
   { name: "allocation", required: true },
   { name: "receipts", required: false },
@@ -21,7 +22,7 @@ const STEP_FIELDS: string[][] = [["city", "districtId", "code", "area", "deadlin
 
 const FIELD_TEXT: Record<string, Record<string, [string, string]>> = {
   city: { required: ["اختار المدينة", "Choose the city"] },
-  district: { required: ["اختار المرحلة / الحي من القايمة", "Choose the phase / district from the list"] },
+  district: { required: ["اختار الحي من القايمة", "Choose the district from the list"] },
   code: {
     required: ["اكتب كود القطعة", "Enter the plot code"],
     format: ["الكود لازم يكون بالشكل ده: NC-8E-1016 (بادئة المدينة-البلوك-الرقم)", "The code must look like NC-8E-1016 (city prefix-block-number)"],
@@ -37,11 +38,27 @@ const FIELD_TEXT: Record<string, Record<string, [string, string]>> = {
   statement: { file: ["الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا", "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB"] },
 };
 
-export function Wizard({ locale, partner = false, districts = [], initial }: { locale: Locale; partner?: boolean; districts?: District[]; initial?: Draft }) {
+export function Wizard({
+  locale,
+  partner = false,
+  cities,
+  districts = [],
+  rounds = [],
+  initial,
+}: {
+  locale: Locale;
+  partner?: boolean;
+  /** GEO-01: المدن الشغالة من الجدول */
+  cities: CityOption[];
+  districts?: District[];
+  /** GEO-02: الطرح منفصل عن الحي */
+  rounds?: Round[];
+  initial?: Draft;
+}) {
   const L = tr(locale);
   const ar = locale === "ar";
   const [step, setStep] = useState(0);
-  const [v, setV] = useState<Draft>({ city: CITY_KEYS[0], priceType: "ALL_INCLUSIVE", paymentStatus: "INSTALLMENTS", construction: "0" });
+  const [v, setV] = useState<Draft>({ city: cities[0]?.id ?? "", priceType: "ALL_INCLUSIVE", paymentStatus: "INSTALLMENTS", construction: "0" });
   const [files, setFiles] = useState<Record<string, { id: string; name: string } | undefined>>({});
   const [uploading, setUploading] = useState<string | null>(null);
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
@@ -54,7 +71,7 @@ export function Wizard({ locale, partner = false, districts = [], initial }: { l
     (_f, e) => {
       // آخر خطوة: نتأكد من كل الخطوات قبل الإرسال
       for (let s = 0; s < 3; s++) {
-        const errs = stepErrors(s, v, files);
+        const errs = stepErrors(s, v, files, cities.find((c) => c.id === v.city));
         if (Object.keys(errs).length) {
           setClientErrors(errs);
           setStep(s);
@@ -97,12 +114,15 @@ export function Wizard({ locale, partner = false, districts = [], initial }: { l
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV((cur) => ({ ...cur, [k]: e.target.value }));
   const cityDistricts = districts.filter((d) => d.city === v.city);
+  const cityRounds = rounds.filter((r) => !r.cityId || r.cityId === v.city);
+  const cityRow = cities.find((c) => c.id === v.city);
+  const hint = cityRow ? codeHint(cityRow, ar) : { example: "", words: "" };
   const titles = [L("بيانات القطعة", "Plot details"), L("السعر", "Price"), L("المستندات", "Documents")];
   const serverErrors = (state.fieldErrors ?? {}) as Record<string, string>;
   const errs = { ...serverErrors, ...clientErrors };
 
   const next = () => {
-    const e = stepErrors(step, v, files);
+    const e = stepErrors(step, v, files, cities.find((c) => c.id === v.city));
     setClientErrors(e);
     if (Object.keys(e).length === 0) setStep(step + 1);
   };
@@ -158,7 +178,7 @@ export function Wizard({ locale, partner = false, districts = [], initial }: { l
             className="font-semibold text-brand underline"
             onClick={() => {
               localStorage.removeItem(DRAFT_KEY);
-              setV({ city: CITY_KEYS[0], priceType: "ALL_INCLUSIVE", paymentStatus: "INSTALLMENTS", construction: "0" });
+              setV({ city: cities[0]?.id ?? "", priceType: "ALL_INCLUSIVE", paymentStatus: "INSTALLMENTS", construction: "0" });
               setFiles({});
               setStep(0);
               setRestored(false);
@@ -183,17 +203,17 @@ export function Wizard({ locale, partner = false, districts = [], initial }: { l
         <div className="grid gap-4 sm:grid-cols-2">
           <label className={labelCls}>
             {L("المدينة", "City")}
-            <select name="city" value={v.city} onChange={(e) => setV((cur) => ({ ...cur, city: e.target.value, districtId: "" }))} className={field} {...inv("city")}>
-              {CITY_KEYS.map((k) => (
-                <option key={k} value={k}>
-                  {label(CITY, k, locale)}
+            <select name="city" value={v.city} onChange={(e) => setV((cur) => ({ ...cur, city: e.target.value, districtId: "", offeringRoundId: "" }))} className={field} {...inv("city")}>
+              {cities.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {ar ? c.nameAr : c.nameEn}
                 </option>
               ))}
             </select>
             <Err name="city" />
           </label>
           <label className={labelCls}>
-            {L("المرحلة / الحي", "Phase / district")}
+            {L("الحي", "District")}
             <select name="districtId" value={v.districtId ?? ""} onChange={set("districtId")} className={field} {...inv("district")}>
               <option value="" disabled>
                 {L("اختار من القايمة", "Choose from the list")}
@@ -207,10 +227,21 @@ export function Wizard({ locale, partner = false, districts = [], initial }: { l
             <Err name="district" />
           </label>
           <label className={labelCls}>
+            {L("الطرح (مرحلة بيت الوطن)", "Offering round (Beit El Watan phase)")}
+            <select name="offeringRoundId" value={v.offeringRoundId ?? ""} onChange={set("offeringRoundId")} className={field}>
+              <option value="">{L("مش متأكد", "Not sure")}</option>
+              {cityRounds.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {ar ? r.nameAr : r.nameEn}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={labelCls}>
             {L("كود القطعة (من خطاب التخصيص)", "Plot code (from the allocation letter)")}
-            <input name="code" value={v.code ?? ""} onChange={set("code")} dir="ltr" placeholder={`${CITY_PREFIX[v.city]}-8E-1016`} className={`${field} text-start`} {...inv("code")} />
+            <input name="code" value={v.code ?? ""} onChange={set("code")} dir="ltr" placeholder={hint.example} className={`${field} text-start`} {...inv("code")} />
             <span className="text-xs">
-              {L(`الشكل: ${CITY_PREFIX[v.city]}-البلوك-الرقم. مش هيظهر لأي مشتري قبل اتفاق العمولة.`, `Format: ${CITY_PREFIX[v.city]}-block-number. Hidden from buyers until the commission agreement.`)}
+              {L(`الشكل: ${hint.words} — مثلاً ${hint.example}. مش هيظهر لأي مشتري قبل اتفاق العمولة.`, `Format: ${hint.words} — e.g. ${hint.example}. Hidden from buyers until the commission agreement.`)}
             </span>
             <Err name="code" />
           </label>

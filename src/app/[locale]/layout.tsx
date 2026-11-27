@@ -1,3 +1,4 @@
+import { allCities } from "@/lib/cities";
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
@@ -50,6 +51,8 @@ export default async function LocaleLayout({
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const t = getDictionary(locale);
+  // GEO-01: تحديث خرايط المدن (كاش 30 ثانية)
+  await allCities();
   const user = await getCurrentUser();
   const unread = user ? await db.notification.count({ where: { userId: user.id, readAt: null } }) : 0;
 

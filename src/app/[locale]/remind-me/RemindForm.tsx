@@ -2,12 +2,12 @@
 
 import type { Locale } from "@/i18n/config";
 import { tr } from "@/lib/format";
-import { CITY, CITY_KEYS, label } from "@/lib/labels";
+import type { CityOption } from "@/lib/cities";
 import { Notice, btn, field, labelCls } from "@/components/ui";
 import { useKeptAction } from "@/components/useKeptAction";
 import { subscribeReminder, type RemindState } from "./actions";
 
-export function RemindForm({ locale }: { locale: Locale }) {
+export function RemindForm({ locale, cities }: { locale: Locale; cities: CityOption[]; }) {
   const L = tr(locale);
   const [state, onSubmit, pending] = useKeptAction((p: RemindState, f: FormData) => subscribeReminder(locale, p, f), {} as RemindState);
   const fe = state.fieldErrors ?? {};
@@ -34,9 +34,9 @@ export function RemindForm({ locale }: { locale: Locale }) {
         <label className={labelCls}>
           {L("المدينة", "City")}
           <select name="city" className={field}>
-            {CITY_KEYS.map((k) => (
-              <option key={k} value={k}>
-                {label(CITY, k, locale)}
+            {cities.map((c) => (
+              <option key={c.id} value={c.id}>
+                {locale === "ar" ? c.nameAr : c.nameEn}
               </option>
             ))}
           </select>

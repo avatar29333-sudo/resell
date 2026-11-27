@@ -1,6 +1,8 @@
+import { allCities } from "@/lib/cities";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { City } from "@prisma/client";
+/** GEO-01: المدينة = مفتاح نصي من جدول المدن */
+type City = string;
 import { isLocale, type Locale } from "@/i18n/config";
 import { loadIndex } from "@/lib/price-index-data";
 import { money, num, tr } from "@/lib/format";
@@ -60,6 +62,7 @@ function LineChart({ points, locale }: { points: { x: Date; y: number; n: number
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "مؤشر أسعار بيت الوطن", "Beit El Watan price index");
 
 export default async function PriceIndexPage({ params, searchParams }: Props) {
+  await allCities(); // GEO-01: قايمة المدن من الجدول
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const L = tr(locale);
