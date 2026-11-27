@@ -23,12 +23,12 @@ import { lockRateAt } from "@/lib/fx-lock";
 
 const loc = (l: string): Locale => (isLocale(l) ? l : "ar");
 
-async function ctx(locale: string, dealId: string) {
+async function ctx(locale: string, dealId: string, form?: FormData | null) {
   const l = loc(locale);
   const user = await requireUser(l, `/${l}/deals/${dealId}`);
   const deal = await loadDealFor(user, dealId);
   if (!deal) redirect(`/${l}/account?denied=1`);
-  return { l, user, deal, back: `/${l}/deals/${dealId}` };
+  return { l, user, deal, back: returnTo(l, form) ?? `/${l}/deals/${dealId}` };
 }
 
 /** فحص الصلاحية من السياسة — الأدمن لو بيتدخل لازم سبب (overrideReason) */
@@ -46,6 +46,19 @@ async function event(deal: LoadedDeal, user: User, type: DealEventType, data?: P
 const done = (l: string, id: string, q = "") => {
   revalidatePath(`/${l}/deals/${id}`);
   redirect(`/${l}/deals/${id}${q}`);
+};
+
+/** OPS-01: أفعال الفلوس ممكن تتعمل من شاشة المالية — يرجع لها (مسار داخلي بس) */
+const returnTo = (l: string, form?: FormData | null) => {
+  const r = String(form?.get("returnTo") ?? "");
+  return r.startsWith(`/${l}/finance`) && !r.startsWith("//") ? r : null;
+};
+const finish = (l: string, id: string, form?: FormData | null, q = "") => {
+  const r = returnTo(l, form);
+  revalidatePath(`/${l}/finance`);
+  if (!r) done(l, id, q);
+  revalidatePath(`/${l}/deals/${id}`);
+  redirect(q ? `${r}${r!.includes("?") ? "&" : "?"}${q.replace(/^\?/, "")}` : r!);
 };
 
 const partiesOf = (deal: LoadedDeal) => [deal.buyerId, deal.listing.sellerId];
@@ -338,12 +351,12 @@ export async function recordDeposit(locale: string, dealId: string, form: FormDa
 
 /** تأكيد وصول العربون للبنك — برقم مرجع البنك */
 export async function confirmDeposit(locale: string, dealId: string, depositId: string, form: FormData) {
-  const { l, user, deal, back } = await ctx(locale, dealId);
+  const { l, user, deal, back } = await ctx(locale, dealId, form);
   await guard(user, deal, "deposit.confirm", back, form);
   const dep = deal.deposits.find((x) => x.id === depositId);
   const ref = String(form.get("bankReference") ?? "").trim();
-  if (!dep || dep.escrowStatus !== "AWAITING_TRANSFER") done(l, dealId);
-  if (ref.length < 4) done(l, dealId, "?err=bank_ref");
+  if (!dep || dep.escrowStatus !== "AWAITING_TRANSFER") finish(l, dealId, form);
+  if (ref.length < 4) finish(l, dealId, form, "?err=bank_ref");
   await db.deposit.update({ where: { id: depositId }, data: { escrowStatus: "HELD", heldAt: new Date(), bankReference: ref } });
   await event(deal, user, "DEPOSIT_UPDATED", { depositId, status: "HELD", bankReference: ref });
   await notify(partiesOf(deal), {
@@ -352,7 +365,7 @@ export async function confirmDeposit(locale: string, dealId: string, depositId: 
     en: ["The deposit is held in the bank escrow account"],
     link: `/deals/${dealId}`,
   });
-  done(l, dealId);
+  finish(l, dealId, form);
 }
 
 /**
@@ -360,13 +373,13 @@ export async function confirmDeposit(locale: string, dealId: string, depositId: 
  * والصرف ما يتنفذش غير بعد موافقة أدمن. الأدمن نفسه بيصرف مباشرة.
  */
 export async function settleDeposit(locale: string, dealId: string, depositId: string, to: "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER", form?: FormData) {
-  const { l, user, deal, back } = await ctx(locale, dealId);
+  const { l, user, deal, back } = await ctx(locale, dealId, form);
   await guard(user, deal, to === "RELEASED_TO_SELLER" ? "deposit.release" : "deposit.refund", back, form);
   // PERM-08: الصرف فعل حرج → تأكيد هوية في آخر 10 دقايق
   await requireRecentAuth(user, l, back);
   const dep = deal.deposits.find((x) => x.id === depositId);
-  if (!dep || dep.escrowStatus !== "HELD") done(l, dealId);
-  if (dep!.approvals.length) done(l, dealId, "?err=approval_pending");
+  if (!dep || dep.escrowStatus !== "HELD") finish(l, dealId, form);
+  if (dep!.approvals.length) finish(l, dealId, form, "?err=approval_pending");
   const limit = (await getSetting("payments.fourEyes")).limitEgp;
   if (user.role !== "ADMIN" && toNum(dep!.amount) > limit) {
     const a = await db.paymentApproval.create({ data: { depositId, action: to, amount: dep!.amount, requestedById: user.id } });
@@ -377,10 +390,10 @@ export async function settleDeposit(locale: string, dealId: string, depositId: s
       en: [`A payout needs your approval: EGP ${toNum(dep!.amount).toLocaleString("en-US")}`, `Deal #${dealId.slice(-6).toUpperCase()}`],
       link: `/deals/${dealId}`,
     });
-    done(l, dealId, "?ok=approval_requested");
+    finish(l, dealId, form, "?ok=approval_requested");
   }
   await executeSettlement(user, deal, depositId, to);
-  done(l, dealId);
+  finish(l, dealId, form, "?ok=settled");
 }
 
 async function executeSettlement(user: User, deal: LoadedDeal, depositId: string, to: "RELEASED_TO_SELLER" | "REFUNDED_TO_BUYER") {
@@ -419,13 +432,17 @@ export async function decidePayment(locale: string, dealId: string, approvalId: 
 }
 
 export async function setCommissionStatus(locale: string, dealId: string, status: "INVOICED" | "PAID" | "WAIVED", form?: FormData) {
-  const { l, user, deal, back } = await ctx(locale, dealId);
+  const { l, user, deal, back } = await ctx(locale, dealId, form);
   await guard(user, deal, status === "WAIVED" ? "commission.waive" : "commission.collect", back, form);
-  if (!deal.commission) done(l, dealId);
+  if (!deal.commission) finish(l, dealId, form);
   const ref = String(form?.get("reference") ?? "").trim() || null;
-  await db.commission.update({ where: { id: deal.commission!.id }, data: { status, ...(status === "PAID" ? { paidAt: new Date() } : {}) } });
-  await audit(user.id, "commission.status", "Commission", deal.commission!.id, { from: deal.commission!.status, to: status, reference: ref });
-  done(l, dealId);
+  // OPS-01: التحصيل بتاريخ + مرجع
+  const paidOn = String(form?.get("paidOn") ?? "");
+  if (status === "PAID" && (!ref || ref.length < 3)) finish(l, dealId, form, "?err=reference");
+  const paidAt = status === "PAID" ? (paidOn ? new Date(`${paidOn}T12:00:00Z`) : new Date()) : undefined;
+  await db.commission.update({ where: { id: deal.commission!.id }, data: { status, ...(paidAt ? { paidAt, paymentRef: ref } : {}) } });
+  await audit(user.id, "commission.status", "Commission", deal.commission!.id, { from: deal.commission!.status, to: status, reference: ref, paidAt: paidAt?.toISOString() ?? null });
+  finish(l, dealId, form, "?ok=commission");
 }
 
 // ─── المستندات حسب المرحلة والدور (DATA-06) ───

@@ -153,6 +153,7 @@ export const ACTIONS = [
   "buy_request.manage",
   // التقارير والإعدادات (5.8)
   "reports.view",
+  "finance.reconcile",
   "fx.manual",
   "settings.fees",
   "audit.view",
@@ -336,6 +337,8 @@ const RULES: Record<Action, Rule[]> = {
 
   "reports.view": [{ roles: ["BROKER", "BROKER_LEAD", "LAWYER", "FINANCE"] }],
   "fx.manual": [{ roles: ["FINANCE"] }],
+  // OPS-01: المطابقة الشهرية مع كشف البنك
+  "finance.reconcile": [{ roles: ["FINANCE"] }],
   "settings.fees": [],
   "audit.view": [],
   "audit.view_money": [{ roles: ["FINANCE"] }],
@@ -355,6 +358,7 @@ const NATIVE_ADMIN: Action[] = [
   "commission.waive",
   "commission.rates",
   "reports.view",
+  "finance.reconcile",
   "fx.manual",
   "settings.fees",
   "audit.view",

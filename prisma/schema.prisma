@@ -249,6 +249,7 @@ model User {
   kycRejections    Int          @default(0)
 
   notifications       Notification[]
+  reconciliations        Reconciliation[] @relation("ReconciliationBy")
   assignedListingsBroker Listing[] @relation("ListingBroker")
   assignedListingsLawyer Listing[] @relation("ListingLawyer")
   submittedListings      Listing[] @relation("ListingSubmitter")
@@ -556,6 +557,8 @@ model Commission {
   currency         Currency         @default(EGP)
   status           CommissionStatus @default(PENDING)
   paidAt           DateTime?
+  /// OPS-01: مرجع التحصيل (تحويل بنكي/إيصال)
+  paymentRef       String?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 }
@@ -578,6 +581,20 @@ model Deposit {
   updatedAt         DateTime     @updatedAt
 
   @@index([dealId])
+}
+
+/// OPS-01: المطابقة الشهرية — إجمالي العرابين المحفوظة في النظام مقابل رقم كشف البنك
+model Reconciliation {
+  id          String   @id @default(cuid())
+  month       String // YYYY-MM
+  systemTotal Decimal  @db.Decimal(14, 2)
+  bankTotal   Decimal  @db.Decimal(14, 2)
+  note        String?
+  enteredById String
+  enteredBy   User     @relation("ReconciliationBy", fields: [enteredById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([month])
 }
 
 /// سعر صرف الدولار بالجنيه

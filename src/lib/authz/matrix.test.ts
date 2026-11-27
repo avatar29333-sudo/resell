@@ -66,7 +66,7 @@ describe("PERM-10 matrix — every role × every action", () => {
     // مسؤول الوسطاء بيشوف كل حاجة ويسند، ويراجع الهويات (notMine فيه ملف هوية مستني المراجعة)
     BROKER_LEAD: ["listing.view_private", "listing.view_code", "listing.assign", "deal.view", "deal.view_money", "deal.assign", "deal.note", "deal.internal_note", "deposit.view", "service.view_queue", "service.assign", "service.update", "reports.view", "kyc.view_id", "kyc.decide", "document.view"],
     // المالي شغال على كل الصفقات: ملاحظات، رفع إيصالات، تسجيل وتأكيد عرابين
-    FINANCE: ["deal.view", "deal.view_money", "deal.note", "deal.upload_doc", "deposit.view", "deposit.record", "deposit.confirm", "deposit.release", "deposit.refund", "commission.collect", "reports.view", "fx.manual", "audit.view_money", "deal.internal_note", "document.view"],
+    FINANCE: ["deal.view", "deal.view_money", "deal.note", "deal.upload_doc", "deposit.view", "deposit.record", "deposit.confirm", "deposit.release", "deposit.refund", "commission.collect", "reports.view", "finance.reconcile", "fx.manual", "audit.view_money", "deal.internal_note", "document.view"],
     // الوسيط: طابور الخدمات + مراجعة هوية مستنية (SEC-06) — مش صفقات ولا عروض مش مسندة ليه
     BROKER: ["service.view_queue", "service.assign", "service.update", "reports.view", "kyc.view_id", "kyc.decide", "document.view"],
     LAWYER: ["reports.view"],

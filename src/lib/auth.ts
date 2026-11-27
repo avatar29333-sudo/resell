@@ -153,7 +153,7 @@ export function homeFor(role: Role) {
     case "LAWYER":
       return "lawyer";
     case "FINANCE":
-      return "reports";
+      return "finance";
     default:
       return "account";
   }

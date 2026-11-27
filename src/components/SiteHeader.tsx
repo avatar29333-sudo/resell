@@ -25,6 +25,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
     { href: `${base}/broker`, label: ar ? "لوحة الوسيط" : "Broker", roles: ["ADMIN", "BROKER", "BROKER_LEAD"] },
     { href: `${base}/agent`, label: ar ? "لوحة المندوب" : "Field agent", roles: ["ADMIN", "AGENT"] },
     { href: `${base}/lawyer`, label: ar ? "شاشة المحامي" : "Lawyer", roles: ["ADMIN", "LAWYER"] },
+    { href: `${base}/finance`, label: ar ? "المالية" : "Finance", roles: ["ADMIN", "FINANCE"] },
     { href: `${base}/reports`, label: ar ? "التقارير" : "Reports", roles: ["ADMIN", "FINANCE", "BROKER", "BROKER_LEAD", "LAWYER"] },
     { href: `${base}/settings`, label: ar ? "الإعدادات" : "Settings", roles: ["ADMIN", "FINANCE"] },
   ].filter((l) => role && l.roles.includes(role));
