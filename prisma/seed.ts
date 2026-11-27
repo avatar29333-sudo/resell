@@ -595,6 +595,27 @@ async function backfillAssignments() {
   }
 }
 
+/**
+ * أسماء حسابات التجربة اللي طلبها صاحب المشروع (بتتطبق كل مرة الـ seed يشتغل — آمنة تتكرر).
+ * بالرقم الثابت لكل حساب تجربة، والعميلين بنفس اختيار شاشة الدخول السريع.
+ */
+async function renameDemoTeam() {
+  const byPhone: [string, string][] = [
+    ["+201000000001", "محمد عماره"], // أدمن
+    ["+201000000004", "أ. محمد الحسيني"], // محامي
+    ["+201000000006", "اماني حسين"], // مندوب
+    ["+201000000002", "محمد ايمن"], // وسيط
+    ["+201000000222", "روفان محمد"], // سمسار شريك (بالعمولة)
+    ["+201000000008", "حسين عماره"], // مالي
+    ["+201000000111", "رانيا مختار"], // مسؤول الوسطاء
+  ];
+  for (const [phone, name] of byPhone) await prisma.user.updateMany({ where: { phone, anonymizedAt: null }, data: { name } });
+  const seller = await prisma.user.findFirst({ where: { role: "CLIENT", listings: { some: {} } }, orderBy: { phone: "asc" } });
+  if (seller) await prisma.user.update({ where: { id: seller.id }, data: { name: "ايمان حسين" } });
+  const buyer = await prisma.user.findFirst({ where: { role: "CLIENT", dealsAsBuyer: { some: {} }, id: { not: seller?.id } }, orderBy: { phone: "asc" } });
+  if (buyer) await prisma.user.update({ where: { id: buyer.id }, data: { name: "حسين محمد" } });
+}
+
 async function main() {
   // SEC-20: ممنوع أي بيانات تجريبية في النسخة الرسمية
   if (process.env.OFFICIAL_DEPLOYMENT === "1") {
@@ -606,6 +627,7 @@ async function main() {
     await backfillBoundaries();
     await seedNotifications();
     await backfillAssignments();
+    await renameDemoTeam();
     return;
   }
   if ((await prisma.user.count()) > 0) {
@@ -653,6 +675,7 @@ async function main() {
   await backfillBoundaries();
   await seedNotifications();
   await backfillAssignments();
+  await renameDemoTeam();
   const c = (k: keyof typeof rows) => rows[k].length;
   console.log(
     `تمام في ${((Date.now() - t0) / 1000).toFixed(1)} ث: ${c("users")} مستخدم، ${c("listings")} عرض، ${c("deals")} صفقة، ${c("contracts")} عقد، ${c("docs")} مستند بمرفقاته، ${c("services")} طلب خدمة، ${c("buy")} طلب شراء، ${c("rates")} سعر صرف.`,

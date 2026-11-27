@@ -24,12 +24,11 @@ export default async function SignInPage({ params, searchParams }: Props) {
   if (user) redirect(safeNext(locale, next) ?? `/${locale}/${homeFor(user.role)}`);
 
   // حسابات التجربة: الفريق + أول عميلين
+  // REL-01: العميل مش «بائع» أو «مشتري» — نفس الحساب ممكن يعمل الاتنين، فالزرارين «عميل ١ / عميل ٢»
+  const client1 = DEMO_MODE ? await db.user.findFirst({ where: { role: "CLIENT", listings: { some: {} } }, orderBy: { phone: "asc" } }) : null;
+  const client2 = DEMO_MODE ? await db.user.findFirst({ where: { role: "CLIENT", dealsAsBuyer: { some: {} }, id: { not: client1?.id } }, orderBy: { phone: "asc" } }) : null;
   const demoUsers = DEMO_MODE
-    ? [
-        ...(await db.user.findMany({ where: { role: { not: "CLIENT" }, status: "ACTIVE" }, orderBy: [{ role: "asc" }, { name: "asc" }], take: 12 })),
-        ...(await db.user.findMany({ where: { role: "CLIENT", listings: { some: {} } }, orderBy: { phone: "asc" }, take: 1 })),
-        ...(await db.user.findMany({ where: { role: "CLIENT", dealsAsBuyer: { some: {} } }, orderBy: { phone: "asc" }, take: 1 })),
-      ]
+    ? [...(await db.user.findMany({ where: { role: { not: "CLIENT" }, status: "ACTIVE" }, orderBy: [{ role: "asc" }, { name: "asc" }], take: 12 })), ...(client1 ? [client1] : []), ...(client2 ? [client2] : [])]
     : [];
 
   return (
@@ -61,8 +60,7 @@ export default async function SignInPage({ params, searchParams }: Props) {
                     >
                       <span className="font-semibold">{u.name}</span>
                       <span className="text-xs text-muted">
-                        {label(ROLE, u.role, locale)}
-                        {u.role === "CLIENT" && (i === demoUsers.length - 1 ? L(" · مشتري", " · buyer") : L(" · بائع", " · seller"))}
+                        {u.role === "CLIENT" ? (u.id === client1?.id ? L("عميل ١ · عنده عرض بيع", "Client 1 · has a listing") : L("عميل ٢ · مشتري في صفقة", "Client 2 · buying in a deal")) : label(ROLE, u.role, locale)}
                       </span>
                     </button>
                   </form>
