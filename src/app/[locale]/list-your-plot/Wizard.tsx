@@ -11,13 +11,13 @@ import { DRAFT_KEY, stepErrors, type Draft } from "./wizard-rules";
 import { createListing, uploadDraftFile, type ListState } from "./actions";
 
 type District = { id: string; city: string; nameAr: string; nameEn: string };
-const TEXT_FIELDS = ["city", "districtId", "code", "area", "paymentStatus", "deadline", "construction", "priceType", "paidUsd", "price"] as const;
+const TEXT_FIELDS = ["city", "districtId", "code", "area", "paymentStatus", "deadline", "construction", "priceType", "paidUsd", "price", "remainingUsd"] as const;
 const FILES = [
   { name: "allocation", required: true },
   { name: "receipts", required: false },
   { name: "statement", required: false },
 ] as const;
-const STEP_FIELDS: string[][] = [["city", "districtId", "code", "area", "deadline", "construction"], ["priceType", "paidUsd", "price"], ["allocation"]];
+const STEP_FIELDS: string[][] = [["city", "districtId", "code", "area", "deadline", "construction"], ["priceType", "paidUsd", "price", "remainingUsd"], ["allocation"]];
 
 const FIELD_TEXT: Record<string, Record<string, [string, string]>> = {
   city: { required: ["اختار المدينة", "Choose the city"] },
@@ -262,6 +262,13 @@ export function Wizard({ locale, partner = false, districts = [] }: { locale: Lo
             <input name="price" type="number" inputMode="decimal" value={v.price ?? ""} onChange={set("price")} className={field} {...inv("price")} />
             <Err name="price" />
           </label>
+          {v.paymentStatus !== "FULLY_PAID" && (
+            <label className={labelCls}>
+              {L("الأقساط الباقية للجهاز (دولار) — اختياري", "Remaining authority instalments (USD) — optional")}
+              <input name="remainingUsd" type="number" min={0} inputMode="decimal" value={v.remainingUsd ?? ""} onChange={set("remainingUsd")} className={field} />
+              <span className="text-xs">{L("بتظهر للمشتري في حاسبة التكلفة الكاملة بسعر دولار النهارده.", "Shown to buyers in the full-cost calculator at today's USD rate.")}</span>
+            </label>
+          )}
         </div>
       )}
 

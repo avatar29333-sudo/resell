@@ -226,6 +226,7 @@ export default async function ListingPage({ params }: Props) {
                 transferPct={fees.authorityTransferPct ?? null}
                 lawyerFeeEgp={fees.buyerLawyerFeeEgp ?? 0}
                 usdEgp={usd}
+                remainingUsd={listing.remainingUsd ? toNum(listing.remainingUsd) : listing.plot.paymentStatus === "FULLY_PAID" ? 0 : null}
               />
             </Card>
           )}

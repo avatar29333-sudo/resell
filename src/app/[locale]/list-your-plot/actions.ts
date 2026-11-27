@@ -150,6 +150,8 @@ export async function createListing(locale: string, _prev: ListState, form: Form
       price,
       currency: "EGP",
       paidAmountUsd: priceType === "PAID_PLUS_PREMIUM" ? paidUsd : null,
+      // MKT-02: الأقساط الباقية بالدولار (اختياري، رقم موجب بس)
+      remainingUsd: Number(form.get("remainingUsd")) > 0 && form.get("paymentStatus") !== "FULLY_PAID" ? Number(form.get("remainingUsd")) : null,
       status: "IN_REVIEW",
     },
   });
