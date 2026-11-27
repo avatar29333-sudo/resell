@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { seedTemplates } from "./seed-templates";
+import { seedBeitElWatanGeo } from "./seed-geo";
 import { Prisma, PrismaClient } from "@prisma/client";
 /** GEO-01: المدينة = مفتاح نصي من جدول المدن (الخمس مدن الأولى بتتضاف في الـ migration) */
 type City = string;
@@ -619,6 +620,9 @@ async function renameDemoTeam() {
 }
 
 async function main() {
+  // بيانات حقيقية (مش تجريبية) — بتتعمل في كل النسخ حتى الرسمية: مدن وأحياء بيت الوطن + نماذج العقود
+  await seedBeitElWatanGeo(prisma);
+  await seedTemplates(prisma);
   // SEC-20: ممنوع أي بيانات تجريبية في النسخة الرسمية
   if (process.env.OFFICIAL_DEPLOYMENT === "1") {
     console.log("النسخة الرسمية — مفيش بيانات تجريبية.");
