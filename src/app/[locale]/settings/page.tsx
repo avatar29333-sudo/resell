@@ -521,7 +521,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
           </label>
           <label className={labelCls}>
             {L("الاسم بالإنجليزي", "English name")}
-            <input name="nameEn" required dir="ltr" placeholder="Round 5" pattern="[A-Za-z0-9][A-Za-z0-9 .,'()&-]+" className={`${field} w-40`} />
+            <input name="nameEn" required dir="ltr" placeholder="Round 5" pattern="[A-Za-z0-9][A-Za-z0-9 .,'\(\)&\-]+" className={`${field} w-40`} />
           </label>
           <label className={labelCls}>
             {L("السنة", "Year")}
@@ -562,7 +562,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         </label>
         <label className={labelCls}>
           {L("الاسم بالإنجليزي (لاتيني)", "English name (Latin)")}
-          <input name="nameEn" required dir="ltr" defaultValue={c?.nameEn} placeholder="10th of Ramadan" pattern="[A-Za-z0-9][A-Za-z0-9 .,'()&-]+" className={`${field} w-44`} />
+          <input name="nameEn" required dir="ltr" defaultValue={c?.nameEn} placeholder="10th of Ramadan" pattern="[A-Za-z0-9][A-Za-z0-9 .,'\(\)&\-]+" className={`${field} w-44`} />
         </label>
         <label className={labelCls}>
           {L("بادئة الكود", "Code prefix")}
