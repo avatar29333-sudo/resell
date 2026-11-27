@@ -6,6 +6,10 @@ import { db } from "@/lib/db";
 import { latestRate, totalEgp } from "@/lib/listing";
 import { getSetting } from "@/lib/settings";
 import { arrangeListings, registerHref } from "@/lib/register";
+import { getCurrentUser } from "@/lib/auth";
+import { ensureReferralCode } from "@/lib/referral";
+import { siteUrl } from "@/lib/meta";
+import { ShareButtons } from "@/components/ShareButtons";
 import { daysUntil, money, num, toNum, tr } from "@/lib/format";
 import { districtName } from "@/lib/district";
 import { CITY, CITY_KEYS, LISTING_STATUS, PAYMENT_STATUS, PRICE_TYPE, label, toneOf } from "@/lib/labels";
@@ -56,6 +60,8 @@ export default async function ListingsPage({ params, searchParams }: Props) {
     { sort: sp.sort, inDeal, budget, page: Number(sp.page) || 1 },
   );
   const listings = arranged.items;
+  const viewer = await getCurrentUser();
+  const refCode = viewer ? await ensureReferralCode(viewer) : null;
   const base = `/${locale}/listings`;
   const keep = { city: sp.city, area: sp.area, budget: sp.budget, sort: sp.sort, paid: sp.paid, inDeal: sp.inDeal };
 
@@ -169,6 +175,17 @@ export default async function ListingsPage({ params, searchParams }: Props) {
                       )}
                     </div>
                   </Link>
+                  {/* MKT-05 */}
+                  <div className="border-x border-b border-line bg-paper px-3 py-2">
+                    <ShareButtons
+                      base={siteUrl()}
+                      path={`/${locale}/listings/${l.id}`}
+                      text={L(`أرض ${num(l.plot.areaSqm, locale)}م² · ${label(CITY, l.plot.city, locale)} — ${districtName(l.plot, locale)} · ${money(l.total, "EGP", locale)}`, `${num(l.plot.areaSqm, locale)} m² plot · ${label(CITY, l.plot.city, locale)} — ${districtName(l.plot, locale)} · ${money(l.total, "EGP", locale)}`)}
+                      refCode={refCode}
+                      ar={locale === "ar"}
+                      compact
+                    />
+                  </div>
                 </li>
               );
             })}

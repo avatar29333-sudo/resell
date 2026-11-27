@@ -16,6 +16,9 @@ import { approximateCenter, plotGeo } from "@/lib/geo";
 import { getSetting } from "@/lib/settings";
 import { PlotMap } from "@/components/PlotMap";
 import { CostCalculator } from "@/components/CostCalculator";
+import { ShareButtons } from "@/components/ShareButtons";
+import { ensureReferralCode } from "@/lib/referral";
+import { siteUrl } from "@/lib/meta";
 
 type Props = { params: Promise<{ locale: string; id: string }> };
 
@@ -215,6 +218,17 @@ export default async function ListingPage({ params }: Props) {
             <p className="text-sm text-muted">
               {L(`محسوب بسعر دولار ${num(usd, locale, 2)} ج.م (${date(rate?.date, locale)})`, `Calculated at USD = EGP ${num(usd, locale, 2)} (${date(rate?.date, locale)})`)}
             </p>
+          </Card>
+
+          {/* MKT-05: مشاركة العرض */}
+          <Card title={L("شارك العرض", "Share this listing")}>
+            <ShareButtons
+              base={siteUrl()}
+              path={`/${locale}/listings/${id}`}
+              text={L(`أرض ${num(area, locale)}م² · ${label(CITY, listing.plot.city, locale)} — ${districtName(listing.plot, locale)} · ${money(total, "EGP", locale)}`, `${num(area, locale)} m² plot · ${label(CITY, listing.plot.city, locale)} — ${districtName(listing.plot, locale)} · ${money(total, "EGP", locale)}`)}
+              refCode={user ? await ensureReferralCode(user) : null}
+              ar={locale === "ar"}
+            />
           </Card>
 
           {listing.status !== "SOLD" && (
