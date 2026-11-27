@@ -19,6 +19,8 @@ export const DEFAULTS = {
   "payments.fourEyes": { limitEgp: 500_000 } as { limitEgp: number },
   /** OPS-04 — السعر اليدوي ما يبعدش عن آخر سعر آلي أكتر من النسبة دي إلا بتأكيد صريح */
   "fx.manual": { maxDeviationPct: 5 } as { maxDeviationPct: number },
+  /** DATA-04 — أقل عدد صفقات في مدينة/شهر عشان رقم المؤشر يظهر */
+  priceIndex: { minDeals: 5 } as { minDeals: number },
   /** DATA-03 — صلاحية إفادة الجهاز: الشهور، التنبيه قبلها، والعرض المنتهي يختفي ولا يظهر بشارة */
   "documents.validity": { authorityStatementMonths: 3, warnDays: 30, expiredListing: "badge" } as { authorityStatementMonths: number; warnDays: number; expiredListing: "badge" | "hide" },
   /** SEC-05 — الوسطاء غير المسندين: «read» يشوفوا الصفقات، «none» ما يشوفوهاش */

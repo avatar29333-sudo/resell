@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { can, subject } from "@/lib/authz";
 import { scopeDealsFor } from "@/lib/authz/scope";
+import { loadIndex } from "@/lib/price-index-data";
 import { STAGES } from "@/lib/deal-machine";
 import { money, num, toNum, tr } from "@/lib/format";
 import { CITY, CITY_KEYS, DEAL_STAGE, LISTING_STATUS, SERVICE_STATUS, label } from "@/lib/labels";
@@ -46,6 +47,12 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
     db.document.count({ where: { expiresAt: { lte: new Date(Date.now() + 30 * 86400000), gte: new Date() }, status: "APPROVED" } }),
   ]);
 
+  const index = await loadIndex();
+  const sixMonthsAgo = (() => {
+    const d = new Date();
+    d.setUTCMonth(d.getUTCMonth() - 5);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  })();
   const closedValue = closed.reduce((s, d) => s + toNum(d.agreedPrice), 0);
   const paid = commissions.filter((c) => c.status === "PAID").reduce((s, c) => s + toNum(c.sellerAmount) + toNum(c.buyerAmount), 0);
   const due = commissions.filter((c) => ["PENDING", "INVOICED"].includes(c.status)).reduce((s, c) => s + toNum(c.sellerAmount) + toNum(c.buyerAmount), 0);
@@ -94,6 +101,26 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
           <Link href={`/${locale}/price-index`} className="text-brand">
             {L("مؤشر الأسعار الكامل ←", "Full price index →")}
           </Link>
+        </Card>
+
+        <Card title={L("مؤشر الأسعار — آخر 6 شهور (نفس أرقام صفحة المؤشر)", "Price index — last 6 months (same figures as the index page)")}>
+          <Table head={[L("المدينة", "City"), L("الشهر", "Month"), L("صفقات", "Deals"), L("متوسط المتر", "Avg / m²")]}>
+            {index.points
+              .filter((p) => p.month >= sixMonthsAgo)
+              .map((p) => (
+                <tr key={`${p.city}-${p.month}`}>
+                  <td className="font-semibold">{label(CITY, p.city, locale)}</td>
+                  <td dir="ltr" className="text-start">
+                    {p.month}
+                  </td>
+                  <td>{num(p.deals, locale)}</td>
+                  <td>{p.avgPerSqm === null ? <span className="text-muted">{L("بيانات غير كافية", "Insufficient data")}</span> : money(p.avgPerSqm, "EGP", locale)}</td>
+                </tr>
+              ))}
+          </Table>
+          <p className="text-xs text-muted">
+            {L(`من الصفقات المقفولة بس؛ أقل من ${num(index.minDeals, locale)} صفقات في الشهر = بيانات غير كافية.`, `Closed deals only; fewer than ${index.minDeals} deals in a month = insufficient data.`)}
+          </p>
         </Card>
       </Container>
     </>

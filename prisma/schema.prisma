@@ -471,6 +471,8 @@ model Deal {
   agent           User?      @relation("DealAgent", fields: [agentId], references: [id])
   stageChangedAt  DateTime   @default(now())
   closedAt        DateTime?
+  /// DATA-04: صفقة من بيانات التجربة — ما تدخلش في المؤشر ولا العدادات لما DEMO_MODE مقفول
+  isDemo          Boolean    @default(false)
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
@@ -481,6 +483,7 @@ model Deal {
   deposits   Deposit[]
 
   @@index([stage, status])
+  @@index([status, isDemo])
   @@index([listingId])
   @@index([buyerId])
   @@index([brokerId])

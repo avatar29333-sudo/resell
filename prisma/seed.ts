@@ -616,7 +616,8 @@ async function main() {
   await prisma.plot.createMany({ data: rows.plots });
   await prisma.listing.createMany({ data: rows.listings });
   await prisma.serviceRequest.createMany({ data: rows.services });
-  await prisma.deal.createMany({ data: rows.deals });
+  // DATA-04: كل صفقات التجربة متعلّمة isDemo — ما تدخلش في المؤشر لما DEMO_MODE مقفول
+  await prisma.deal.createMany({ data: rows.deals.map((d) => ({ ...d, isDemo: true })) });
   await chunk(rows.docs, (d) => prisma.document.createMany({ data: d }));
   await prisma.kycProfile.createMany({ data: rows.kyc });
   await prisma.review.createMany({ data: rows.reviews });
