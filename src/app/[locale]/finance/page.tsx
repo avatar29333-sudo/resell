@@ -124,8 +124,8 @@ export default async function FinancePage({ params, searchParams }: Props) {
                 {d.escrowStatus === "AWAITING_TRANSFER" && confirm.allowed && (
                   <form action={confirmDeposit.bind(null, locale, d.dealId, d.id)} className="flex flex-wrap items-center gap-1.5">
                     <input type="hidden" name="returnTo" value={ret} />
-                    <input name="bankReference" required minLength={4} placeholder={L("رقم مرجع البنك", "Bank reference")} dir="ltr" className={`${field} min-h-9 w-40`} />
-                    {confirm.override && <input name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                    <input aria-label={L("رقم مرجع البنك", "Bank reference")} name="bankReference" required minLength={4} placeholder={L("رقم مرجع البنك", "Bank reference")} dir="ltr" className={`${field} min-h-9 w-40`} />
+                    {confirm.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
                     <ConfirmButton message={L(`تأكيد وصول ${amount} للبنك؟`, `Confirm ${amount} arrived at the bank?`)} className={`${btn.small} bg-ok text-white`}>
                       {L("أكّد الوصول", "Confirm arrival")}
                     </ConfirmButton>
@@ -136,7 +136,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     {release.allowed && (
                       <form action={settleDeposit.bind(null, locale, d.dealId, d.id, "RELEASED_TO_SELLER")} className="flex flex-wrap gap-1">
                         <input type="hidden" name="returnTo" value={ret} />
-                        {release.override && <input name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                        {release.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
                         <ConfirmButton message={L(`صرف ${amount} للبائع؟ الفعل ده مش بيترجع.`, `Release ${amount} to the seller? This can't be undone.`)} className={`${btn.small} bg-brand text-white`}>
                           {L("صرف للبائع", "Release to seller")}
                         </ConfirmButton>
@@ -145,7 +145,7 @@ export default async function FinancePage({ params, searchParams }: Props) {
                     {refund.allowed && (
                       <form action={settleDeposit.bind(null, locale, d.dealId, d.id, "REFUNDED_TO_BUYER")} className="flex flex-wrap gap-1">
                         <input type="hidden" name="returnTo" value={ret} />
-                        {refund.override && <input name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                        {refund.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
                         <ConfirmButton message={L(`رد ${amount} للمشتري؟ الفعل ده مش بيترجع.`, `Refund ${amount} to the buyer? This can't be undone.`)} className={`${btn.small} border border-[#A32020] text-[#A32020]`}>
                           {L("رد للمشتري", "Refund to buyer")}
                         </ConfirmButton>
@@ -223,8 +223,8 @@ export default async function FinancePage({ params, searchParams }: Props) {
                       <form action={setCommissionStatus.bind(null, locale, r.dealId, "PAID")} className="flex flex-wrap items-center gap-1.5">
                         <input type="hidden" name="returnTo" value={ret} />
                         <input name="paidOn" type="date" defaultValue={today} max={today} required className={`${field} min-h-9 w-40`} aria-label={L("تاريخ التحصيل", "Collection date")} />
-                        <input name="reference" required minLength={3} placeholder={L("مرجع التحويل/الإيصال", "Transfer / receipt ref")} dir="ltr" className={`${field} min-h-9 w-40`} />
-                        {me.role === "ADMIN" && <input name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
+                        <input aria-label={L("مرجع التحويل/الإيصال", "Transfer / receipt ref")} name="reference" required minLength={3} placeholder={L("مرجع التحويل/الإيصال", "Transfer / receipt ref")} dir="ltr" className={`${field} min-h-9 w-40`} />
+                        {me.role === "ADMIN" && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-9 w-44`} />}
                         <ConfirmButton message={L(`تسجيل تحصيل ${money(total, r.currency, locale)}؟`, `Record collection of ${money(total, r.currency, locale)}?`)} className={`${btn.small} bg-ok text-white`}>
                           {L("اتحصّلت", "Collected")}
                         </ConfirmButton>

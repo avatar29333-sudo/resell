@@ -182,7 +182,7 @@ export default async function AgentPage({ params, searchParams }: Props) {
                           {L("ملاحظة (إجبارية للاستيفاء والرفض)", "Note (required for more-papers or refusal)")}
                           <input name="note" className={`${field} min-h-11`} />
                         </label>
-                        {upd.override && <input name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-11 w-48`} />}
+                        {upd.override && <input aria-label={L("سبب تدخّل الأدمن", "Admin override reason")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن", "Admin override reason")} className={`${field} min-h-11 w-48`} />}
                         <button className={`${btn.small} min-h-11 bg-brand text-white`}>{L("حدّث", "Update")}</button>
                       </form>
                     )}

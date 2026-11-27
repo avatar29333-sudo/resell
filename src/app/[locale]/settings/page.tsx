@@ -116,7 +116,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
       <Card title={L(`المستخدمين (${num(total, locale)})`, `Users (${total})`)}>
         <form className="flex flex-wrap gap-2">
           <input type="hidden" name="tab" value="users" />
-          <input name="q" defaultValue={q} placeholder={L("ابحث بالاسم أو الرقم أو الإيميل", "Search by name, number or email")} className={`${field} max-w-sm`} />
+          <input aria-label={L("ابحث بالاسم أو الرقم أو الإيميل", "Search by name, number or email")} name="q" defaultValue={q} placeholder={L("ابحث بالاسم أو الرقم أو الإيميل", "Search by name, number or email")} className={`${field} max-w-sm`} />
           <select name="role" defaultValue={roleFilter ?? ""} className={`${field} w-44`} aria-label={L("الدور", "Role")}>
             <option value="">{L("كل الأدوار", "All roles")}</option>
             {roleOptions.map((r) => (
@@ -156,7 +156,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
                     <details className="mt-1">
                       <summary className="cursor-pointer text-xs text-[#A32020]">{L("إيقاف…", "Suspend…")}</summary>
                       <form action={suspendUser.bind(null, locale, u.id)} className="mt-1 flex flex-col gap-1">
-                        <input name="reason" required minLength={10} placeholder={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} className={`${field} min-h-9 w-56`} />
+                        <input aria-label={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} name="reason" required minLength={10} placeholder={L("السبب (10 حروف على الأقل)", "Reason (10+ characters)")} className={`${field} min-h-9 w-56`} />
                         <button className={`${btn.small} self-start border border-[#A32020] text-[#A32020]`}>{L("أوقف الحساب", "Suspend account")}</button>
                       </form>
                     </details>
@@ -341,7 +341,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               </td>
               <td>
                 <form action={bumpTemplate.bind(null, locale, t.type)} className="flex gap-1.5">
-                  <input name="note" required placeholder={L("إيه اللي اتغير؟", "What changed?")} className={`${field} min-h-9`} />
+                  <input aria-label={L("إيه اللي اتغير؟", "What changed?")} name="note" required placeholder={L("إيه اللي اتغير؟", "What changed?")} className={`${field} min-h-9`} />
                   <button className={`${btn.small} border border-brand text-brand`}>{L("انشر", "Publish")}</button>
                 </form>
               </td>

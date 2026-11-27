@@ -44,7 +44,7 @@ export function ReviewForm({ action, items, ar, adminReason }: { action: (f: For
         <textarea name="notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="border border-line px-2 py-1.5" />
       </label>
       {adminReason && (
-        <input name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن (إجباري)", "Admin override reason (required)")} className="min-h-9 border border-[#F0D9A8] bg-[#FDF3E1] px-2 text-sm" />
+        <input aria-label={L("سبب تدخّل الأدمن (إجباري)", "Admin override reason (required)")} name="overrideReason" required minLength={5} placeholder={L("سبب تدخّل الأدمن (إجباري)", "Admin override reason (required)")} className="min-h-9 border border-[#F0D9A8] bg-[#FDF3E1] px-2 text-sm" />
       )}
       <div className="flex flex-wrap gap-2">
         <button name="decision" value="APPROVED" disabled={!allTicked} className="inline-flex min-h-9 items-center bg-ok px-3 text-sm font-semibold text-white disabled:opacity-40">

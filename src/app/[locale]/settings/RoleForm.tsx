@@ -41,7 +41,7 @@ export function RoleForm({
         ))}
       </select>
       {role === "PARTNER_BROKER" && (
-        <input
+        <input aria-label={ar ? "رقم القيد في سجل الوسطاء" : "Broker registry number"}
           name="brokerRegNo"
           defaultValue={brokerRegNo ?? ""}
           required={!brokerRegNo}

@@ -234,7 +234,7 @@ async function Queue({ locale, me }: { locale: "ar" | "en"; me: User }) {
                         <button name="decision" value="APPROVED" className={`${btn.small} bg-ok text-white`}>
                           {L("قبول", "Approve")}
                         </button>
-                        <input name="reason" minLength={10} placeholder={L("سبب الرفض (10 حروف على الأقل)", "Rejection reason (10+ chars)")} className={`${field} min-h-9 w-48`} />
+                        <input aria-label={L("سبب الرفض (10 حروف على الأقل)", "Rejection reason (10+ chars)")} name="reason" minLength={10} placeholder={L("سبب الرفض (10 حروف على الأقل)", "Rejection reason (10+ chars)")} className={`${field} min-h-9 w-48`} />
                         <button name="decision" value="REJECTED" className={`${btn.small} border border-[#A32020] text-[#A32020]`}>
                           {L("رفض", "Reject")}
                         </button>

@@ -274,7 +274,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                           <div className="flex flex-wrap gap-2">
                             {p["contract.approve"].allowed && c.status === "PENDING_LAWYER" && (
                               <form action={lawyerDecision.bind(null, locale, id, c.id)} className="flex flex-wrap items-end gap-2">
-                                <input name="notes" placeholder={L("ملاحظات (إجبارية لطلب التعديل)", "Notes (required to request changes)")} className={`${field} w-64`} />
+                                <input aria-label={L("ملاحظات (إجبارية لطلب التعديل)", "Notes (required to request changes)")} name="notes" placeholder={L("ملاحظات (إجبارية لطلب التعديل)", "Notes (required to request changes)")} className={`${field} w-64`} />
                                 <AdminReason show={ov("contract.approve")} ar={ar} />
                                 <button name="decision" value="APPROVED" className={`${btn.small} bg-ok text-white`}>
                                   {L("اعتماد", "Approve")}
@@ -359,7 +359,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
             <Card title={L("سجل الصفقة", "Deal log")}>
               {open && p["deal.note"].allowed && (
                 <form action={addNote.bind(null, locale, id)} className="flex flex-wrap gap-2">
-                  <input name="note" required placeholder={L("اكتب ملاحظة", "Write a note")} className={`${field} min-w-56 flex-1`} />
+                  <input aria-label={L("اكتب ملاحظة", "Write a note")} name="note" required placeholder={L("اكتب ملاحظة", "Write a note")} className={`${field} min-w-56 flex-1`} />
                   {p["deal.internal_note"].allowed && (
                     <label className="flex min-h-11 items-center gap-1.5 text-sm">
                       <input type="checkbox" name="internal" className="size-4" />
@@ -519,7 +519,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                         <div className="flex flex-wrap gap-1.5">
                           {p["deposit.confirm"].allowed && d.escrowStatus === "AWAITING_TRANSFER" && (
                             <form action={confirmDeposit.bind(null, locale, id, d.id)} className="flex flex-wrap gap-1.5">
-                              <input name="bankReference" required minLength={4} dir="ltr" placeholder={L("رقم مرجع البنك", "Bank reference")} className={`${field} min-h-9 w-40`} />
+                              <input aria-label={L("رقم مرجع البنك", "Bank reference")} name="bankReference" required minLength={4} dir="ltr" placeholder={L("رقم مرجع البنك", "Bank reference")} className={`${field} min-h-9 w-40`} />
                               <AdminReason show={ov("deposit.confirm")} ar={ar} />
                               <button className={`${btn.small} border border-ok text-ok`}>{L("البنك أكّد الاستلام", "Bank confirmed")}</button>
                             </form>
@@ -575,7 +575,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                       .filter((s) => s !== deal.commission!.status)
                       .map((s) => (
                         <form key={s} action={setCommissionStatus.bind(null, locale, id, s)} className="flex gap-1">
-                          {s === "PAID" && <input name="reference" placeholder={L("مرجع التحصيل", "Payment reference")} className={`${field} min-h-9 w-36`} />}
+                          {s === "PAID" && <input aria-label={L("مرجع التحصيل", "Payment reference")} name="reference" placeholder={L("مرجع التحصيل", "Payment reference")} className={`${field} min-h-9 w-36`} />}
                           <AdminReason show={ov("commission.collect")} ar={ar} />
                           <button className={`${btn.small} border border-line`}>{label(COMMISSION_STATUS, s, locale)}</button>
                         </form>
@@ -610,7 +610,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                           ))}
                         </select>
                       </label>
-                      <input name="note" placeholder={L("تفاصيل (بتظهر للطرفين)", "Details (shown to both sides)")} className={field} />
+                      <input aria-label={L("تفاصيل (بتظهر للطرفين)", "Details (shown to both sides)")} name="note" placeholder={L("تفاصيل (بتظهر للطرفين)", "Details (shown to both sides)")} className={field} />
                       <AdminReason show={ov("deal.cancel")} ar={ar} />
                       <button className={btn.danger}>{L("إلغاء الصفقة", "Cancel deal")}</button>
                     </form>
@@ -622,7 +622,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
             {p["deal.revert"].allowed && deal.stage !== "INTEREST" && (
               <Card title={L("إرجاع لمرحلة سابقة (أدمن)", "Revert to previous stage (admin)")}>
                 <form action={revertStage.bind(null, locale, id)} className="flex flex-col gap-2">
-                  <input name="reason" required minLength={5} placeholder={L("السبب", "Reason")} className={field} />
+                  <input aria-label={L("السبب", "Reason")} name="reason" required minLength={5} placeholder={L("السبب", "Reason")} className={field} />
                   <button className={btn.secondary}>{L("ارجع مرحلة", "Revert one stage")}</button>
                 </form>
               </Card>
