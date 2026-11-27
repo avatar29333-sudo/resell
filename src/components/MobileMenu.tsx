@@ -7,12 +7,13 @@ import { usePathname } from "next/navigation";
  * UX-30: قائمة الموبايل كـ Sheet — بتقفل لما المسار يتغير، أو تضغط أي رابط جواها، أو تضغط برّه، أو Esc.
  * aria-expanded + قفل تمرير الصفحة وهي مفتوحة.
  */
-export function MobileMenu({ label, children }: { label: string; children: ReactNode }) {
+export function MobileMenu({ label, resetKey, children }: { label: string; resetKey?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const wrap = useRef<HTMLDivElement>(null);
 
-  useEffect(() => setOpen(false), [pathname]);
+  // بتتقفل لما المسار يتغير، أو لما المستخدم يتغير (خروج من نفس الصفحة مثلاً)
+  useEffect(() => setOpen(false), [pathname, resetKey]);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
@@ -48,9 +49,10 @@ export function MobileMenu({ label, children }: { label: string; children: React
         <nav
           id="mobile-menu"
           aria-label={label}
-          // أي ضغطة على رابط أو زرار جوه القايمة بتقفلها
+          // أي ضغطة على رابط جوه القايمة بتقفلها. زراير الفورم (زي «خروج») لأ: لو القايمة اتقفلت في نفس اللحظة
+          // الفورم بيتشال قبل ما يتبعت والطلب ما يحصلش — القايمة بتتقفل لوحدها لما الصفحة تتحوّل بعد الإرسال
           onClick={(e) => {
-            if ((e.target as HTMLElement).closest("a,button[type=submit]")) setOpen(false);
+            if ((e.target as HTMLElement).closest("a")) setOpen(false);
           }}
           className="absolute inset-x-0 top-full z-50 flex max-h-[80vh] flex-col overflow-y-auto bg-navy px-4 pb-4 shadow-lg"
         >

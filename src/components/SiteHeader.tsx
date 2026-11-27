@@ -64,7 +64,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
           <Link href={`${base}/list-your-plot`} className="inline-flex min-h-11 items-center bg-white px-3 text-sm font-semibold text-navy">
             {t.nav.listPlot}
           </Link>
-          <MobileMenu label={t.nav.menu}>
+          <MobileMenu label={t.nav.menu} resetKey={user?.id ?? ""}>
               {links.map((l) => (
                 <Link key={l.href} href={l.href} className={menuLink}>
                   {l.label}
