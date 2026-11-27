@@ -1,45 +1,65 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { Prisma } from "@prisma/client";
 import { isLocale } from "@/i18n/config";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { errorText } from "@/lib/errors";
 import { date, num, tr } from "@/lib/format";
 import { CITY, CONTRACT_TYPE, DOC_TYPE, REVIEW_DECISION, label, toneOf } from "@/lib/labels";
-import { Badge, Card, Container, Empty, FileLink, PageHeader, Stat, Table, btn, field } from "@/components/ui";
+import { Badge, Card, Container, Empty, FileLink, Notice, PageHeader, Stat, Table, btn } from "@/components/ui";
 import { reviewDocument } from "./actions";
 import { CHECKLISTS } from "./checklists";
+import { ReviewForm } from "./ReviewForm";
 
-export default async function LawyerPage({ params }: { params: Promise<{ locale: string }> }) {
+const REVIEWABLE = ["ALLOCATION_LETTER", "PAYMENT_RECEIPT", "AUTHORITY_STATEMENT", "POWER_OF_ATTORNEY", "OTHER"] as const;
+
+type Props = { params: Promise<{ locale: string }>; searchParams: Promise<{ err?: string }> };
+
+export default async function LawyerPage({ params, searchParams }: Props) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
+  const sp = await searchParams;
   const L = tr(locale);
-  await requireUser(locale, `/${locale}/lawyer`, ["LAWYER", "ADMIN"]);
+  const ar = locale === "ar";
+  const me = await requireUser(locale, `/${locale}/lawyer`, ["LAWYER", "ADMIN"]);
+  const isAdmin = me.role === "ADMIN";
 
-  const [docs, contracts, recent] = await Promise.all([
+  // PERM-02: المحامي يشوف مستندات العروض والصفقات المسندة ليه بس، ومش ورق هو رافعه أو صاحبه
+  const docScope: Prisma.DocumentWhereInput = isAdmin
+    ? {}
+    : {
+        OR: [{ listing: { assignedLawyerId: me.id } }, { deal: { lawyerId: me.id } }],
+        ownerId: { not: me.id },
+        uploadedById: { not: me.id },
+      };
+  const [docs, contracts, recent, reviewsDone] = await Promise.all([
     db.document.findMany({
-      where: { status: "IN_REVIEW", type: { in: ["ALLOCATION_LETTER", "PAYMENT_RECEIPT", "AUTHORITY_STATEMENT", "POWER_OF_ATTORNEY", "OTHER"] } },
-      include: { owner: true, listing: { include: { plot: true } } },
+      where: { AND: [docScope, { status: "IN_REVIEW", type: { in: [...REVIEWABLE] } }] },
+      include: { owner: true, listing: { include: { plot: true } }, deal: { include: { listing: { include: { plot: true } } } } },
       orderBy: { createdAt: "asc" },
     }),
     db.contract.findMany({
-      where: { status: "PENDING_LAWYER", deal: { status: { in: ["ACTIVE", "ON_HOLD"] } } },
+      where: { status: "PENDING_LAWYER", deal: { status: { in: ["ACTIVE", "ON_HOLD"] }, ...(isAdmin ? {} : { lawyerId: me.id }) } },
       include: { deal: { include: { listing: { include: { plot: true } } } } },
       orderBy: { createdAt: "asc" },
     }),
-    db.review.findMany({ include: { document: true, contract: true, lawyer: true }, orderBy: { createdAt: "desc" }, take: 15 }),
+    db.review.findMany({ where: isAdmin ? {} : { lawyerId: me.id }, include: { document: true, contract: true, lawyer: true }, orderBy: { createdAt: "desc" }, take: 15 }),
+    db.review.count({ where: isAdmin ? {} : { lawyerId: me.id } }),
   ]);
 
   return (
     <>
       <PageHeader
         title={L("شاشة المحامي", "Lawyer workspace")}
-        subtitle={L("مراجعة المستندات ببنود ثابتة، واعتماد العقود قبل التوقيع.", "Review documents against a fixed checklist and approve contracts before signing.")}
+        subtitle={L("مراجعة المستندات المسندة ليك ببنود ثابتة، واعتماد العقود قبل التوقيع.", "Review documents assigned to you against a fixed checklist and approve contracts before signing.")}
       />
       <Container className="flex flex-col gap-6">
+        {sp.err && <Notice tone="red">{errorText(sp.err, ar)}</Notice>}
         <div className="grid grid-cols-3 gap-3">
           <Stat label={L("مستندات للمراجعة", "Documents to review")} value={num(docs.length, locale)} />
           <Stat label={L("عقود للاعتماد", "Contracts to approve")} value={num(contracts.length, locale)} />
-          <Stat label={L("مراجعات اتعملت", "Reviews done")} value={num(await db.review.count(), locale)} />
+          <Stat label={L("مراجعات اتعملت", "Reviews done")} value={num(reviewsDone, locale)} />
         </div>
 
         <Card title={L("مستندات مستنية المراجعة", "Documents awaiting review")}>
@@ -49,46 +69,38 @@ export default async function LawyerPage({ params }: { params: Promise<{ locale:
             <ul className="flex flex-col gap-4">
               {docs.map((d) => {
                 const items = CHECKLISTS[d.type] ?? CHECKLISTS.OTHER;
+                const plot = d.listing?.plot ?? d.deal?.listing.plot;
+                const isImage = d.mimeType.startsWith("image/");
                 return (
-                  <li key={d.id} className="border border-line p-4">
-                    <form action={reviewDocument.bind(null, locale, d.id)} className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
-                      <div className="flex flex-col gap-1.5">
-                        <FileLink id={d.id}>
-                          {label(DOC_TYPE, d.type, locale)} {d.version > 1 && `v${d.version}`}
-                        </FileLink>
-                        <span className="text-sm text-muted">{d.owner.name}</span>
-                        {d.listing && (
-                          <Link href={`/${locale}/listings/${d.listing.id}`} className="text-sm text-brand">
-                            {label(CITY, d.listing.plot.city, locale)} — {d.listing.plot.district} ·{" "}
-                            <span dir="ltr">{d.listing.plot.code}</span>
+                  <li key={d.id} id={`d-${d.id}`} className="border border-line p-4">
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+                      {/* OPS-03: المستند جنب البنود */}
+                      <div className="flex flex-col gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <FileLink id={d.id}>
+                            {label(DOC_TYPE, d.type, locale)} {d.version > 1 && `v${d.version}`}
+                          </FileLink>
+                          {d.dealId && <Badge tone="blue">{L("مستند صفقة", "Deal document")}</Badge>}
+                        </div>
+                        <span className="text-sm text-muted">
+                          {d.owner.name} · {date(d.createdAt, locale)}
+                        </span>
+                        {plot && (
+                          <Link href={d.dealId ? `/${locale}/deals/${d.dealId}` : `/${locale}/listings/${d.listingId}`} className="text-sm text-brand">
+                            {label(CITY, plot.city, locale)} — {plot.district} · <span dir="ltr">{plot.code}</span>
                           </Link>
                         )}
-                        <span className="text-xs text-muted">{date(d.createdAt, locale)}</span>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <fieldset className="flex flex-col gap-1">
-                          <legend className="mb-1 text-sm font-semibold">{L("بنود المراجعة", "Checklist")}</legend>
-                          {items.map((it) => (
-                            <label key={it.key} className="flex min-h-9 items-center gap-2 text-sm">
-                              <input type="checkbox" name={`c_${it.key}`} className="size-4" />
-                              {locale === "ar" ? it.ar : it.en}
-                            </label>
-                          ))}
-                        </fieldset>
-                        <input name="notes" placeholder={L("ملاحظات (بتظهر للوسيط والبائع)", "Notes (shown to broker and seller)")} className={field} />
-                        <div className="flex flex-wrap gap-2">
-                          <button name="decision" value="APPROVED" className={`${btn.small} bg-ok text-white`}>
-                            {L("اعتماد", "Approve")}
-                          </button>
-                          <button name="decision" value="CHANGES_REQUESTED" className={`${btn.small} border border-[#8A5A00] text-[#8A5A00]`}>
-                            {L("طلب تعديل", "Request changes")}
-                          </button>
-                          <button name="decision" value="REJECTED" className={`${btn.small} border border-[#A32020] text-[#A32020]`}>
-                            {L("رفض", "Reject")}
-                          </button>
+                        <div className="h-[420px] border border-line bg-paper">
+                          {isImage ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={`/api/files/${d.id}`} alt={label(DOC_TYPE, d.type, locale)} className="h-full w-full object-contain" />
+                          ) : (
+                            <iframe src={`/api/files/${d.id}`} title={label(DOC_TYPE, d.type, locale)} className="h-full w-full" />
+                          )}
                         </div>
                       </div>
-                    </form>
+                      <ReviewForm action={reviewDocument.bind(null, locale, d.id)} items={items} ar={ar} adminReason={isAdmin} />
+                    </div>
                   </li>
                 );
               })}
