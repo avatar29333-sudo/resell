@@ -186,8 +186,8 @@ export default async function SettingsPage({ params, searchParams }: Props) {
       <Card title={L("سعر صرف الدولار", "USD exchange rate")}>
         <Notice>
           {L(
-            "بيتسحب لوحده كل يوم الساعة 8 الصبح: من البنك المركزي، ولو موقعه مش متاح من مصدر سوق مفتوح (ومكتوب المصدر جنب كل سعر). الإدخال اليدوي للطوارئ بس وبيتسجل باسمك.",
-            "Fetched automatically every day at 8am: from the Central Bank, or from an open market source if the CBE site is down (the source is shown next to each rate). Manual entry is for emergencies only and is logged under your name.",
+            "بيتسحب لوحده كل يوم الساعة 8 الصبح بتوقيت القاهرة: من البنك المركزي، ولو موقعه مش متاح من مصدر سوق مفتوح (ومكتوب المصدر جنب كل سعر). الإدخال اليدوي للطوارئ بس وبيتسجل باسمك.",
+            "Fetched automatically every day at 8am Cairo time: from the Central Bank, or from an open market source if the CBE site is down (the source is shown next to each rate). Manual entry is for emergencies only and is logged under your name.",
           )}
         </Notice>
         {fxStatus === "created" && <Notice tone="green">{L("اتسحب سعر النهارده.", "Today's rate was fetched.")}</Notice>}
