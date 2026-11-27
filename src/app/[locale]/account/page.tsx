@@ -40,7 +40,7 @@ import { applyAsPartner, createBuyRequest, setBuyRequestAlerts, setBuyRequestSta
 
 type Props = {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string; partner?: string; ev?: string; ok?: string; err?: string }>;
+  searchParams: Promise<{ kyc?: string; welcome?: string; listed?: string; rescue?: string; denied?: string; upload?: string; partner?: string; ev?: string; ok?: string; err?: string; view?: string }>;
 };
 
 // مراحل العرض من ناحية البائع
@@ -107,6 +107,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
     }),
   ]);
   const deals = allDeals.filter((d) => d.status === "ACTIVE" || d.status === "ON_HOLD");
+  // REL-01: التبويب الافتراضي «بيع» لو عنده عروض ومفيش صفقات شراء، وإلا «شراء»
+  const view = sp.view === "sell" || sp.view === "buy" ? sp.view : listings.length > 0 && allDeals.length === 0 ? "sell" : "buy";
   const endedDeals = allDeals.filter((d) => d.status === "COMPLETED" || d.status === "CANCELLED");
 
   /** سبب انتهاء الصفقة بكلام واضح */
@@ -175,6 +177,21 @@ export default async function AccountPage({ params, searchParams }: Props) {
         {sp.upload === "ok" && <Notice tone="green">{L("النسخة الجديدة اترفعت ووصلت للوسيط.", "The new version was uploaded and sent to the broker.")}</Notice>}
         {sp.upload === "bad" && <Notice tone="red">{L("الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا.", "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB.")}</Notice>}
 
+        {/* REL-01: البائع والمشتري علاقة مش دور — نفس الحساب بيبيع ويشتري، في تبويبين */}
+        <nav aria-label={L("بيع وشراء", "Selling and buying")} className="flex gap-2 border-b border-line">
+          {(
+            [
+              ["buy", L("شراء", "Buying")],
+              ["sell", L("بيع", "Selling")],
+            ] as const
+          ).map(([k, t]) => (
+            <Link key={k} href={`/${locale}/account?view=${k}`} aria-current={view === k ? "page" : undefined} className={`inline-flex min-h-11 items-center border-b-2 px-4 font-semibold ${view === k ? "border-brand text-brand" : "border-transparent text-muted"}`}>
+              {t}
+            </Link>
+          ))}
+        </nav>
+        {view === "buy" && (
+          <>
         {/* ── المشتري: القطع اللي مهتم بيها ومرحلة كل صفقة ── */}
         <section className="flex flex-col gap-3">
           <h2 className="text-2xl font-bold">{L("القطع اللي مهتم بيها", "Plots you're interested in")}</h2>
@@ -249,6 +266,10 @@ export default async function AccountPage({ params, searchParams }: Props) {
           </section>
         )}
 
+          </>
+        )}
+        {view === "sell" && (
+          <>
         {/* ── البائع: قطعي ومرحلة كل عرض ── */}
         <section className="flex flex-col gap-3">
           <h2 className="text-2xl font-bold">{L("قطعي المعروضة", "My plots")}</h2>
@@ -390,6 +411,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
               })}
             </ul>
           </section>
+        )}
+          </>
         )}
 
         <div className="grid gap-6 lg:grid-cols-2">

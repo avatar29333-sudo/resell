@@ -419,3 +419,15 @@ export async function recordOfficialRequest(locale: string, form: FormData) {
   refresh(l);
   redirect(`${back(l, "official")}&ok=official`);
 }
+
+/** REL-03: تفعيل/إيقاف «يتعامل كعميل» لموظف (يبيع/يشتري لنفسه) */
+export async function toggleClientEnabled(locale: string, userId: string) {
+  const l = loc(locale);
+  const me = await signedIn(l);
+  if (me.role !== "ADMIN") redirect(back(l, "users"));
+  const u = await db.user.findUnique({ where: { id: userId }, select: { role: true, clientEnabled: true } });
+  if (!u || u.role === "CLIENT") redirect(`/${l}/settings/users/${userId}`);
+  await db.user.update({ where: { id: userId }, data: { clientEnabled: !u!.clientEnabled } });
+  await audit(me.id, "user.client_enabled", "User", userId, { before: u!.clientEnabled, after: !u!.clientEnabled });
+  redirect(`/${l}/settings/users/${userId}`);
+}

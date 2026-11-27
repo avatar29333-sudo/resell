@@ -4,7 +4,7 @@
 import { stageIndex } from "../deal-machine";
 
 export type Role = "CLIENT" | "PARTNER_BROKER" | "BROKER" | "BROKER_LEAD" | "LAWYER" | "AGENT" | "FINANCE" | "ADMIN";
-export type Subject = { id: string; role: Role; accountLevel: "BASIC" | "VERIFIED"; status?: "ACTIVE" | "SUSPENDED" } | null;
+export type Subject = { id: string; role: Role; accountLevel: "BASIC" | "VERIFIED"; status?: "ACTIVE" | "SUSPENDED"; clientEnabled?: boolean } | null;
 
 export type Ctx = {
   listing?: {
@@ -443,6 +443,10 @@ export function can(user: Subject, action: Action, ctx: Ctx = {}): Decision {
   }
   for (const r of RULES[action]) {
     if (r.roles.includes(user.role) && (!r.when || r.when(user, ctx))) return { allowed: true };
+  }
+  // REL-03: موظف مفعّل كعميل → قواعد العميل (كلها مربوطة بعلاقته بالعرض/الصفقة، فما بتفتحش حاجة تانية)
+  if (user.clientEnabled && user.role !== "CLIENT") {
+    for (const r of RULES[action]) if (r.roles.includes("CLIENT") && (!r.when || r.when({ ...user, role: "CLIENT" }, ctx))) return { allowed: true };
   }
   return { allowed: false, reason: "forbidden" };
 }

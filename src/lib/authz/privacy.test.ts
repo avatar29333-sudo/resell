@@ -62,3 +62,15 @@ describe("ADM-EXP-03 export permissions", () => {
     expect(can({ id: "a", role: "ADMIN", accountLevel: "VERIFIED", status: "ACTIVE" }, "export.user", {}).allowed).toBe(true);
   });
 });
+
+describe("REL-03 staff can also be clients", () => {
+  const pub = { ...listing, status: "PUBLISHED", sellerId: "someone", submittedById: "someone" };
+  it("a broker with client access can show interest in someone else's listing", () => {
+    const b: Subject = { id: "b9", role: "BROKER", accountLevel: "VERIFIED", status: "ACTIVE", clientEnabled: true };
+    expect(can(b, "deal.create", { listing: pub }).allowed).toBe(true);
+    expect(can({ ...b, clientEnabled: false }, "deal.create", { listing: pub }).allowed).toBe(false);
+  });
+  it("REL-01: nobody can express interest in their own listing", () => {
+    expect(can({ id: "someone", role: "CLIENT", accountLevel: "VERIFIED", status: "ACTIVE" }, "deal.create", { listing: pub }).allowed).toBe(false);
+  });
+});

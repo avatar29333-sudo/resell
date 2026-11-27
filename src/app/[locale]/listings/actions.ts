@@ -24,7 +24,10 @@ export async function expressInterest(locale: string, listingId: string) {
   if (existing) redirect(`/${loc}/deals/${existing.id}`);
 
   // وسيط الصفقة = وسيط العرض افتراضياً، أو أقل وسيط عنده شغل (مش طرف)
-  const brokerId = listing!.assignedBrokerId ?? (await leastLoaded("BROKER", [user.id, listing!.sellerId]));
+  // REL-03: تعارض مصالح — وسيط العرض لو هو نفسه المشتري (موظف كعميل) ما يتسندش لصفقته، ويتسجل
+  const conflict = listing!.assignedBrokerId === user.id;
+  const brokerId = listing!.assignedBrokerId && !conflict ? listing!.assignedBrokerId : await leastLoaded("BROKER", [user.id, listing!.sellerId]);
+  if (conflict) await audit(user.id, "conflict.avoided", "Listing", listingId, { role: "BROKER", reassignedTo: brokerId });
   const source = await readAttribution(); // MKT-10
   const deal = await db.deal.create({
     data: {

@@ -10,6 +10,7 @@ import { dealRef } from "@/lib/action-otp-core";
 import { Badge, Card, Container, DL, Notice, PageHeader, btn, field, labelCls } from "@/components/ui";
 import { REASON_AR } from "@/lib/export-core";
 import { requestExport } from "../../../exports/actions";
+import { toggleClientEnabled } from "../../actions";
 import { pageMeta } from "@/lib/meta";
 
 type Props = { params: Promise<{ locale: string; id: string }>; searchParams: Promise<{ ok?: string; err?: string }> };
@@ -54,6 +55,18 @@ export default async function UserPage({ params, searchParams }: Props) {
               [L("الموبايل", "Mobile"), <span key="p" dir="ltr">{u!.phone}</span>],
               [L("الإيميل", "Email"), u!.email ?? "—"],
               [L("اتسجل", "Joined"), date(u!.createdAt, locale)],
+              ...(u!.role !== "CLIENT"
+                ? ([
+                    [
+                      L("يتعامل كعميل", "Acts as a client"),
+                      <form key="ce" action={toggleClientEnabled.bind(null, locale, u!.id)} className="flex items-center gap-2">
+                        <Badge tone={u!.clientEnabled ? "green" : "gray"}>{u!.clientEnabled ? L("مفعّل", "On") : L("مقفول", "Off")}</Badge>
+                        <button className={`${btn.small} border border-line`}>{u!.clientEnabled ? L("اقفل", "Turn off") : L("فعّل", "Turn on")}</button>
+                        <span className="text-[13px] text-muted">{L("ما بيتسندش لأي صفقة هو طرف فيها.", "Never assigned to a deal they're party to.")}</span>
+                      </form>,
+                    ],
+                  ] as [string, React.ReactNode][])
+                : []),
               [L("النشاط", "Activity"), L(`${num(listings.length, locale)} عرض · ${num(sells.length, locale)} صفقة بيع · ${num(buys.length, locale)} صفقة شراء · ${num(requests.length, locale)} طلب شراء`, `${listings.length} listings · ${sells.length} sell deals · ${buys.length} buy deals · ${requests.length} buy requests`)],
             ]}
           />

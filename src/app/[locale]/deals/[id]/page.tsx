@@ -280,6 +280,12 @@ export default async function DealRoom({ params, searchParams }: Props) {
           </Notice>
         )}
 
+        {/* REL-01: الدور في الصفقة دي بالذات */}
+        {side && (
+          <p className="self-start">
+            <Badge tone="navy">{side === "SELLER" ? L("أنت هنا: البائع", "You are: the seller") : L("أنت هنا: المشتري", "You are: the buyer")}</Badge>
+          </p>
+        )}
         <StageStepper stage={deal.stage} locale={locale} cancelled={deal.status === "CANCELLED"} />
 
         {/* TXN-01: 4 كروت ثابتة أعلى الغرفة */}

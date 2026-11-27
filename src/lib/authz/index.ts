@@ -10,7 +10,7 @@ export type { Action, Ctx } from "./policy";
 
 /** مستخدم قاعدة البيانات → الشكل اللي السياسة بتفهمه */
 export function subject(u: User | null): Subject {
-  return u ? { id: u.id, role: u.role, accountLevel: u.accountLevel, status: u.status } : null;
+  return u ? { id: u.id, role: u.role, accountLevel: u.accountLevel, status: u.status, clientEnabled: u.clientEnabled } : null;
 }
 
 const PLOT_REQUIRED = ["ALLOCATION_LETTER", "PAYMENT_RECEIPT", "AUTHORITY_STATEMENT"] as const;

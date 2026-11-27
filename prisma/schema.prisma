@@ -220,6 +220,8 @@ enum ServiceRequestStatus {
 // ───────────────────────── الجداول ─────────────────────────
 
 model User {
+  /// REL-03: موظف مسموح له يتعامل كعميل (قاعدة تعارض المصالح بتمنع إسناده لصفقته)
+  clientEnabled    Boolean          @default(false)
   exportJobs         ExportJob[]
   approvedTemplates  TemplateVersion[]   @relation("TemplateLawyer")
   bankAccounts       BankAccount[]
