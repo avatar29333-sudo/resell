@@ -120,21 +120,21 @@ export function Wizard({ locale, partner = false }: { locale: Locale; partner?: 
       <div data-step="2" hidden={step !== 2} className="flex flex-col gap-4">
         <p className="leading-7 text-muted">
           {L(
-            "الملفات بتتحفظ في خزنة مشفّرة، والمحامي بيراجعها قبل النشر. PDF أو صورة، أقل من 4 ميجا لكل ملف.",
-            "Files are kept in an encrypted vault and reviewed by a lawyer before publishing. PDF or image, under 4 MB each.",
+            "الملفات بتتحفظ في خزنة مشفّرة، والمحامي بيراجعها قبل النشر. PDF أو صورة (JPG/PNG/WebP)، أقل من 4 ميجا لكل ملف.",
+            "Files are kept in an encrypted vault and reviewed by a lawyer before publishing. PDF or image (JPG/PNG/WebP), under 4 MB each.",
           )}
         </p>
         <label className={labelCls}>
           {L("خطاب التخصيص (مطلوب)", "Allocation letter (required)")}
-          <input name="allocation" type="file" required accept="application/pdf,image/*" className="border border-dashed border-line p-2.5" />
+          <input name="allocation" type="file" required accept="application/pdf,image/jpeg,image/png,image/webp" className="border border-dashed border-line p-2.5" />
         </label>
         <label className={labelCls}>
           {L("إيصالات السداد", "Payment receipts")}
-          <input name="receipts" type="file" accept="application/pdf,image/*" className="border border-dashed border-line p-2.5" />
+          <input name="receipts" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="border border-dashed border-line p-2.5" />
         </label>
         <label className={labelCls}>
           {L("آخر إفادة من الجهاز", "Latest authority statement")}
-          <input name="statement" type="file" accept="application/pdf,image/*" className="border border-dashed border-line p-2.5" />
+          <input name="statement" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="border border-dashed border-line p-2.5" />
         </label>
         {partner && (
           <label className="flex min-h-11 items-center gap-2 text-sm">

@@ -121,7 +121,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
         {sp.listed && <Notice tone="green">{L("قطعتك وصلت وهي دلوقتي قيد المراجعة. هنبلغك على واتساب.", "Your plot was received and is now in review. We'll update you on WhatsApp.")}</Notice>}
         {sp.denied && <Notice tone="amber">{L("الصفحة دي مش متاحة لحسابك.", "That page isn't available to your account.")}</Notice>}
         {sp.upload === "ok" && <Notice tone="green">{L("النسخة الجديدة اترفعت ووصلت للوسيط.", "The new version was uploaded and sent to the broker.")}</Notice>}
-        {sp.upload === "bad" && <Notice tone="red">{L("الملف لازم يكون PDF أو صورة وأقل من 4 ميجا.", "The file must be a PDF or image under 4 MB.")}</Notice>}
+        {sp.upload === "bad" && <Notice tone="red">{L("الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا.", "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB.")}</Notice>}
 
         {/* ── المشتري: القطع اللي مهتم بيها ومرحلة كل صفقة ── */}
         <section className="flex flex-col gap-3">
@@ -266,7 +266,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
                             {d.reviews[0]?.notes && ` — ${d.reviews[0].notes}`}
                           </span>
                           <div className="flex flex-wrap items-center gap-2">
-                            <input name="file" type="file" required accept="application/pdf,image/*" className="flex-1 border border-dashed border-line bg-white p-1.5 text-sm" />
+                            <input name="file" type="file" required accept="application/pdf,image/jpeg,image/png,image/webp" className="flex-1 border border-dashed border-line bg-white p-1.5 text-sm" />
                             <button className={`${btn.small} bg-brand text-white`}>
                               {L(`ارفع نسخة ${num(d.version + 1, locale)}`, `Upload version ${d.version + 1}`)}
                             </button>
@@ -350,7 +350,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
           <Card title={<span id="kyc">{L("توثيق الهوية", "ID verification")}</span>}>
             {kyc && <Badge tone={toneOf(kyc.status)}>{label(VERIFICATION, kyc.status, locale)}</Badge>}
             {sp.kyc === "sent" && <Notice tone="green">{L("استلمنا صورك، والمراجعة خلال يوم عمل.", "We received your images; review takes one working day.")}</Notice>}
-            {sp.kyc === "missing" && <Notice tone="red">{L("ارفع صورة الهوية والصورة الشخصية (PDF أو صورة أقل من 4 ميجا).", "Upload both the ID and the selfie (PDF or image under 4 MB).")}</Notice>}
+            {sp.kyc === "missing" && <Notice tone="red">{L("ارفع صورة الهوية والصورة الشخصية (PDF أو صورة (JPG/PNG/WebP) أقل من 4 ميجا).", "Upload both the ID and the selfie (PDF or image (JPG/PNG/WebP) under 4 MB).")}</Notice>}
             {kyc?.status === "REJECTED" && kyc.rejectionReason && <Notice tone="red">{kyc.rejectionReason}</Notice>}
             {kyc?.status === "APPROVED" ? (
               <p className="text-ok">{L("هويتك موثّقة. تقدر تمضي العقود.", "Your ID is verified. You can sign contracts.")}</p>
@@ -367,11 +367,11 @@ export default async function AccountPage({ params, searchParams }: Props) {
                 </label>
                 <label className={labelCls}>
                   {L("صورة الهوية", "ID image")}
-                  <input name="idFile" type="file" required accept="application/pdf,image/*" className="border border-dashed border-line p-2" />
+                  <input name="idFile" type="file" required accept="application/pdf,image/jpeg,image/png,image/webp" className="border border-dashed border-line p-2" />
                 </label>
                 <label className={labelCls}>
                   {L("صورة شخصية واضحة", "A clear selfie")}
-                  <input name="selfieFile" type="file" required accept="image/*" className="border border-dashed border-line p-2" />
+                  <input name="selfieFile" type="file" required accept="image/jpeg,image/png,image/webp" className="border border-dashed border-line p-2" />
                 </label>
                 <button type="submit" className={btn.primary}>
                   {L("ابعت للتوثيق", "Submit for verification")}

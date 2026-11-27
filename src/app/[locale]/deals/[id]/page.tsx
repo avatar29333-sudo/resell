@@ -79,7 +79,7 @@ const ERRORS: Record<string, [string, string]> = {
   price: ["اكتب سعر صحيح.", "Enter a valid price."],
   amount: ["اكتب مبلغ صحيح.", "Enter a valid amount."],
   size: ["الملف أكبر من 4 ميجا.", "The file is larger than 4 MB."],
-  file: ["اختار ملف PDF أو صورة.", "Choose a PDF or image file."],
+  file: ["اختار ملف PDF أو صورة (JPG/PNG/WebP).", "Choose a PDF or image (JPG/PNG/WebP) file."],
 };
 
 export default async function DealRoom({ params, searchParams }: Props) {
@@ -340,7 +340,7 @@ export default async function DealRoom({ params, searchParams }: Props) {
                     </select>
                   </label>
                   <label className={`${labelCls} min-w-44 flex-1`}>
-                    {L("الملف (PDF أو صورة JPG/PNG/WebP)", "File (PDF or JPG/PNG/WebP image)")}
+                    {L("الملف (PDF أو صورة (JPG/PNG/WebP) JPG/PNG/WebP)", "File (PDF or JPG/PNG/WebP image)")}
                     <input name="file" type="file" required accept="application/pdf,image/jpeg,image/png,image/webp" className="border border-dashed border-line p-2" />
                   </label>
                   <AdminReason show={ov("deal.upload_doc")} ar={ar} />

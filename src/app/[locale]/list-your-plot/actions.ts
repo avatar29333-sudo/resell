@@ -51,7 +51,7 @@ export async function createListing(locale: string, _prev: ListState, form: Form
   const uploads = [];
   for (const [field, type] of files) {
     const r = await fileFromForm(form, field);
-    if ("error" in r && r.error) return { error: ar ? "كل ملف لازم يكون PDF أو صورة وأقل من 4 ميجا" : "Each file must be a PDF or image under 4 MB" };
+    if ("error" in r && r.error) return { error: ar ? "كل ملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا" : "Each file must be a PDF or image (JPG/PNG/WebP) under 4 MB" };
     if (r.file) uploads.push({ ...r.file, docType: type });
   }
   if (!uploads.some((u) => u.docType === "ALLOCATION_LETTER")) return { error: ar ? "خطاب التخصيص مطلوب" : "The allocation letter is required" };

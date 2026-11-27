@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { db } from "./db";
+import { sniffMime } from "./file-sniff";
 
 // خزنة الملفات:
 // - لو إعدادات S3 موجودة (S3_ENDPOINT + S3_BUCKET + المفاتيح): الملفات الجديدة بتروح S3،
@@ -11,7 +12,7 @@ import { db } from "./db";
 // الملفات القديمة اللي في FileBlob بتفضل تتقري حتى بعد التحويل لـ S3.
 
 export const MAX_FILE_BYTES = 4 * 1024 * 1024; // حد Vercel للطلب الواحد 4.5MB
-export const ALLOWED_MIME = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/svg+xml"];
+export const ALLOWED_MIME = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
 const LINK_SECONDS = 300;
 
 let client: S3Client | null = null;
@@ -109,6 +110,9 @@ export async function fileFromForm(form: FormData, field: string) {
   const f = form.get(field);
   if (!f || typeof f === "string" || f.size === 0) return { file: null };
   if (f.size > MAX_FILE_BYTES) return { error: "size" as const };
-  if (!ALLOWED_MIME.includes(f.type)) return { error: "type" as const };
-  return { file: { name: f.name, type: f.type, data: Buffer.from(await f.arrayBuffer()) } };
+  // SEC-09: النوع من محتوى الملف نفسه (مش الامتداد ولا كلام المتصفح) — ومفيش SVG
+  const data = Buffer.from(await f.arrayBuffer());
+  const type = sniffMime(data);
+  if (!type) return { error: "type" as const };
+  return { file: { name: f.name, type, data } };
 }

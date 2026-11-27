@@ -26,7 +26,7 @@ export async function submitRescue(locale: string, _prev: RescueState, form: For
 
   const upload = await fileFromForm(form, "file");
   if ("error" in upload && upload.error)
-    return { error: ar ? "الملف لازم يكون PDF أو صورة وأقل من 4 ميجا" : "The file must be a PDF or image under 4 MB" };
+    return { error: ar ? "الملف لازم يكون PDF أو صورة (JPG/PNG/WebP) وأقل من 4 ميجا" : "The file must be a PDF or image (JPG/PNG/WebP) under 4 MB" };
 
   const user = await getCurrentUser();
   const req = await db.serviceRequest.create({

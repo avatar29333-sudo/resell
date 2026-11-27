@@ -112,8 +112,8 @@ export function RescueForm({ locale }: { locale: Locale }) {
         </select>
       </label>
       <label className={labelCls}>
-        {L("خطاب التخصيص (اختياري دلوقتي) — PDF أو صورة", "Allocation letter (optional for now) — PDF or image")}
-        <input name="file" type="file" accept="application/pdf,image/*" className="border border-dashed border-[#C5CBD8] p-2.5" />
+        {L("خطاب التخصيص (اختياري دلوقتي) — PDF أو صورة (JPG/PNG/WebP)", "Allocation letter (optional for now) — PDF or image (JPG/PNG/WebP)")}
+        <input name="file" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="border border-dashed border-[#C5CBD8] p-2.5" />
       </label>
       <button type="submit" disabled={pending} className={btn.primary}>
         {pending ? L("بنبعت…", "Sending…") : L("أرسل طلب الفحص", "Send inspection request")}
