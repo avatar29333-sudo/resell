@@ -6,6 +6,8 @@ import { CITY, DOC_TYPE } from "@/lib/labels";
 import { getSetting } from "@/lib/settings";
 import { validityState } from "@/lib/validity";
 import { districtName } from "@/lib/district";
+import { dueStage, reminderText } from "@/lib/reminders";
+import { queueMessage, unsubscribeUrl } from "@/lib/outbox";
 
 // مهمة يومية (Vercel Cron الساعة 8 الصبح بتوقيت القاهرة — vercel.json):
 // 1) سعر صرف النهارده  2) المستندات اللي انتهت  3) المستندات اللي هتنتهي خلال 30 يوم
@@ -104,6 +106,18 @@ export async function GET(req: Request) {
   }
   report.needsUpdate = needsUpdate;
   report.statementWarned = warned;
+
+  // 3ج) MKT-04: «فكّرني بمهلتي» — تنبيه قبل 90 / 30 / 7 أيام، مرة واحدة لكل مرحلة
+  const reminders = await db.deadlineReminder.findMany({ where: { unsubscribedAt: null, deadline: { gte: now, lte: new Date(now.getTime() + 91 * DAY) } } });
+  let remindersSent = 0;
+  for (const r of reminders) {
+    const stage = dueStage(r.deadline, now, r);
+    if (!stage) continue;
+    await queueMessage("whatsapp", r.phone, `reminder.${stage}`, reminderText(stage, r.locale, CITY[r.city][r.locale === "en" ? 1 : 0], unsubscribeUrl(r.locale, r.unsubToken)));
+    await db.deadlineReminder.update({ where: { id: r.id }, data: stage === 90 ? { sent90At: now } : stage === 30 ? { sent30At: now } : { sent7At: now } });
+    remindersSent++;
+  }
+  report.remindersSent = remindersSent;
 
   // 4) مهلة البناء خلال 60 يوم (للعروض الشغالة)
   const plots = await db.plot.findMany({

@@ -239,6 +239,10 @@ model User {
   referredById     String?
   referredBy       User?     @relation("Referral", fields: [referredById], references: [id])
   referrals        User[]    @relation("Referral")
+  rewardsEarned    ReferralReward[] @relation("RewardReferrer")
+  rewardsAsReferred ReferralReward[] @relation("RewardReferred")
+  /// MKT-07: نصيب السمسار الشريك من العمولة (%)
+  partnerSharePct  Decimal?  @db.Decimal(5, 2)
   // التحقق الثنائي (تطبيق Authenticator) — السر متشفّر بـ AES-GCM
   totpSecret       String?
   totpEnabledAt    DateTime?
@@ -283,6 +287,7 @@ model User {
   createdPlots        Plot[]
 
   @@index([role])
+  @@index([referredById])
 }
 
 /// توثيق الهوية — مراجعة يدوية في المرحلة 1
@@ -517,6 +522,8 @@ model Deal {
   documents  Document[]
   commission Commission?
   deposits   Deposit[]
+  referralReward ReferralReward?
+  story          DealStory?
 
   @@index([stage, status])
   @@index([status, isDemo])
@@ -662,10 +669,97 @@ model BuyRequest {
   budgetMax Decimal?         @db.Decimal(14, 2)
   currency  Currency         @default(EGP)
   status    BuyRequestStatus @default(ACTIVE)
+  /// MKT-13: موافقة صريحة على تنبيهات واتساب/إيميل + رابط إيقاف + آخر تنبيه (رسالة واحدة في اليوم)
+  alertConsentAt DateTime?
+  unsubToken     String?   @unique
+  lastAlertAt    DateTime?
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
   @@index([status])
+}
+
+/// MKT-04: «فكّرني بمهلتي» — من غير حساب كامل
+model DeadlineReminder {
+  id             String    @id @default(cuid())
+  phone          String
+  city           City
+  deadline       DateTime  @db.Date
+  plotCode       String?
+  locale         String    @default("ar")
+  consentAt      DateTime
+  unsubToken     String    @unique
+  unsubscribedAt DateTime?
+  sent90At       DateTime?
+  sent30At       DateTime?
+  sent7At        DateTime?
+  source         Json?
+  createdAt      DateTime  @default(now())
+
+  @@index([city])
+  @@index([deadline])
+}
+
+/// رسايل برّه المنصة (واتساب/إيميل) — بتتسجل هنا وبتتبعت لما المزوّد يتظبط
+model OutboundMessage {
+  id        String    @id @default(cuid())
+  channel   String
+  to        String
+  kind      String
+  body      String
+  status    String    @default("QUEUED")
+  error     String?
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([status, createdAt])
+  @@index([to, kind, createdAt])
+}
+
+/// MKT-06: مكافأة إحالة — بتستحق بس لما صفقة المُحال تتقفل
+model ReferralReward {
+  id         String    @id @default(cuid())
+  referrerId String
+  referrer   User      @relation("RewardReferrer", fields: [referrerId], references: [id])
+  referredId String
+  referred   User      @relation("RewardReferred", fields: [referredId], references: [id])
+  dealId     String    @unique
+  deal       Deal      @relation(fields: [dealId], references: [id])
+  amount     Decimal   @db.Decimal(14, 2)
+  status     String    @default("DUE")
+  paidAt     DateTime?
+  paymentRef String?
+  createdAt  DateTime  @default(now())
+
+  @@index([referrerId])
+}
+
+/// MKT-12: مصروف الحملة في الشهر (إدخال يدوي) → تكلفة العميل
+model CampaignSpend {
+  id          String   @id @default(cuid())
+  channel     String
+  month       String
+  amountEgp   Decimal  @db.Decimal(14, 2)
+  enteredById String
+  createdAt   DateTime @default(now())
+
+  @@unique([channel, month])
+}
+
+/// MKT-14: قصة صفقة حقيقية بموافقة الطرفين — الأدمن بيراجع وينشر
+model DealStory {
+  id              String    @id @default(cuid())
+  dealId          String    @unique
+  deal            Deal      @relation(fields: [dealId], references: [id])
+  buyerConsentAt  DateTime?
+  sellerConsentAt DateTime?
+  showPlotCode    Boolean   @default(false)
+  textAr          String?
+  textEn          String?
+  status          String    @default("PENDING")
+  reviewedById    String?
+  publishedAt     DateTime?
+  createdAt       DateTime  @default(now())
 }
 
 /// أول جدول هيشتغل: فورم صفحة «إنقاذ المهلة».
