@@ -6,6 +6,7 @@ import { homeFor } from "@/lib/auth";
 import { ROLE, label } from "@/lib/labels";
 import { signOut } from "@/app/[locale]/auth-actions";
 import { Logo } from "./Logo";
+import { MobileMenu } from "./MobileMenu";
 
 type Props = { locale: Locale; t: Dictionary; user: User | null; unread?: number };
 
@@ -62,12 +63,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
           <Link href={`${base}/list-your-plot`} className="inline-flex min-h-11 items-center bg-white px-3 text-sm font-semibold text-navy">
             {t.nav.listPlot}
           </Link>
-          <details className="group">
-            <summary aria-label={t.nav.menu} className="flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center text-2xl text-white [&::-webkit-details-marker]:hidden">
-              <span aria-hidden="true" className="group-open:hidden">☰</span>
-              <span aria-hidden="true" className="hidden group-open:inline">✕</span>
-            </summary>
-            <nav aria-label={t.nav.menu} className="absolute inset-x-0 top-full z-50 flex max-h-[80vh] flex-col overflow-y-auto bg-navy px-4 pb-4 shadow-lg">
+          <MobileMenu label={t.nav.menu}>
               {links.map((l) => (
                 <Link key={l.href} href={l.href} className={menuLink}>
                   {l.label}
@@ -102,8 +98,7 @@ export function SiteHeader({ locale, t, user, unread = 0 }: Props) {
               <Link href={`/${other}`} hrefLang={other} className={menuLink}>
                 {t.nav.otherLanguage}
               </Link>
-            </nav>
-          </details>
+          </MobileMenu>
         </div>
       </div>
 
