@@ -129,10 +129,10 @@ export default async function ListingsPage({ params, searchParams }: Props) {
               const days = daysUntil(l.plot.buildDeadline);
               const verified = new Set(l.documents.map((d) => d.type));
               return (
-                <li key={l.id}>
+                <li key={l.id} className="flex flex-col">
                   <Link
                     href={`/${locale}/listings/${l.id}`}
-                    className="flex h-full flex-col gap-3 border border-line bg-white p-5 hover:border-brand hover:shadow-[0_8px_30px_rgba(10,25,68,0.10)]"
+                    className="flex flex-1 flex-col gap-3 border border-line bg-white p-5 hover:border-brand hover:shadow-[0_8px_30px_rgba(10,25,68,0.10)]"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex flex-col">
