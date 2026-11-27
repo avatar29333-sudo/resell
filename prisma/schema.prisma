@@ -754,6 +754,8 @@ model DealStory {
   buyerConsentAt  DateTime?
   sellerConsentAt DateTime?
   showPlotCode    Boolean   @default(false)
+  buyerShowCode   Boolean   @default(false)
+  sellerShowCode  Boolean   @default(false)
   textAr          String?
   textEn          String?
   status          String    @default("PENDING")

@@ -7,7 +7,8 @@ import { pageMeta } from "@/lib/meta";
 import { CITY, CITY_KEYS, label } from "@/lib/labels";
 import { Badge, Card, Container, Empty, Notice, PageHeader, Table, btn, field, labelCls } from "@/components/ui";
 import { ConfirmButton } from "@/components/ConfirmButton";
-import { broadcastRelief } from "./actions";
+import { broadcastRelief, reviewStory } from "./actions";
+import { bothConsented, dealDays, storyText } from "@/lib/stories";
 import { Funnel } from "./Funnel";
 
 export const generateMetadata = ({ params }: { params: Promise<{ locale: string }> }) => pageMeta(params, "التسويق", "Marketing", { noindex: true });
@@ -22,6 +23,7 @@ export default async function MarketingPage({ params, searchParams }: Props) {
   const sp = await searchParams;
   const L = tr(locale);
   await requireUser(locale, `/${locale}/marketing`, ["ADMIN"]);
+  const stories = await db.dealStory.findMany({ where: { status: { not: "REJECTED" } }, include: { deal: { include: { listing: { include: { plot: true } } } } }, orderBy: { createdAt: "desc" }, take: 30 });
   const [subsByCity, outbox] = await Promise.all([
     db.deadlineReminder.groupBy({ by: ["city"], where: { unsubscribedAt: null }, _count: true }),
     db.outboundMessage.findMany({ orderBy: { createdAt: "desc" }, take: 30 }),
@@ -34,9 +36,49 @@ export default async function MarketingPage({ params, searchParams }: Props) {
         {sp.ok === "broadcast" && <Notice tone="green">{L(`اتجهزت ${num(Number(sp.n ?? 0), locale)} رسالة للمشتركين.`, `${sp.n ?? 0} messages queued for subscribers.`)}</Notice>}
         {sp.ok === "spend" && <Notice tone="green">{L("المصروف اتسجل.", "Spend saved.")}</Notice>}
         {sp.err === "broadcast" && <Notice tone="red">{L("اختار المدينة واكتب الرسالة (20 حرف على الأقل).", "Choose the city and write the message (20+ characters).")}</Notice>}
+        {sp.err === "story" && <Notice tone="red">{L("القصة ما بتتنشرش غير بموافقة الطرفين.", "A story can only be published with both parties' consent.")}</Notice>}
+        {sp.ok === "story" && <Notice tone="green">{L("اتحفظ.", "Saved.")}</Notice>}
         {sp.err === "spend" && <Notice tone="red">{L("اكتب اسم الحملة والشهر والمبلغ.", "Enter the campaign, month and amount.")}</Notice>}
 
         <Funnel locale={locale} from={sp.from} to={sp.to} />
+
+        {/* MKT-14: قصص الصفقات */}
+        <Card title={L("قصص الصفقات (بموافقة الطرفين)", "Deal stories (with both parties' consent)")}>
+          {stories.length === 0 ? (
+            <Empty>{L("مفيش قصص مستنية مراجعة.", "No stories awaiting review.")}</Empty>
+          ) : (
+            <ul className="flex flex-col gap-4">
+              {stories.map((s) => {
+                const ready = bothConsented(s);
+                const city = s.deal.listing.plot.city;
+                const days = dealDays(s.deal.createdAt, s.deal.closedAt);
+                const code = s.showPlotCode ? s.deal.listing.plot.code : null;
+                return (
+                  <li key={s.id} className="flex flex-col gap-2 border border-line p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <strong>#{s.dealId.slice(-6).toUpperCase()}</strong>
+                      <Badge tone={s.buyerConsentAt ? "green" : "gray"}>{L("المشتري", "Buyer")} {s.buyerConsentAt ? "✓" : "…"}</Badge>
+                      <Badge tone={s.sellerConsentAt ? "green" : "gray"}>{L("البائع", "Seller")} {s.sellerConsentAt ? "✓" : "…"}</Badge>
+                      <Badge tone={s.status === "PUBLISHED" ? "green" : s.status === "REJECTED" ? "red" : "amber"}>{s.status}</Badge>
+                    </div>
+                    <form action={reviewStory.bind(null, locale, s.id)} className="flex flex-col gap-2">
+                      <textarea name="textAr" defaultValue={s.textAr ?? storyText("ar", CITY[city][0], days, code)} rows={2} aria-label={L("النص بالعربي", "Arabic text")} className={`${field} py-2`} />
+                      <textarea name="textEn" defaultValue={s.textEn ?? storyText("en", CITY[city][1], days, code)} rows={2} dir="ltr" aria-label={L("النص بالإنجليزي", "English text")} className={`${field} py-2`} />
+                      <div className="flex gap-2">
+                        <button name="decision" value="publish" disabled={!ready} className={`${btn.small} bg-ok text-white disabled:opacity-40`} title={ready ? "" : L("مستني موافقة الطرفين", "Waiting for both parties")}>
+                          {L("انشر", "Publish")}
+                        </button>
+                        <button name="decision" value="reject" className={`${btn.small} border border-[#A32020] text-[#A32020]`}>
+                          {L("ما تنشرش", "Don't publish")}
+                        </button>
+                      </div>
+                    </form>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Card title={L("«فكّرني بمهلتي» — قرار تسهيلات جديد", "Deadline reminders — new relief decision")}>

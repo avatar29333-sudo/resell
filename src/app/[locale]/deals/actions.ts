@@ -106,6 +106,14 @@ export async function advanceStage(locale: string, dealId: string, form?: FormDa
     await db.listing.update({ where: { id: deal.listingId }, data: { status: "SOLD" } });
     if (deal.commission) await db.commission.update({ where: { id: deal.commission.id }, data: { status: "INVOICED" } });
     await accrueReferralReward(deal, user);
+    // MKT-14: طلب موافقة الطرفين على نشر قصة مختصرة
+    await db.dealStory.upsert({ where: { dealId }, create: { dealId }, update: {} });
+    await notify([deal.buyerId, deal.listing.sellerId], {
+      kind: "story.consent",
+      ar: ["مبروك قفل الصفقة! تسمح ننشر قصتها؟", "المدينة والمدة بس — من غير أسماء. وافق أو تجاهل من غرفة الصفقة."],
+      en: ["Congratulations on closing! May we share the story?", "City and duration only — no names. Agree or ignore in the deal room."],
+      link: `/deals/${dealId}#story`,
+    });
     // باقي الصفقات على نفس القطعة بتتقفل، ويتسجل السبب عشان المشتري يعرف
     const others = await db.deal.findMany({ where: { listingId: deal.listingId, id: { not: dealId }, status: { in: ["ACTIVE", "ON_HOLD"] } } });
     for (const o of others) {
@@ -599,6 +607,23 @@ export async function setDealStatus(locale: string, dealId: string, status: "ACT
     });
   }
   done(l, dealId);
+}
+
+/** MKT-14: موافقة طرف على نشر قصة الصفقة (والكود لو عايز) — الطرفين بس */
+export async function storyConsent(locale: string, dealId: string, form: FormData) {
+  const { l, user, deal, back } = await ctx(locale, dealId);
+  const side = user.id === deal.buyerId ? "buyer" : user.id === deal.listing.sellerId ? "seller" : null;
+  if (!side || deal.status !== "COMPLETED") redirect(`${back}?err=forbidden`);
+  const agree = form.get("agree") === "yes";
+  const showCode = form.get("showCode") === "on";
+  const s = await db.dealStory.upsert({ where: { dealId }, create: { dealId }, update: {} });
+  const mine = side === "buyer" ? { buyerConsentAt: agree ? new Date() : null, buyerShowCode: agree && showCode } : { sellerConsentAt: agree ? new Date() : null, sellerShowCode: agree && showCode };
+  const buyerCode = side === "buyer" ? agree && showCode : s.buyerShowCode;
+  const sellerCode = side === "seller" ? agree && showCode : s.sellerShowCode;
+  // الكود بيظهر بس لو الطرفين وافقوا عليه — أي طرف يرفض بيقفله
+  await db.dealStory.update({ where: { id: s.id }, data: { ...mine, showPlotCode: buyerCode && sellerCode } });
+  await audit(user.id, agree ? "story.consent" : "story.decline", "DealStory", s.id, { side, showCode });
+  done(l, dealId, "#story");
 }
 
 export async function addNote(locale: string, dealId: string, form: FormData) {

@@ -30,6 +30,26 @@ export async function broadcastRelief(locale: string, form: FormData) {
   redirect(`${page(l)}?ok=broadcast&n=${subs.length}`);
 }
 
+/** MKT-14: الأدمن بيراجع وينشر قصة (بس لو الطرفين وافقوا) أو يرفضها */
+export async function reviewStory(locale: string, id: string, form: FormData) {
+  const l = isLocale(locale) ? locale : "ar";
+  const me = await requireUser(l, page(l), ["ADMIN"]);
+  const s = await db.dealStory.findUnique({ where: { id } });
+  if (!s) redirect(page(l));
+  const publish = form.get("decision") === "publish";
+  if (publish && !(s!.buyerConsentAt && s!.sellerConsentAt)) redirect(`${page(l)}?err=story`);
+  const textAr = String(form.get("textAr") ?? "").trim().slice(0, 500);
+  const textEn = String(form.get("textEn") ?? "").trim().slice(0, 500);
+  await db.dealStory.update({
+    where: { id },
+    data: publish ? { status: "PUBLISHED", textAr, textEn, reviewedById: me.id, publishedAt: new Date() } : { status: "REJECTED", reviewedById: me.id, publishedAt: null },
+  });
+  await audit(me.id, publish ? "story.publish" : "story.reject", "DealStory", id, {});
+  revalidatePath(page(l));
+  revalidatePath(`/${l}`);
+  redirect(`${page(l)}?ok=story`);
+}
+
 /** MKT-12: مصروف حملة في شهر (إدخال يدوي) */
 export async function saveSpend(locale: string, form: FormData) {
   const l = isLocale(locale) ? locale : "ar";

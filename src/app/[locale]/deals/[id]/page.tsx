@@ -29,6 +29,7 @@ import { Badge, Card, Container, DL, Empty, FileLink, Notice, PageHeader, btn, f
 import { StageStepper } from "@/components/StageStepper";
 import { AdminReason } from "@/components/AdminReason";
 import { TrackEvent } from "@/components/Analytics";
+import { storyConsent } from "../actions";
 import {
   addNote,
   advanceStage,
@@ -99,6 +100,9 @@ export default async function DealRoom({ params, searchParams }: Props) {
   const me = await requireUser(locale, `/${locale}/deals/${id}`);
   const deal = await loadDealFor(me, id);
   if (!deal) redirect(`/${locale}/account?denied=1`);
+  // MKT-14
+  const story = deal.status === "COMPLETED" ? await db.dealStory.findUnique({ where: { dealId: deal.id } }) : null;
+  const storySide = me.id === deal.buyerId ? "buyer" : me.id === deal.listing.sellerId ? "seller" : null;
 
   const dc = dealCtx(deal);
   const p = permissionsFor(
@@ -180,6 +184,24 @@ export default async function DealRoom({ params, searchParams }: Props) {
       <Container className="flex flex-col gap-6">
         {/* MKT-11 */}
         <TrackEvent name={sp.new ? "interest_registered" : sp.ev} />
+        {/* MKT-14: موافقة الطرفين على نشر قصة الصفقة */}
+        {story && storySide && (
+          <div id="story" className="flex flex-col gap-2 border border-[#C9D6F2] bg-[#EEF3FC] p-4">
+            <strong>{L("تسمح ننشر قصة صفقتك؟", "May we share your deal's story?")}</strong>
+            <span className="text-sm">{L("هننشر المدينة والمدة اللي الصفقة خدتها بس — من غير أسماء. الكود بيظهر بس لو الطرفين وافقوا.", "We'd share only the city and how long the deal took — no names. The plot code appears only if both sides agree.")}</span>
+            {(storySide === "buyer" ? story.buyerConsentAt : story.sellerConsentAt) ? (
+              <span className="text-sm text-ok">{L("✓ إنت موافق. تقدر تسحب موافقتك في أي وقت.", "✓ You agreed. You can withdraw at any time.")}</span>
+            ) : null}
+            <form action={storyConsent.bind(null, locale, deal.id)} className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="showCode" defaultChecked={storySide === "buyer" ? story.buyerShowCode : story.sellerShowCode} className="size-4" />
+                {L("ممكن تظهروا كود القطعة كمان", "You may show the plot code too")}
+              </label>
+              <button name="agree" value="yes" className={`${btn.small} bg-brand text-white`}>{L("موافق", "I agree")}</button>
+              <button name="agree" value="no" className={`${btn.small} border border-line`}>{L("لا", "No")}</button>
+            </form>
+          </div>
+        )}
         {sp.new && <Notice tone="green">{L("اهتمامك اتسجل، والوسيط هيكلمك لاتفاق العمولة.", "Your interest is registered. The broker will contact you about the commission agreement.")}</Notice>}
         {sp.ok === "approval_requested" && <Notice tone="amber">{L(`المبلغ فوق حد الأربع عيون (${num(fourEyes, locale)} ج.م) — اتبعت طلب موافقة للأدمن.`, `The amount is above the four-eyes limit (EGP ${fourEyes}) — an approval request was sent to the admin.`)}</Notice>}
         {sp.ok === "agent_requested" && <Notice tone="green">{L("اتبعت طلب مندوب للأدمن.", "A field agent request was sent to the admin.")}</Notice>}
